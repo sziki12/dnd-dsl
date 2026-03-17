@@ -1,0 +1,16 @@
+{
+    "projectName": "DndDsl",
+    "languages": [
+        {
+            "id": "dnd-dsl",
+            "grammar": "src/dnd-dsl.langium",
+            "fileExtensions": [
+                "dnd"
+            ],
+            "textMate": {
+                "out": "syntaxes/dnd-dsl.tmLanguage.json"
+            }
+        }
+    ],
+    "out": "src/generated"
+}

@@ -1,0 +1,48 @@
+
+
+world "WorldName"
+
+location "Forest Of The Damned"
+	exit "Through the dense forest" to "Cozy Village"
+	let DangerLevel = 100
+
+location "High Castle"
+
+	exit "Front Door" to "Cozy Village"
+	let Resources = object
+		let Food = 50
+		let Gold = 2000
+		let Soliders = call Random with 50, 100 // Pre defined format or action?? like: Call Random with 50, 100
+	end
+
+location "Cozy Village"
+
+	entry "Village Square"
+	sublocations
+		location "Riverside Tavern"
+			exit "Back Door" to "Back Alle" [Hidden: true] //Other [Indentifiers]
+			exit "Front Door" to "Village Square" 
+			
+		location "Back Alle"
+			exit "Main Street" to "Village Square"
+			
+		location "Village Square"
+			exit "Enter Forest" to "Forest Of The Damned" //[Condition: Quest "Rising Dead" Active is true]
+			let Resources = object
+				let Food = 50
+				let Gold = 2000
+				let Soliders = call Random with 50, 100
+			end
+	end
+	
+		
+function Random
+	param min : int
+	param max : int
+
+	let result = (10  + 12) / 3 + (5 - 5 * 2) + (12) * 3 // Just an example of using math operations, you can replace it with actual random generation logic
+	result = call predefined randomfv with min, max
+return result
+
+function randomBoolean
+return true
