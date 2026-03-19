@@ -37,12 +37,60 @@ location "Cozy Village"
 	
 		
 function Random
-	param min : int
-	param max : int
+	param min
+	param max
 
-	let result = (10  + 12) / 3 + (5 - 5 * 2) + (12) * 3 // Just an example of using math operations, you can replace it with actual random generation logic
+	let result = - 2 - (10  + 12) / 3 + (5 - 5 * 2) + (12) * 3 // Just an example of using math operations, you can replace it with actual random generation logic
 	result = call predefined randomfv with min, max
 return result
 
 function randomBoolean
-return true
+let result = call predefined randomfv with 0, 1
+return result + 1 == 0 
+
+quest "Rising Dead"
+
+	//Quest status can be: Locked, Available, Active, Completed, Failed
+	//status: Available
+	//giver: NPC "The King"
+	//deadline: 5 days
+	
+	enabled on true
+		/*(event completed "EventName"
+		and
+		Quest succeded "QuestName")
+		or
+		(State Party Gold > 150
+		and
+		Quest failed "QuestName")*/
+	
+	objective "Geather Bone Fragments"
+		//requiered count 3
+		//starting count 0
+		description
+			"Geather bone freagments form the fallen Undead."
+		on completed
+			trigger "The Ambush"
+			let success = true
+			call ActionName with 2, 3
+			when true
+			do
+				success = call ActionName with 4, 5
+			end
+	
+	objective "Deliver to the Village"
+
+		description 
+			"Bring it to the Herbalist of the Village."
+		//requierement:
+			//Party Location is Location "Cozy Village"
+		
+		//Other examples
+		requierement
+			event triggered "EventName"
+			and
+			true
+			//state CONDITION //Ex: completed on state Party Location == Location "Riverside Tavern" and Faction "King's Guard" AtPeace is true
+		
+function ActionName
+return 5

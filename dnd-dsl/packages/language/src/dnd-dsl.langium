@@ -5,8 +5,10 @@ entry Model:
 
 World:
     'world' name=STRING
-    (locations+=Location)*
-    (functions+=FunctionDeclaration)*;
+    ((locations+=Location)+
+    | (functions+=FunctionDeclaration)+
+    |(quests+=Quest)+
+    |(events+=Event)+)*;
 
 //Location
 Location:
@@ -25,21 +27,47 @@ LocationChain:
 Identifier:
     '['property=ID ((':'|'=') value=ConstantExpression)? ']';
 
-/*
 //Quest
 Quest:
     'quest' name=STRING
     (Description)?
-    (objectives+=Objective)*
-    (CompleteableEvents)?;
-
+    (CompleteableEvents)?
+    (objectives+=Objective)+;
 Objective:
     'objective' name=STRING
     (Description)?
     (CompleteableEvents)?;
-*/
+QuestExpressions infers BoolExpression:
+    QuestCompletedExpression
+    | QuestFailedExpression
+    | QuestAcceptedExpression
+    | ObjectiveExpressions
+    ;
+QuestCompletedExpression infers BoolExpression:
+    'quest' 'completed' target=QuestRef;
+QuestFailedExpression infers BoolExpression:
+    'quest' 'failed' target=QuestRef;
+QuestAcceptedExpression infers BoolExpression:
+    'quest' 'accepted' target=QuestRef;
+
+ObjectiveExpressions:
+    ObjectiveCompletedExpression
+    | ObjectiveFailedExpression
+    ;
+ObjectiveCompletedExpression infers BoolExpression:
+    'objective' 'completed' target=ObjectiveRef;
+ObjectiveFailedExpression infers BoolExpression:
+    'objective' 'failed' target=ObjectiveRef;
 
 //Event
+Event:
+    'event' name=STRING
+    (Description)?
+    (codeBlock=CodeBlock)?;
+EventTrigger:
+    'trigger' target=EventRef;
+EventCalledExpression infers BoolExpression:
+    'event' 'triggered' target=EventRef;
 
 //Function
 FunctionDeclaration:
@@ -49,71 +77,95 @@ FunctionDeclaration:
     (description=STRING)?
     (codeBlock=CodeBlock)?
     'return' (returnValue=(Expression));
-
 FunctionCall:
    'call' ((predefined?='predefined' predefinedTarget=ID) | target=[FunctionDeclaration:ID])  ('with' params+=Expression (',' params+=Expression)*)?;
 
 
-/*Condition:
-    conditions+=Condition (('and'| 'or') conditions+=Condition)*;
-ConditionalBlock:
-    'when' condition=ConditionExpression 'do' body+=CodeBlock 'end';
-ConditionExpression:
-    left=ConditionExpression operator=('==' | '!=' | '<' | '>' | '<=' | '>=') right=ConditionExpression
-    | value=(ConstantExpression);
-CodeBlock://TODO
-    body+=FunctionCall*;
-*/
 
+//Code
 CodeBlock:
     (code+=Code)+;
 Code:
     FunctionCall
     | VariableAssignment
+    | ConditionalBlock
+    | EventTrigger
+    | VariableDeclaration
     ;
+ConditionalBlock:
+    'when' condition=BoolExpression 'do' body+=CodeBlock 'end';
+VariableAssignment:
+    target=[VariableDeclaration:ID] '=' value=(Expression | ObjectDeclaration);
+
+
 //General Declarations
 VariableDeclaration:
     'let' name=ID '=' value=(Expression | ObjectDeclaration);
-Expression:
-    ConstantExpression
-    | NumericExpression
-    | BoolExpression
-    ;
-ConstantExpression:
-    value=(INT | STRING | BooleanValue);
-
-NumericExpression:
-    ('(' parts+=NumericExpression ')' | parts+=NumericExpressionPart)
-     (operators+=('+' | '-' | '*' | '/') parts+=NumericExpression)*;
-NumericExpressionPart:
-    (value=(INT | FunctionCall) | valueReference=[VariableDeclaration:ID]);
-
-BoolExpression:
-    ('(' parts+=BoolExpression ')' | parts+=BoolExpressionPart)
-     (operators+=('and' | 'or' | 'not') parts+=BoolExpression)*;
-BoolExpressionPart:
-    (value=(BooleanValue | FunctionCall) | valueReference=[VariableDeclaration:ID]);
-
 ObjectDeclaration:
     'object'
     (variables+=VariableDeclaration)*
     (Description)?
     'end';
 
-VariableAssignment:
-    target=[VariableDeclaration:ID] '=' value=(ConstantExpression | ObjectDeclaration | FunctionCall);
-Parameter infers VariableDeclaration:
-    'param' name=ID ':' type=ID;
 
+//Expressions
+Expression:
+    BoolExpression
+    ;
+ConstantExpression:
+    value=(IntVal | StringVal | BoolVal);
+BoolExpression:
+    exp1=PrimitiveBoolExpression (operator=('and' | 'or') exp2=BoolExpression)?;
+IntExpression:
+    exp1=(PrimitiveIntExpression) (operator=('+' | '-' | '*' | '/') exp2=IntExpression)?;
+PrimitiveBoolExpression: BoolVal | RefChain | BoolGroup | FunctionCall | QuestExpressions | EventCalledExpression | IntToBoolExpression;
+PrimitiveIntExpression: IntVal | RefChain | IntGroup | FunctionCall;
+IntToBoolExpression infers BoolExpression:
+    exp1=IntExpression (operator=('==' | '!=' | '<' | '>' | '<=' | '>=') exp2=BoolExpression)?;
+BoolGroup infers BoolExpression:      
+    '(' exp1=BoolExpression ')' (operator=('and' | 'or') exp2=IntExpression)?;
+IntGroup infers IntExpression:      
+    '(' exp1=IntExpression ')' (operator=('+' | '-' | '*' | '/') exp2=IntExpression)?;
+
+//Values
+IntVal:        
+   isNegative?='-'? val=INT;
+BoolVal: 
+    isNegated?='not'? val=BooleanValue;
+StringVal: 
+    val=STRING;
+Parameter infers VariableDeclaration:
+    'param' name=ID;
+
+//References
+Ref:
+    VariableRef
+    | LocationRef
+    | QuestRef
+    | EventRef;
+RefChain:
+    (val+=VariableRef | 'location' val+=LocationRef | 'quest' val+=QuestRef | 'event' val+=EventRef) ('->' val+=Ref)*;
+//val is declared, property is generated
+VariableRef:        
+    val=[VariableDeclaration:ID] | property=ID;
+LocationRef:
+    val=[Location:STRING];
+QuestRef:
+    val=[Quest:STRING];
+ObjectiveRef:
+    val=[Objective:STRING];
+EventRef:
+    val=[Event:STRING];
 //Fragments
 fragment Description:
     'description' description=STRING;
 
-/*fragment CompleteableEvents:
-    ('enabled' 'on' conditions+=Condition)? 
-    ('on' 'completed' handler+=CodeBlock)?
-    ('on' 'failed' handler+=CodeBlock)?;
-*/
+fragment CompleteableEvents:
+    ('enabled' 'on' enabled+=BoolExpression)?
+    ('requierement' requierement+=BoolExpression)?
+    ('on' ('completed' completed+=CodeBlock) | ('failed' failed+=CodeBlock))?
+    ('on' ('completed' completed+=CodeBlock) | ('failed' failed+=CodeBlock))?;
+
 
 
 // Terminals
