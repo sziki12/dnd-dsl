@@ -22,7 +22,7 @@ export class LangiumParserService {
       const messages = result.parserErrors.map(e => e.message).join(', ');
       throw new Error(`Parser errors: ${messages}`);
     }
-    const javaScript = await generateJavaScript(result.value as Model, "generated.js", "language-output");
+    const javaScript = await generateJavaScript(result.value as Model, "./generated.js", "language-output");
     return;
   }
 
