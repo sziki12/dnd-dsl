@@ -1,7 +1,7 @@
 import { startLanguageServer } from 'langium/lsp';
 import { NodeFileSystem } from 'langium/node';
 import { createConnection, ProposedFeatures } from 'vscode-languageserver/node.js';
-import { createDndDslServices } from 'dnd-dsl-language';
+import { createDndDslServices } from '../../../language/src/dnd-dsl-module.js';
 
 // Create a connection to the client
 const connection = createConnection(ProposedFeatures.all);

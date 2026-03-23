@@ -1,4 +1,4 @@
-import type { Model } from 'dnd-dsl-language';
+import type { Model } from '../../language/src/generated/ast.js';
 import { expandToNode, joinToNode, toString } from 'langium/generate';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

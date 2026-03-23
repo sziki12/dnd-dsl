@@ -1,5 +1,6 @@
-import type { Model } from 'dnd-dsl-language';
-import { createDndDslServices, DndDslLanguageMetaData } from 'dnd-dsl-language';
+import type { Model } from '../../language/src/generated/ast.js';
+import { createDndDslServices } from '../../language/src/dnd-dsl-module.js';
+import { DndDslLanguageMetaData } from '../../language/src/generated/module.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { extractAstNode } from './util.js';

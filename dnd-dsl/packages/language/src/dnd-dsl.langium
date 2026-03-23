@@ -144,7 +144,7 @@ Ref:
     | QuestRef
     | EventRef;
 RefChain:
-    (val+=VariableRef | 'location' val+=LocationRef | 'quest' val+=QuestRef | 'event' val+=EventRef) ('->' val+=Ref)*;
+    ('this' val+=VariableRef | 'location' val+=LocationRef | 'quest' val+=QuestRef | 'event' val+=EventRef) ('->' val+=Ref)*;
 //val is declared, property is generated
 VariableRef:        
     val=[VariableDeclaration:ID] | property=ID;
