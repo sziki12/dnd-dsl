@@ -121,9 +121,9 @@ IntExpression:
 PrimitiveBoolExpression: BoolVal | RefChain | BoolGroup | FunctionCall | QuestExpressions | EventCalledExpression | IntToBoolExpression;
 PrimitiveIntExpression: IntVal | RefChain | IntGroup | FunctionCall;
 IntToBoolExpression infers BoolExpression:
-    exp1=IntExpression (operator=('==' | '!=' | '<' | '>' | '<=' | '>=') exp2=BoolExpression)?;
+    exp1=IntExpression (operator=('==' | '!=' | '<' | '>' | '<=' | '>=') exp2=IntExpression)?;
 BoolGroup infers BoolExpression:      
-    '(' exp1=BoolExpression ')' (operator=('and' | 'or') exp2=IntExpression)?;
+    '(' exp1=BoolExpression ')' (operator=('and' | 'or') exp2=BoolExpression)?;
 IntGroup infers IntExpression:      
     '(' exp1=IntExpression ')' (operator=('+' | '-' | '*' | '/') exp2=IntExpression)?;
 
@@ -144,10 +144,10 @@ Ref:
     | QuestRef
     | EventRef;
 RefChain:
-    ('this' val+=VariableRef | 'location' val+=LocationRef | 'quest' val+=QuestRef | 'event' val+=EventRef) ('->' val+=Ref)*;
+    (val+=VariableRef | 'location' val+=LocationRef | 'quest' val+=QuestRef | 'event' val+=EventRef) ('->' val+=Ref)*;
 //val is declared, property is generated
 VariableRef:        
-    val=[VariableDeclaration:ID] | property=ID;
+    val=[VariableDeclaration:ID];
 LocationRef:
     val=[Location:STRING];
 QuestRef:
