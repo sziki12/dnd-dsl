@@ -9,7 +9,7 @@ location "Forest Of The Damned"
 location "High Castle"
 
 	exit "Front Door" to "Cozy Village"
-	let Resources = object
+	let Resources = object 
 		let Food = 50
 		let Gold = 2000
 		let Soliders = call Random with 50, 100 // Pre defined format or action?? like: Call Random with 50, 100

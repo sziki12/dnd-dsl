@@ -13,11 +13,10 @@ export class LangiumParserService {
     this.services = createDndDslServices(EmptyFileSystem).DndDsl;
   }
 
-  async parse(input: string) {
+  async parseAndGenerate(input: string) {
     const parser : LangiumParser = this.services.parser.LangiumParser;
     const result = parser.parse(input);
     
-    // Replace 'expect' with a standard error check
     if (result.parserErrors && result.parserErrors.length > 0) {
       const messages = result.parserErrors.map(e => e.message).join(', ');
       throw new Error(`Parser errors: ${messages}`);
@@ -26,18 +25,14 @@ export class LangiumParserService {
     return;
   }
 
-  /*async parse(input: string) {
-    const parser = this.services.parser.LangiumParser;
-    const document = await parser(input, {validation: true});
-
-    //Validation
-    expect(document.parseResult.lexerErrors).toHaveLength(0);
-    expect(document.parseResult.parserErrors).toHaveLength(0);
-    expect(document.diagnostics ?? []).toHaveLength(0);
-
-    const javaScript = generateJavaScript(document.parseResult.value, 'C:\\Users\\Szikszai Levente\\Documents\\GitHub\\dnd-dsl\\dnd-dsl-backend\\out', "generated.js");
-
-    return javaScript;
-    return "Parsed"
-  }*/
+async parse(input: string) {
+    const parser : LangiumParser = this.services.parser.LangiumParser;
+    const result = parser.parse(input);
+    
+    if (result.parserErrors && result.parserErrors.length > 0) {
+      const messages = result.parserErrors.map(e => e.message).join(', ');
+      throw new Error(`Parser errors: ${messages}`);
+    }
+    return result.value;
+  }
 }
