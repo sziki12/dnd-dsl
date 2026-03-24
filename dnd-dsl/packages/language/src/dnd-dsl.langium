@@ -7,8 +7,8 @@ World:
     'world' name=STRING
     ((locations+=Location)+
     | (functions+=FunctionDeclaration)+
-    |(quests+=Quest)+
-    |(events+=Event)+)*;
+    | (quests+=Quest)+
+    | (events+=Event)+)*;
 
 //Location
 Location:
@@ -25,7 +25,7 @@ LocationEntry:
 LocationChain:
     locations+=[Location:STRING] ('->' locations+=[Location:STRING])*;
 Identifier:
-    '['property=ID ((':'|'=') value=ConstantExpression)? ']';
+    '['property=STRING ((':'|'=') value=ConstantExpression)? ']';
 
 //Quest
 Quest:
@@ -71,14 +71,13 @@ EventCalledExpression infers BoolExpression:
 
 //Function
 FunctionDeclaration:
-    'function' name=ID
+    'function' name=STRING
     (params+=Parameter)*
-    (variables+=VariableDeclaration)*
     (description=STRING)?
     (codeBlock=CodeBlock)?
-    'return' (returnValue=(Expression));
+    ;
 FunctionCall:
-   'call' ((predefined?='predefined' predefinedTarget=ID) | target=[FunctionDeclaration:ID])  ('with' params+=Expression (',' params+=Expression)*)?;
+   'call' ((predefined?='predefined' predefinedTarget=STRING) | target=[FunctionDeclaration:STRING])  ('with' params+=Expression (',' params+=Expression)*)?;
 
 
 
@@ -91,16 +90,19 @@ Code:
     | ConditionalBlock
     | EventTrigger
     | VariableDeclaration
+    | ReturnStatement
     ;
 ConditionalBlock:
     'when' condition=BoolExpression 'do' body+=CodeBlock 'end';
+ReturnStatement:
+    'return' (returnValue=(Expression))?;
 VariableAssignment:
-    target=[VariableDeclaration:ID] '=' value=(Expression | ObjectDeclaration);
+    target=[VariableDeclaration:STRING] '=' value=(Expression | ObjectDeclaration);
 
 
 //General Declarations
 VariableDeclaration:
-    'let' name=ID '=' value=(Expression | ObjectDeclaration);
+    'let' name=STRING '=' value=(Expression | ObjectDeclaration);
 ObjectDeclaration:
     'object'
     (variables+=VariableDeclaration)*
@@ -110,22 +112,29 @@ ObjectDeclaration:
 
 //Expressions
 Expression:
-    BoolExpression
+    BoolExpression;
+BoolExpression:
+    ComparisonExpression ({infer BoolExpression.exp1=current} operator=('and' | 'or') exp2=BoolExpression)?;
+ComparisonExpression:
+    IntExpression ({infer IntToBoolExpression.exp1=current} operator=('==' | '!=' | '<' | '>' | '<=' | '>=') exp2=IntExpression)?;
+IntExpression:
+    PrimaryExpression ({infer IntExpression.exp1=current} operator=('+' | '-' | '*' | '/') exp2=IntExpression)?;
+PrimaryExpression:
+    '(' Expression ')'  |
+    ReferenceExpression |
+    ConstantExpression
     ;
 ConstantExpression:
-    value=(IntVal | StringVal | BoolVal);
-BoolExpression:
-    exp1=PrimitiveBoolExpression (operator=('and' | 'or') exp2=BoolExpression)?;
-IntExpression:
-    exp1=(PrimitiveIntExpression) (operator=('+' | '-' | '*' | '/') exp2=IntExpression)?;
-PrimitiveBoolExpression: BoolVal | RefChain | BoolGroup | FunctionCall | QuestExpressions | EventCalledExpression | IntToBoolExpression;
-PrimitiveIntExpression: IntVal | RefChain | IntGroup | FunctionCall;
-IntToBoolExpression infers BoolExpression:
-    exp1=IntExpression (operator=('==' | '!=' | '<' | '>' | '<=' | '>=') exp2=IntExpression)?;
-BoolGroup infers BoolExpression:      
-    '(' exp1=BoolExpression ')' (operator=('and' | 'or') exp2=BoolExpression)?;
-IntGroup infers IntExpression:      
-    '(' exp1=IntExpression ')' (operator=('+' | '-' | '*' | '/') exp2=IntExpression)?;
+    IntVal | 
+    StringVal | 
+    BoolVal
+    ;
+ReferenceExpression:
+    FunctionCall |
+    QuestExpressions |
+    EventCalledExpression |
+    RefChain
+    ;
 
 //Values
 IntVal:        
@@ -135,7 +144,7 @@ BoolVal:
 StringVal: 
     val=STRING;
 Parameter infers VariableDeclaration:
-    'param' name=ID;
+    'param' name=STRING;
 
 //References
 Ref:
@@ -147,7 +156,7 @@ RefChain:
     (val+=VariableRef | 'location' val+=LocationRef | 'quest' val+=QuestRef | 'event' val+=EventRef) ('->' val+=Ref)*;
 //val is declared, property is generated
 VariableRef:        
-    val=[VariableDeclaration:ID];
+    val=[VariableDeclaration:STRING];
 LocationRef:
     val=[Location:STRING];
 QuestRef:
@@ -163,8 +172,7 @@ fragment Description:
 fragment CompleteableEvents:
     ('enabled' 'on' enabled+=BoolExpression)?
     ('requierement' requierement+=BoolExpression)?
-    ('on' ('completed' completed+=CodeBlock) | ('failed' failed+=CodeBlock))?
-    ('on' ('completed' completed+=CodeBlock) | ('failed' failed+=CodeBlock))?;
+    ('on' ('completed' completed+=CodeBlock) | ('failed' failed+=CodeBlock))*;
 
 
 
