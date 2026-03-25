@@ -49,3 +49,12 @@ export function extractDestinationAndName(filePath: string, destination: string 
         name: path.basename(filePath)
     };
 }
+
+export function writeToFile(destinationFolder: string, fileName: string, data: string): string{
+    if (!fs.existsSync(destinationFolder)) {
+        fs.mkdirSync(destinationFolder, { recursive: true });
+    }
+    const filePath = `${path.join(destinationFolder, fileName)}`;
+    fs.writeFileSync(filePath, data);
+    return filePath
+}

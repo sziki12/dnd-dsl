@@ -9,7 +9,7 @@ location "Forest Of The Damned"
 location "High Castle"
 
 	exit "Front Door" to "Cozy Village"
-	let Resources = object 
+	let Resources = object
 		let Food = 50
 		let Gold = 2000
 		let Soliders = call Random with 50, 100 // Pre defined format or action?? like: Call Random with 50, 100
@@ -20,7 +20,7 @@ location "Cozy Village"
 	entry "Village Square"
 	sublocations
 		location "Riverside Tavern"
-			exit "Back Door" to "Back Alle" [Hidden: true] //Other [Indentifiers]
+			exit "Back Door" to "Back Alle" ["Hidden": true] //Other [Indentifiers]
 			exit "Front Door" to "Village Square" 
 			
 		location "Back Alle"
@@ -40,12 +40,12 @@ function Random
 	param min
 	param max
 
-	let result = - 2 - (10  + 12) / 3 + (5 - 5 * 2) + (12) * 3 // Just an example of using math operations, you can replace it with actual random generation logic
-	result = call predefined randomfv with min, max
+	let result = - 2 - (10  + 12) / 3 + (5 - 5 * 2) + (12) * 3// Just an example of using math operations, you can replace it with actual random generation logic
+	result = call predefined "randomfv" with "min", "max"
 return result
 
 function randomBoolean
-let result = call predefined randomfv with 0, 1
+let result = call predefined "randomfv" with 0, 1
 return result + 1 == 0 
 
 quest "Rising Dead"

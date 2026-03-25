@@ -5,14 +5,12 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import fs = require('fs');
 import { Model } from '@dnd-language/index.js';
-import { LocationParsingService } from './parsing/location-parsing/location-parsing.service.js';
 
 @Controller()
 export class AppController {
   constructor(
     private readonly appService: AppService,
     private readonly parserService: LangiumParserService,
-    private readonly locationParsingService: LocationParsingService
   ) {}
 
   private worldState = {};
@@ -27,7 +25,7 @@ export class AppController {
   @Post("/generate")
   async generateLanguage() {
     const text = fs.readFileSync(('./test_file.dnd'), 'utf8');
-    let resultContent = await this.parserService.parseAndGenerate(text);
+    await this.parserService.parseAndGenerate(text);
     return "Parsed";
   }
 
@@ -41,11 +39,9 @@ export class AppController {
 
   @Post("/load/locations")
   async loadLocations() {
-    const text = fs.readFileSync(('./test_file.dnd'), 'utf8');
-    let resultContent = await this.parserService.parse(text) as Model;
-    this.parsed = resultContent;
-    this.worldState["locations"] = [];
-    this.locationParsingService.loadLocations(this.worldState, this.parsed.World)
+    const fileUrl = pathToFileURL("./language-output/worldstate.js").href + `?update=${Date.now()}`;
+    const worldStetModule = await import(fileUrl);
+    this.worldState = worldStetModule["getWorldState"]();
     return this.worldState;
   }
 

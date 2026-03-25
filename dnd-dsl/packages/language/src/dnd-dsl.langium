@@ -25,7 +25,7 @@ LocationEntry:
 LocationChain:
     locations+=[Location:STRING] ('->' locations+=[Location:STRING])*;
 Identifier:
-    '['property=STRING ((':'|'=') value=ConstantExpression)? ']';
+    '['tag=STRING ((':'|'=') value=ConstantExpression)? ']';
 
 //Quest
 Quest:
@@ -42,20 +42,20 @@ QuestExpressions:
     | QuestFailedExpression
     | QuestAcceptedExpression) | ObjectiveExpressions)
     ;
-QuestCompletedExpression infers BoolExpression:
+QuestCompletedExpression:
     'completed' target=QuestRef;
-QuestFailedExpression infers BoolExpression:
+QuestFailedExpression:
     'failed' target=QuestRef;
-QuestAcceptedExpression infers BoolExpression:
+QuestAcceptedExpression:
     'accepted' target=QuestRef;
 
 ObjectiveExpressions:
     'objective' (ObjectiveCompletedExpression
     | ObjectiveFailedExpression)
     ;
-ObjectiveCompletedExpression infers BoolExpression:
+ObjectiveCompletedExpression:
     'completed' target=ObjectiveRef;
-ObjectiveFailedExpression infers BoolExpression:
+ObjectiveFailedExpression:
     'failed' target=ObjectiveRef;
 
 //Event
@@ -65,7 +65,7 @@ Event:
     (codeBlock=CodeBlock)?;
 EventTrigger:
     'trigger' target=EventRef;
-EventCalledExpression infers BoolExpression:
+EventCalledExpression:
     'event' 'triggered' target=EventRef;
 
 //Function
@@ -76,7 +76,7 @@ FunctionDeclaration:
     (codeBlock=CodeBlock)?
     ;
 FunctionCall:
-   'call' ((predefined?='predefined' predefinedTarget=STRING) | target=FunctionRef)  ('with' params+=Expression (',' params+=Expression)*)?;
+   'call' ((predefined?='predefined' predefinedTarget=ID) | target=FunctionRef)  ('with' params+=Expression (',' params+=Expression)*)?;
 
 
 //Code
@@ -95,12 +95,12 @@ ConditionalBlock:
 ReturnStatement:
     'return' (returnValue=(Expression))?;
 VariableAssignment:
-    target=VariableRef '=' value=(Expression | ObjectDeclaration);
+    target=VariableRef '=' value=(Expression);
 
 
 //General Declarations
 VariableDeclaration:
-    'let' name=ID '=' value=(Expression | ObjectDeclaration);
+    'let' name=ID '=' value=(Expression);
 ObjectDeclaration:
     'object'
     (variables+=VariableDeclaration)*
@@ -118,14 +118,15 @@ ComparisonExpression:
 IntExpression:
     PrimaryExpression ({infer IntExpression.exp1=current} operator=('+' | '-' | '*' | '/') exp2=IntExpression)?;
 PrimaryExpression:
-    '(' Expression ')'  |
+    '(' Expression ')' {infer GroupedExpression.exp1=current}  |
     ReferenceExpression |
     ConstantExpression
     ;
 ConstantExpression:
     IntVal | 
     StringVal | 
-    BoolVal
+    BoolVal |
+    ObjectDeclaration
     ;
 ReferenceExpression:
     FunctionCall |

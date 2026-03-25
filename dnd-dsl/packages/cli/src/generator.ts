@@ -1,12 +1,11 @@
-import type { Model } from '../../language/src/generated/ast.js';
+import {type Model } from '../../language/src/generated/ast.js';
 import { expandToNode, joinToNode, toString } from 'langium/generate';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { extractDestinationAndName } from './util.js';
+import { extractDestinationAndName, writeToFile } from './util.js';
+import { parseLocations } from './parser/location-parser.js';
 
 export function generateJavaScript(model: Model, filePath: string, destination: string | undefined): string {
     const data = extractDestinationAndName(filePath, destination);
-    const generatedFilePath = `${path.join(data.destination, data.name)}.js`;
+    const fileName = `${data.name}.js`;
 
     const fileNode = expandToNode`
         "use strict";
@@ -14,9 +13,25 @@ export function generateJavaScript(model: Model, filePath: string, destination: 
         ${joinToNode(model.World.locations, location => `console.log('Hello, ${location.name}!');`, { appendNewLineIfNotEmpty: true })}
     `.appendNewLineIfNotEmpty();
 
-    if (!fs.existsSync(data.destination)) {
-        fs.mkdirSync(data.destination, { recursive: true });
-    }
-    fs.writeFileSync(generatedFilePath, toString(fileNode));
+    const generatedFilePath = writeToFile(data.destination, fileName, toString(fileNode))
     return generatedFilePath;
 }
+
+export function generateWorldState(model: Model, filePath: string, destination: string | undefined): string {
+     const data = extractDestinationAndName(filePath, destination);
+    const fileName = `${data.name}.js`;
+
+    const fileNode = expandToNode`
+        "use strict";
+        export function getWorldState() {
+            return {
+                "locations": ${JSON.stringify(parseLocations(model.World.locations)).replace(',',',\n')}
+            }
+        }
+    `.appendNewLineIfNotEmpty();
+
+    const generatedFilePath = writeToFile(data.destination, fileName, toString(fileNode))
+    return generatedFilePath;
+}
+
+    
