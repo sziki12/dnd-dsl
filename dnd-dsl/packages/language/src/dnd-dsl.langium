@@ -37,27 +37,26 @@ Objective:
     'objective' name=STRING
     (Description)?
     (CompleteableEvents)?;
-QuestExpressions infers BoolExpression:
-    QuestCompletedExpression
+QuestExpressions:
+    ('quest' (QuestCompletedExpression
     | QuestFailedExpression
-    | QuestAcceptedExpression
-    | ObjectiveExpressions
+    | QuestAcceptedExpression) | ObjectiveExpressions)
     ;
 QuestCompletedExpression infers BoolExpression:
-    'quest' 'completed' target=QuestRef;
+    'completed' target=QuestRef;
 QuestFailedExpression infers BoolExpression:
-    'quest' 'failed' target=QuestRef;
+    'failed' target=QuestRef;
 QuestAcceptedExpression infers BoolExpression:
-    'quest' 'accepted' target=QuestRef;
+    'accepted' target=QuestRef;
 
 ObjectiveExpressions:
-    ObjectiveCompletedExpression
-    | ObjectiveFailedExpression
+    'objective' (ObjectiveCompletedExpression
+    | ObjectiveFailedExpression)
     ;
 ObjectiveCompletedExpression infers BoolExpression:
-    'objective' 'completed' target=ObjectiveRef;
+    'completed' target=ObjectiveRef;
 ObjectiveFailedExpression infers BoolExpression:
-    'objective' 'failed' target=ObjectiveRef;
+    'failed' target=ObjectiveRef;
 
 //Event
 Event:
@@ -71,14 +70,13 @@ EventCalledExpression infers BoolExpression:
 
 //Function
 FunctionDeclaration:
-    'function' name=STRING
+    'function' name=ID
     (params+=Parameter)*
     (description=STRING)?
     (codeBlock=CodeBlock)?
     ;
 FunctionCall:
-   'call' ((predefined?='predefined' predefinedTarget=STRING) | target=[FunctionDeclaration:STRING])  ('with' params+=Expression (',' params+=Expression)*)?;
-
+   'call' ((predefined?='predefined' predefinedTarget=STRING) | target=FunctionRef)  ('with' params+=Expression (',' params+=Expression)*)?;
 
 
 //Code
@@ -97,12 +95,12 @@ ConditionalBlock:
 ReturnStatement:
     'return' (returnValue=(Expression))?;
 VariableAssignment:
-    target=[VariableDeclaration:STRING] '=' value=(Expression | ObjectDeclaration);
+    target=VariableRef '=' value=(Expression | ObjectDeclaration);
 
 
 //General Declarations
 VariableDeclaration:
-    'let' name=STRING '=' value=(Expression | ObjectDeclaration);
+    'let' name=ID '=' value=(Expression | ObjectDeclaration);
 ObjectDeclaration:
     'object'
     (variables+=VariableDeclaration)*
@@ -144,7 +142,7 @@ BoolVal:
 StringVal: 
     val=STRING;
 Parameter infers VariableDeclaration:
-    'param' name=STRING;
+    'param' name=ID;
 
 //References
 Ref:
@@ -156,7 +154,7 @@ RefChain:
     (val+=VariableRef | 'location' val+=LocationRef | 'quest' val+=QuestRef | 'event' val+=EventRef) ('->' val+=Ref)*;
 //val is declared, property is generated
 VariableRef:        
-    val=[VariableDeclaration:STRING];
+    val=[VariableDeclaration:ID];
 LocationRef:
     val=[Location:STRING];
 QuestRef:
@@ -165,6 +163,8 @@ ObjectiveRef:
     val=[Objective:STRING];
 EventRef:
     val=[Event:STRING];
+FunctionRef:
+    val=[FunctionDeclaration:ID];
 //Fragments
 fragment Description:
     'description' description=STRING;
