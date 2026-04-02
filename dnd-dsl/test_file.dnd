@@ -2,6 +2,18 @@
 
 world "WorldName"
 
+function Random
+	param min
+	param max
+
+	let result = - 2 - (10  + 12) / 3 + (5 - 5 * 2) + (12) * 3// Just an example of using math operations, you can replace it with actual random generation logic
+	result = call predefined randomfv with "min", "max"
+return result
+
+function randomBoolean
+let result = call predefined randomfv with 0, 1
+return result + 1 == 0 
+
 location "Forest Of The Damned"
 	exit "Through the dense forest" to "Cozy Village"
 	let DangerLevel = 100
@@ -34,19 +46,6 @@ location "Cozy Village"
 				let Soliders = call Random with 50, 100
 			end
 	end
-	
-		
-function Random
-	param min
-	param max
-
-	let result = - 2 - (10  + 12) / 3 + (5 - 5 * 2) + (12) * 3// Just an example of using math operations, you can replace it with actual random generation logic
-	result = call predefined "randomfv" with "min", "max"
-return result
-
-function randomBoolean
-let result = call predefined "randomfv" with 0, 1
-return result + 1 == 0 
 
 quest "Rising Dead"
 

@@ -1,12 +1,14 @@
-import { Location, LocationChain } from "../../../language/src/generated/ast.js";
+/*import { Location, LocationChain } from "../../../language/src/generated/ast.js";
+import { popCurrentReference, pushCurrentReference } from "../generator.js";
 import { mapVariablesToObject } from "./expression-parser.js";
 
 
-export function parseLocations(locations: Location[]): any
+export function parseLocations(locations: Location[], isTopLevel: boolean = false): any
     {
         let outLocations: any[] = []
         for (let location of locations)
         {
+            pushCurrentReference(location)
             let object = 
             {
                 name: location.name, 
@@ -18,10 +20,11 @@ export function parseLocations(locations: Location[]): any
                     }
                 }),
                 locations: parseLocations(location.sublocations),
-                ...mapVariablesToObject(location.variables)
+                ...mapVariablesToObject(location.variables, "Declaration")
             }
-            
+
             outLocations.push(object);
+            popCurrentReference()
         }
         return outLocations
     }
@@ -33,6 +36,6 @@ export function parseLocations(locations: Location[]): any
             return undefined
         }
         return locationChain.locations.map(location => location.$refText)
-    }
+    }*/
 
     

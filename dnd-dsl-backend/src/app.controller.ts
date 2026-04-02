@@ -42,6 +42,12 @@ export class AppController {
     const fileUrl = pathToFileURL("./language-output/worldstate.js").href + `?update=${Date.now()}`;
     const worldStetModule = await import(fileUrl);
     this.worldState = worldStetModule["getWorldState"]();
+    
+    this.worldState["functions"] = []
+    this.worldState["functions"]["Random"] = (min, max) => {return Math.random()*(max-min)+min}
+
+    console.log(this.worldState["functions"]["Random"](10,20))
+    worldStetModule["initWorldState"](this.worldState);
     return this.worldState;
   }
 
