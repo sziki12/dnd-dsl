@@ -100,7 +100,7 @@ VariableAssignment:
 
 //General Declarations
 VariableDeclaration:
-    'let' name=ID '=' value=(Expression);
+    'let' isComputed='computed'? target=ID '=' value=(Expression);
 ObjectDeclaration:
     'object'
     (variables+=VariableDeclaration)*
@@ -111,17 +111,29 @@ ObjectDeclaration:
 //Expressions
 Expression:
     BoolExpression;
-BoolExpression:
-    ComparisonExpression ({infer BoolExpression.exp1=current} operator=('and' | 'or') exp2=BoolExpression)?;
-ComparisonExpression:
-    IntExpression ({infer IntToBoolExpression.exp1=current} operator=('==' | '!=' | '<' | '>' | '<=' | '>=') exp2=IntExpression)?;
-IntExpression:
-    PrimaryExpression ({infer IntExpression.exp1=current} operator=('+' | '-' | '*' | '/') exp2=IntExpression)?;
-PrimaryExpression:
-    '(' Expression ')' {infer GroupedExpression.exp1=current}  |
+
+BoolExpression infers Expression:
+    exp=ComparisonExpression (
+        {infer BoolExpression.left=current} 
+        operator=('and' | 'or') 
+        right=ComparisonExpression
+    )*;
+ComparisonExpression infers Expression:
+    exp=IntExpression (
+        {infer IntToBoolExpression.left=current} 
+        operator=('==' | '!=' | '<' | '>' | '<=' | '>=') 
+        right=IntExpression
+    )?;
+IntExpression infers Expression:
+    exp=PrimaryExpression (
+        {infer IntExpression.left=current} 
+        operator=('+' | '-' | '*' | '/') 
+        right=PrimaryExpression
+    )*;
+PrimaryExpression infers Expression:
+    {infer GroupedExpression} '(' exp=Expression ')' |
     ReferenceExpression |
-    ConstantExpression
-    ;
+    ConstantExpression;
 ConstantExpression:
     IntVal | 
     StringVal | 
@@ -146,13 +158,29 @@ Parameter infers VariableDeclaration:
     'param' name=ID;
 
 //References
-Ref:
-    VariableRef
-    | LocationRef
-    | QuestRef
-    | EventRef;
 RefChain:
-    (val+=VariableRef | 'location' val+=LocationRef | 'quest' val+=QuestRef | 'event' val+=EventRef) ('->' val+=Ref)*;
+    first=RefChainStart ('->' rest+=RefChainItem)*;
+
+RefChainStart:
+    VariableRefItem
+    | LocationRefItem
+    | QuestRefItem
+    | EventRefItem;
+
+RefChainItem:
+    VariableRefItem
+    | LocationRefItem
+    | QuestRefItem
+    | EventRefItem;
+VariableRefItem:
+    val=VariableRef;
+LocationRefItem:
+    isLocation='location' val=LocationRef;
+QuestRefItem:
+    isQuest='quest' val=QuestRef;
+EventRefItem:
+    isEvent='event' val=EventRef;
+
 //val is declared, property is generated
 VariableRef:        
     val=[VariableDeclaration:ID];
@@ -166,6 +194,7 @@ EventRef:
     val=[Event:STRING];
 FunctionRef:
     val=[FunctionDeclaration:ID];
+
 //Fragments
 fragment Description:
     'description' description=STRING;
