@@ -21,8 +21,11 @@
         "build:clean": "npm run clean && npm run build"
     },
     "dependencies": {
-        "dnd-dsl-language": "0.0.1",
         "chalk": "~5.3.0",
-        "commander": "~11.1.0"
+        "commander": "~11.1.0",
+        "dnd-dsl-language": "0.0.1"
+    },
+    "devDependencies": {
+        "@types/node": "^20.17.58"
     }
 }

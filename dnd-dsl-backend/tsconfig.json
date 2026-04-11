@@ -14,7 +14,7 @@
     "target": "ES2023",
     "sourceMap": true,
     "outDir": "./dist",
-    "baseUrl": "./",
+    "rootDir": "./",
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,
@@ -23,8 +23,10 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "paths": {
-      "@dnd-language/*": ["src/dnd-language/language/src/*"],
-      "@dnd-cli/*": ["src/dnd-language/cli/*"],
+      "@dnd-language/*": ["./src/dnd-language/language/src/*"],
+      "@dnd-cli/*": ["./src/dnd-language/cli/src/*"],
     },
-  }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

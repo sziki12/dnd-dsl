@@ -1,10 +1,9 @@
 import { Controller, Get, Post, Param } from '@nestjs/common';
 import { AppService } from './app.service.js';
 import { LangiumParserService } from './langium-parser/langium-parser.service.js';
-import { join } from 'path';
 import { pathToFileURL } from 'url';
-import fs = require('fs');
 import { Model } from '@dnd-language/index.js';
+import { parseModel, stringifyModel } from '@dnd-cli/main.js';
 
 @Controller()
 export class AppController {
@@ -13,8 +12,8 @@ export class AppController {
     private readonly parserService: LangiumParserService,
   ) {}
 
-  private worldState = {};
-  private parsed : Model;
+  private worldState : any = {};
+  private model : Model | undefined = undefined;
   @Get()
   getHello(): string {
     return this.appService.getHello();
@@ -24,9 +23,8 @@ export class AppController {
   
   @Post("/generate")
   async generateLanguage() {
-    const text = fs.readFileSync(('./test_file.dnd'), 'utf8');
-    await this.parserService.parseAndGenerate(text);
-    return "Parsed";
+    this.model = (await parseModel('./test_file.dnd'));
+    return "Model generated successfully";
   }
 
   @Post("/execute")
@@ -39,9 +37,12 @@ export class AppController {
 
   @Post("/load/locations")
   async loadLocations() {
+    if(this.model === undefined)
+      return
+
     const fileUrl = pathToFileURL("./language-output/worldstate.js").href + `?update=${Date.now()}`;
     const worldStetModule = await import(fileUrl);
-    this.worldState = worldStetModule["getWorldState"]();
+    this.worldState = JSON.parse(stringifyModel(this.model));
     
     this.worldState["functions"] = []
     this.worldState["functions"]["Random"] = (min, max) => {return Math.random()*(max-min)+min}

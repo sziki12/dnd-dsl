@@ -1,4 +1,4 @@
-import {Location, Quest, ReferenceExpression, VariableAssignment, VariableDeclaration, Event, type Model } from '../../language/src/generated/ast.js';
+import {type Model } from '../../language/src/generated/ast.js';
 import { expandToNode, joinToNode, toString } from 'langium/generate';
 import { extractDestinationAndName, writeToFile } from './util.js';
 
@@ -16,6 +16,9 @@ export function generateJavaScript(model: Model, filePath: string, destination: 
     const generatedFilePath = writeToFile(data.destination, fileName, toString(fileNode))
     return generatedFilePath;
 }
+
+
+
 
 /*export function generateWorldState(model: Model, filePath: string, destination: string | undefined): string {
      const data = extractDestinationAndName(filePath, destination);

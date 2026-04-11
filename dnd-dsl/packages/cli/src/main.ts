@@ -1,5 +1,5 @@
 import type { Model } from '../../language/src/generated/ast.js';
-import { createDndDslServices } from '../../language/src/dnd-dsl-module.js';
+import { createDndDslServices, DndDslServices } from '../../language/src/dnd-dsl-module.js';
 import { DndDslLanguageMetaData } from '../../language/src/generated/module.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
@@ -15,7 +15,32 @@ const packagePath = path.resolve(__dirname, '..', 'package.json');
 const packageContent = await fs.readFile(packagePath, 'utf-8');
 
 export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
+    var model: Model = await parseModel(fileName);
+    
+    const generatedFilePath = generateJavaScript(model, fileName, opts.destination);
+    console.log(chalk.green(`JavaScript code generated successfully: ${generatedFilePath}`));
+
+    //const generatedWorldStateFilePath = generateWorldState(model, fileName, opts.destination);
+    //console.log(chalk.green(`WordlState generated successfully: ${generatedWorldStateFilePath}`));
+};
+
+export const parseModelAndStringify = async (fileName: string): Promise<string> => {
     const services = createDndDslServices(NodeFileSystem).DndDsl;
+    var model: Model = await parseModel(fileName, services);
+
+    return stringifyModel(model, services);
+}
+
+export const stringifyModel = (model: Model, paramServices: DndDslServices | undefined = undefined): string => {
+    const services = paramServices || createDndDslServices(NodeFileSystem).DndDsl;
+    
+    const jsonSerializer = services.serializer.JsonSerializer;
+    const serializedModel = jsonSerializer.serialize(model);
+    return serializedModel;
+}
+
+export const parseModel = async (fileName: string, paramServices: DndDslServices | undefined = undefined): Promise<Model> => {
+    const services = paramServices || createDndDslServices(NodeFileSystem).DndDsl;
     // 1. Document betöltése
     const document = await extractDocument(fileName, services);
     
@@ -42,12 +67,10 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
     // 4. Most már biztonságos a model kinyerése
     const model = document.parseResult.value as Model;
     
-    const generatedFilePath = generateJavaScript(model, fileName, opts.destination);
-    console.log(chalk.green(`JavaScript code generated successfully: ${generatedFilePath}`));
-
-    //const generatedWorldStateFilePath = generateWorldState(model, fileName, opts.destination);
-    //console.log(chalk.green(`WordlState generated successfully: ${generatedWorldStateFilePath}`));
+    return model;
 };
+
+
 
 export type GenerateOptions = {
     destination?: string;
