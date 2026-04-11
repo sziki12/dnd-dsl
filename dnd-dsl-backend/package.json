@@ -69,9 +69,5 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
-  },
-  "imports": {
-    "#dnd-cli/*": "./dist/dnd-language/cli/src/*",
-    "#dnd-language/*": "./dist/dnd-language/language/src/*"
   }
 }

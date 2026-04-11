@@ -9,10 +9,6 @@ import { NodeFileSystem } from 'langium/node';
 import * as url from 'node:url';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
-
-const packagePath = path.resolve(__dirname, '..', 'package.json');
-const packageContent = await fs.readFile(packagePath, 'utf-8');
 
 export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
     var model: Model = await parseModel(fileName);
@@ -33,7 +29,7 @@ export const parseModelAndStringify = async (fileName: string): Promise<string> 
 
 export const stringifyModel = (model: Model, paramServices: DndDslServices | undefined = undefined): string => {
     const services = paramServices || createDndDslServices(NodeFileSystem).DndDsl;
-    
+
     const jsonSerializer = services.serializer.JsonSerializer;
     const serializedModel = jsonSerializer.serialize(model);
     return serializedModel;
@@ -76,8 +72,12 @@ export type GenerateOptions = {
     destination?: string;
 }
 
-export default function(): void {
+export default async function(): Promise<void>  {
     const program = new Command();
+    
+    const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
+    const packagePath = path.resolve(__dirname, '..', 'package.json');
+    const packageContent = await fs.readFile(packagePath, 'utf-8');
 
     program.version(JSON.parse(packageContent).version);
 

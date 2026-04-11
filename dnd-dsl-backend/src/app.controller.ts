@@ -1,15 +1,17 @@
-import { Controller, Get, Post, Param } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query } from '@nestjs/common';
 import { AppService } from './app.service.js';
 import { LangiumParserService } from './langium-parser/langium-parser.service.js';
 import { pathToFileURL } from 'url';
 import { Model } from '@dnd-language/index.js';
 import { parseModel, stringifyModel } from '@dnd-cli/main.js';
+import { LangiumInterpreterService } from './langium-interpreter/langium-interpreter.service.js';
 
 @Controller()
 export class AppController {
   constructor(
     private readonly appService: AppService,
     private readonly parserService: LangiumParserService,
+    private readonly interpreterService: LangiumInterpreterService,
   ) {}
 
   private worldState : any = {};
@@ -45,10 +47,10 @@ export class AppController {
     this.worldState = JSON.parse(stringifyModel(this.model));
     
     this.worldState["functions"] = []
-    this.worldState["functions"]["Random"] = (min, max) => {return Math.random()*(max-min)+min}
+    this.worldState["functions"][0] = (min, max) => {return Math.random()*(max-min)+min}
 
-    console.log(this.worldState["functions"]["Random"](10,20))
-    worldStetModule["initWorldState"](this.worldState);
+    //console.log(this.worldState["functions"]["Random"](10,20))
+    //worldStetModule["initWorldState"](this.worldState);
     return this.worldState;
   }
 
@@ -61,5 +63,17 @@ export class AppController {
   @Get("/world")
   async getWorldState() {
     return this.worldState;
+  }
+
+  @Post("/resolve")
+  async resolveReference(@Query('reference') reference: string) {
+    if(this.model === undefined)
+      return undefined;
+
+    if(!reference.startsWith("#"))
+        reference = `#${reference}`;
+
+    console.log(`Resolving reference: ${reference}`);
+    return this.interpreterService.parseReference(this.model, reference);
   }
 }
