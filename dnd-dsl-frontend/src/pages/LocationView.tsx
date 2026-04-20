@@ -1,12 +1,10 @@
 import { useCallback, useState, useRef, useEffect } from 'react';
 import test_map_image from '../assets/test_map_image.webp';
-import { addEdge, applyEdgeChanges, applyNodeChanges, Background, MarkerType, Panel, ReactFlow, useEdgesState, useNodesState, type Connection, type Edge, type EdgeChange, type Node, type NodeChange } from '@xyflow/react';
+import { addEdge, Background, MarkerType, Panel, ReactFlow, useEdgesState, useNodesState, type Connection, type Node } from '@xyflow/react';
 
 import MapNode from '../nodes/MapNode.js';
 
 const LocationView = () => {
-  const [activeTab, setActiveTab] = useState('Variables');
-
   return (
     // 1. Parent Container: use 'flex' and 'flex-col lg:flex-row' for responsiveness
     <div className="h-screen w-full bg-slate-900 text-white p-4 flex flex-col lg:flex-row gap-4">
@@ -63,24 +61,106 @@ const LocationView = () => {
 const MapFlow = () => {
 const containerRef = useRef<HTMLDivElement>(null);
 const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>([[0, 0], [0, 0]]);
-
+const targetSize = 50;
+const markerColor = '#000000';
   const initialNodes: Node<{ location: string }>[] = [
-    { id: 'n1', position: { x: 0, y: 0 }, data: { location: 'Place 1' }, type: 'custom' },
-    { id: 'n2', position: { x: 0, y: 50 }, data: { location: 'Place 2' }, type: 'custom' },
+    { id: 'n1', position: { x: 0, y: 0 }, data: { location: 'Place 1' }, type: 'mapNode' },
+    { id: 'n2', position: { x: 0, y: 50 }, data: { location: 'Place 2' }, type: 'mapNode' },
   ];
-  const initialEdges = [{ id: 'n1-n2', source: 'n1', target: 'n2' }];
+  const initialEdges = [{
+    id: 'n1-n2',
+    source: 'n1',
+    target: 'n2',
+    label: 'Transition Name',
+    data: { direction: 'both' },
+    type: 'straight',
+    markerStart: {
+      type: MarkerType.ArrowClosed,
+      width: targetSize,
+      height: targetSize,
+      color: markerColor,
+    },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: targetSize,
+      height: targetSize,
+      color: markerColor,
+    },
+  }];
 
   const nodeTypes = {
-    custom: MapNode,
+    mapNode: MapNode,
   };
   
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
     [setEdges]
   );
+
+  const onEdgeClick = useCallback((_event: React.MouseEvent, clickedEdge: any) => {
+    setEdges((eds) =>
+      eds.map((edge) => {
+        if (edge.id === clickedEdge.id) {
+          const currentDir = edge.data?.direction || 'both';
+          
+          // Cycle: end → start → both
+          const directionOrder = ['end', 'start', 'both'];
+          const currentIndex = directionOrder.indexOf(currentDir);
+          const nextDir = directionOrder[(currentIndex + 1) % 3];
+          var markerEnd: any | undefined = undefined;
+          var markerStart: any | undefined = undefined;
+         
+          switch(nextDir) {
+            case 'start':
+              markerStart = {
+                type: MarkerType.ArrowClosed,
+                width: targetSize,
+                height: targetSize,
+                color: markerColor,
+              };
+              markerEnd = undefined;
+              break;
+            case 'end':
+              markerStart = undefined;
+              markerEnd = {
+                type: MarkerType.ArrowClosed,
+                width: targetSize,
+                height: targetSize,
+                color: markerColor,
+              };
+              break;
+            case 'both':
+              markerStart = {
+                type: MarkerType.ArrowClosed,
+                width: targetSize,
+                height: targetSize,
+                color: markerColor,
+              };
+              markerEnd = {
+                type: MarkerType.ArrowClosed,
+                width: targetSize,
+                height: targetSize,
+                color: markerColor,
+              };
+              break;
+          }
+
+          console.log(`Edge ${edge.id} direction changed from ${currentDir} to ${nextDir}`);
+
+          return {
+            ...edge,
+            data: { ...edge.data, direction: nextDir },
+            markerStart,
+            markerEnd
+          } as typeof edge;
+        }
+        return edge;
+      })
+    );
+  }, [setEdges]);
 
   const proOptions = { hideAttribution: true };
 
@@ -113,6 +193,7 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onEdgeClick={onEdgeClick}
           
           proOptions={proOptions}
           nodeTypes={nodeTypes}
