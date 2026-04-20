@@ -1,7 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import LocationView from './pages/LocationView';
 
-import '@xyflow/react/dist/style.css';
+//import '@xyflow/react/dist/style.css';
 
 
 function Home() {

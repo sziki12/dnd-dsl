@@ -1,16 +1,17 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useRef, useEffect } from 'react';
 import test_map_image from '../assets/test_map_image.webp';
-import { addEdge, applyEdgeChanges, applyNodeChanges, Background, Panel, ReactFlow, useEdgesState, useNodesState, type Connection, type Edge, type EdgeChange, type Node, type NodeChange } from '@xyflow/react';
+import { addEdge, applyEdgeChanges, applyNodeChanges, Background, MarkerType, Panel, ReactFlow, useEdgesState, useNodesState, type Connection, type Edge, type EdgeChange, type Node, type NodeChange } from '@xyflow/react';
+
+import MapNode from '../nodes/MapNode.js';
 
 const LocationView = () => {
   const [activeTab, setActiveTab] = useState('Variables');
 
   return (
     // 1. Parent Container: use 'flex' and 'flex-col lg:flex-row' for responsiveness
-    <div className="min-h-screen bg-slate-900 text-white p-8 flex flex-col lg:flex-row gap-8">
-      
+    <div className="h-screen w-full bg-slate-900 text-white p-4 flex flex-col lg:flex-row gap-4">
       {/* 2. Left Column: Variables Panel */}
-      <div className="w-full lg:w-1/3 flex flex-col items-center">
+      <div className="flex-1 flex flex-col items-center justify-center min-w-75 max-w-full">
         <h1 className="text-4xl font-bold mb-6">Location View</h1>
         
         {/* Tab Buttons */}
@@ -36,7 +37,7 @@ const LocationView = () => {
       </div>
 
       {/* 3. Right Column: Map Panel */}
-      <div className="w-full lg:w-2/3 flex flex-col items-center">
+      <div className="flex-1 flex flex-col items-center justify-center min-w-75 max-w-full">
         {/* Map/Tree Toggle */}
         <div className="flex gap-2 mb-4 self-center lg:self-end">
           <button className="bg-gray-700 px-3 py-1 rounded text-xs">Map</button>
@@ -44,7 +45,9 @@ const LocationView = () => {
         </div>
 
         {/* Map Image Container */}
-        <MapFlow />
+        <div className="w-full h-[60vw] max-h-[80vh] min-h-75 min-w-75 flex items-center justify-center">
+          <MapFlow />
+        </div>
         
         {/* Location Labels (moved below map) */}
         <div className="mt-4 space-y-1 text-center">
@@ -58,58 +61,93 @@ const LocationView = () => {
 };
 
 const MapFlow = () => {
-  const initialNodes: Node<{ label: string }>[] = [
-    { id: 'n1', position: { x: 0, y: 0 }, data: { label: 'Node 1' } },
-    { id: 'n2', position: { x: 0, y: 50 }, data: { label: 'Node 2' } },
+const containerRef = useRef<HTMLDivElement>(null);
+const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>([[0, 0], [0, 0]]);
+
+  const initialNodes: Node<{ location: string }>[] = [
+    { id: 'n1', position: { x: 0, y: 0 }, data: { location: 'Place 1' }, type: 'custom' },
+    { id: 'n2', position: { x: 0, y: 50 }, data: { location: 'Place 2' }, type: 'custom' },
   ];
   const initialEdges = [{ id: 'n1-n2', source: 'n1', target: 'n2' }];
+
+  const nodeTypes = {
+    custom: MapNode,
+  };
   
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
+  const onConnect = useCallback(
+    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
+    [setEdges]
+  );
+
   const proOptions = { hideAttribution: true };
-  // Define the boundaries of your map frame (e.g., 0 to 800px wide, 0 to 600px high)
-  const mapBounds: [[number, number], [number, number]] = [[0, 0], [400, 400]];
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateBounds = () => {
+      const { width, height } = container.getBoundingClientRect();
+      const newBounds: [[number, number], [number, number]] = [[0, 0], [Math.max(width - 20, 100), Math.max(height - 20, 100) ]];
+      setMapBounds(newBounds);
+    };
+
+    updateBounds();
+
+    const resizeObserver = new ResizeObserver(updateBounds);
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
   return (
-    <div className="border-4" 
-    style={{ width: '800px', height: '800px' }}>  
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        // LOCK THE CANVAS
-        panOnDrag={false}
-        selectionOnDrag={false}
-        zoomOnScroll={false}
-        zoomOnPinch={false}
-        zoomOnDoubleClick={false}
-        preventScrolling={true}
-        // Ensure nodes stay interactive
-        nodesDraggable={true}
-        // This prevents nodes from being dragged outside these coordinates
-        translateExtent={mapBounds}
-        // Recommended: prevent the user from zooming out and seeing the "void"
-        nodeExtent={mapBounds}
-        proOptions={proOptions}
-        fitView
-      >
-        {/* The Image Layer */}
-        <Background 
-          style={{
-          backgroundImage: `url('${test_map_image}')`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          opacity: 0.6,
-        }}
-        // We remove the dots/lines by setting color to transparent
-        color="transparent" 
-      />
-        
-        <Panel position="top-right" className="bg-white p-2 rounded shadow">
-          Canvas Locked | Nodes Draggable
-        </Panel>
+    <div ref={containerRef} className="border-4 w-full aspect-square rounded-lg overflow-hidden bg-slate-800">   
+      {mapBounds[1][0] > 0 && 
+      (
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          
+          proOptions={proOptions}
+          nodeTypes={nodeTypes}
+          // MANUALLY CONTROLLED BOUNDS
+          translateExtent={mapBounds}
+          nodeExtent={mapBounds}
+          // CAMERA DEFAULTS (No fitView)
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          minZoom={1}
+          maxZoom={1}
+          // LOCKING
+          panOnDrag={false}
+          selectionOnDrag={false}
+          zoomOnScroll={false}
+          zoomOnPinch={false}
+          zoomOnDoubleClick={false}
+          preventScrolling={true}
+          nodesDraggable={true}
+          // Styles
+        >
+          {/* The Image Layer */}
+          <Background 
+            style={{
+              backgroundImage: `url('${test_map_image}')`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              opacity: 0.6,
+            }}
+            color="transparent" 
+          />
+          <Panel position="top-right" className="bg-gray-100 p-2 rounded shadow text-black">
+            Canvas Locked | Nodes Draggable
+          </Panel>
       </ReactFlow>
+      )}
     </div>
   );
 };
