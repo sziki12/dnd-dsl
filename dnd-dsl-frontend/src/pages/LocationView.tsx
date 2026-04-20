@@ -1,6 +1,6 @@
 import { useCallback, useState, useRef, useEffect } from 'react';
 import test_map_image from '../assets/test_map_image.webp';
-import { addEdge, Background, MarkerType, Panel, ReactFlow, useEdgesState, useNodesState, type Connection, type Node } from '@xyflow/react';
+import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow, type Connection, type Node } from '@xyflow/react';
 
 import MapNode from '../nodes/MapNode.js';
 
@@ -44,7 +44,9 @@ const LocationView = () => {
 
         {/* Map Image Container */}
         <div className="w-full h-[60vw] max-h-[80vh] min-h-75 min-w-75 flex items-center justify-center">
-          <MapFlow />
+          <ReactFlowProvider>
+            <MapFlow />
+          </ReactFlowProvider>
         </div>
         
         {/* Location Labels (moved below map) */}
@@ -91,13 +93,65 @@ const markerColor = '#000000';
   const nodeTypes = {
     mapNode: MapNode,
   };
+
+  let id = 1;
+  const getId = () => `${id++}`;
+  const nodeOrigin: [number, number] = [0.5, 0];
+
+  //TODO const reactFlowWrapper = useRef(null);
   
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-
+  const { screenToFlowPosition } = useReactFlow();
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
     [setEdges]
+  );
+
+  const onConnectEnd = useCallback(
+    (event: any, connectionState: any) => {
+      // when a connection is dropped on the pane it's not valid
+      if (!connectionState.isValid) {
+        // we need to remove the wrapper bounds, in order to get the correct position
+        const id = getId();
+        const { clientX, clientY } =
+          'changedTouches' in event ? event.changedTouches[0] : event;
+        const newNode = {
+          id,
+          position: screenToFlowPosition({
+            x: clientX,
+            y: clientY,
+          }),
+          data: { location: `Node ${id}` },
+          origin: [0.5, 0] as [number, number],
+        };
+ 
+        setNodes((nds) => nds.concat(newNode));
+        setEdges((eds) =>
+          eds.concat({
+            id,
+            source: connectionState.fromNode.id,
+            target: id,
+            label: 'Transition',
+            data: { direction: 'both' },
+            type: 'straight',
+            markerStart: {
+              type: MarkerType.ArrowClosed,
+              width: targetSize,
+              height: targetSize,
+              color: markerColor,
+            },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              width: targetSize,
+              height: targetSize,
+              color: markerColor,
+            },
+          }),
+        );
+      }
+    },
+    [screenToFlowPosition],
   );
 
   const onEdgeClick = useCallback((_event: React.MouseEvent, clickedEdge: any) => {
@@ -193,7 +247,9 @@ const markerColor = '#000000';
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
           onEdgeClick={onEdgeClick}
+          nodeOrigin={nodeOrigin}
           
           proOptions={proOptions}
           nodeTypes={nodeTypes}
