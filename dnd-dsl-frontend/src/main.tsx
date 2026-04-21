@@ -7,7 +7,7 @@ import '@xyflow/react/dist/style.css';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
+  //<StrictMode>
     <App />
-  </StrictMode>,
+  //</StrictMode>,
 )

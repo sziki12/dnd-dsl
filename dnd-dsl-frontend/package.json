@@ -10,6 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codingame/monaco-vscode-api": "25.1.2",
+    "@codingame/monaco-vscode-configuration-service-override": "25.1.2",
+    "@codingame/monaco-vscode-keybindings-service-override": "25.1.2",
+    "@codingame/monaco-vscode-textmate-service-override": "25.1.2",
+    "@codingame/monaco-vscode-theme-service-override": "25.1.2",
+    "monaco-languageclient": "10.7.0",
+    "vscode": "npm:@codingame/monaco-vscode-api@25.1.2",
     "@tailwindcss/postcss": "^4.2.2",
     "@tailwindcss/vite": "^4.2.2",
     "@xyflow/react": "^12.10.2",

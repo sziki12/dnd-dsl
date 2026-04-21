@@ -64,8 +64,8 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
 const targetSize = 50;
 const markerColor = '#000000';
   const initialNodes: Node<{ location: string }>[] = [
-    { id: 'n1', position: { x: 0, y: 0 }, data: { location: 'Place 1' }, type: 'mapNode' },
-    { id: 'n2', position: { x: 0, y: 50 }, data: { location: 'Place 2' }, type: 'mapNode' },
+    { id: 'n1', position: { x: 50, y: 50 }, data: { location: 'Place 1' }, type: 'mapNode' },
+    { id: 'n2', position: { x: 100, y: 100 }, data: { location: 'Place 2' }, type: 'mapNode' },
   ];
   const initialEdges = [{
     id: 'n1-n2',

@@ -1,5 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import LocationView from './pages/LocationView';
+import { DslEditor } from './pages/DslEditor';
+import { ContextWrapper } from './contexts/ContextWrapper';
 
 //import '@xyflow/react/dist/style.css';
 
@@ -18,14 +20,17 @@ function Contact() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="/location" element={<LocationView />} />
-      </Routes>
-    </BrowserRouter>
+    <ContextWrapper>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/location" element={<LocationView />} />
+          <Route path="/editor" element={<DslEditor />} />
+        </Routes>
+      </BrowserRouter>
+    </ContextWrapper>
   );
 }
 
