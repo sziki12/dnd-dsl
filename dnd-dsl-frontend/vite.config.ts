@@ -80,35 +80,22 @@ export default defineConfig({
       server.middlewares.use((req, res, next) => {
         const url = req.url || '';
 
-        // 1. Target the Language Client
         if (url.includes('vscode-languageclient/lib/browser/main.js')) {
-          const pkgPath = path.resolve(__dirname, 'node_modules/.vite/deps/vscode-languageclient_browser.js');
-          return serveOptimizedFile(res, pkgPath);
+            res.statusCode = 307;
+            res.setHeader('Location', '/node_modules/.vite/deps/vscode-languageclient_browser.js');
+            console.error(`[Vite Hijack] Missing optimized file: /node_modules/.vite/deps/vscode-languageclient_browser.js`);
+            res.end();
+            return;
         }
-
-        // 2. Target JSON-RPC - We'll try the most likely Vite-generated filenames
         if (url.includes('vscode-jsonrpc/lib/browser/main.js')) {
-          const possiblePaths = [
-            path.resolve(__dirname, 'node_modules/.vite/deps/vscode-jsonrpc.js'),
-            path.resolve(__dirname, 'node_modules/.vite/deps/vscode-languageserver-protocol.js'), // Sometimes bundled together
-            path.resolve(__dirname, 'node_modules/.vite/deps/vscode-jsonrpc_lib_browser_main_js.js')
-          ];
-          
-          for (const p of possiblePaths) {
-            if (fs.existsSync(p)) return serveOptimizedFile(res, p);
-          }
+            res.statusCode = 307;
+            res.setHeader('Location', '/node_modules/.vite/deps/vscode-jsonrpc.js');
+            console.error(`[Vite Hijack] Missing optimized file: /node_modules/.vite/deps/vscode-jsonrpc.js`);
+            res.end();
+            return;
         }
-
         next();
       });
-
-      function serveOptimizedFile(res: any, filePath: string) {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        res.setHeader('Content-Type', 'application/javascript');
-        res.setHeader('X-Vite-Hijack', 'true'); 
-        res.end(content);
-        return;
-      }
     }
   }
   ],
