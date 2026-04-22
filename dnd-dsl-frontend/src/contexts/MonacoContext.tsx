@@ -1,36 +1,47 @@
-import { createContext, useEffect, useState } from 'react';
+import { createContext, useRef } from 'react';
 import { EditorApp, type EditorAppConfig } from 'monaco-languageclient/editorApp';
-import { getMonacoInit } from '../MonacoInit';
+import { FILE_URI, getMonacoInit } from '../MonacoInit';
 
 export const MonacoContext = createContext<any>(null);
 
-const editorAppConfig: /*EditorAppConfig*/ any = {
+console.log(FILE_URI);
+const editorAppConfig: EditorAppConfig = {
     codeResources: {
         original: {
             text: '// initial editor content',
-            uri: '/workspace/hello.mylang'
+            uri: FILE_URI.toString()
         }
     }
 };
 
 export function MonacoContextNode({ children }: { children: React.ReactNode }) {
-    const [editorApp, setEditorApp] = useState</*EditorApp*/ any | null>(null);
-
-    useEffect(() => {
-        // Kick off init — safe to call multiple times, returns same promise
-        getMonacoInit().catch(console.error);
-    }, []);
+    // useRef instead of useState — survives re-renders without stale closures,
+    // and mutations don't trigger re-renders
+    const editorAppRef = useRef<EditorApp | null>(null);
 
     const startEditor = async (element: HTMLDivElement) => {
-        // Wait for API to be ready before mounting editor
-        await getMonacoInit();
-        const app = editorApp ?? new EditorApp(editorAppConfig);
-        if (!editorApp) setEditorApp(app);
+        await getMonacoInit()
+        .then(() => console.log('MonacoContext: init complete'))
+        .catch((e: any) => console.error('MonacoContext: init failed', e));
+
+        // If a disposed or stale instance exists, always create a fresh one
+        if (editorAppRef.current) {
+            await editorAppRef.current.dispose().catch(() => {});
+            editorAppRef.current = null;
+        }
+
+        const app = new EditorApp(editorAppConfig);
+        editorAppRef.current = app;
         await app.start(element);
+        console.log('Editor started');
     };
 
     const disposeEditor = async () => {
-        await editorApp?.dispose();
+        if (editorAppRef.current) {
+            await editorAppRef.current.dispose();
+            editorAppRef.current = null; // ← clear ref so next startEditor creates fresh
+            console.log('Editor disposed');
+        }
     };
 
     return (

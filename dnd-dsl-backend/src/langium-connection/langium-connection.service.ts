@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { WebSocketGateway, OnGatewayConnection } from '@nestjs/websockets';
 import { WebSocket } from 'ws';
-import { createConnection, MessageReader, MessageWriter } from 'vscode-languageserver';
+import { createConnection, InitializeParams, Message, MessageReader, MessageWriter, WorkspaceFolder, Disposable  } from 'vscode-languageserver';
 import { createDndDslServices } from '../dnd-language/language/src/dnd-dsl-module.js';
 // Import your generated Langium module
 import { IWebSocket, WebSocketMessageReader, WebSocketMessageWriter } from 'vscode-ws-jsonrpc/socket';
@@ -10,28 +10,45 @@ import { startLanguageServer } from 'langium/lsp';
 
 @WebSocketGateway({ path: '/ls', cors: { origin: '*' } })
 export class LangiumConnectionGateway implements OnGatewayConnection {
-  handleConnection(client: WebSocket) {
-    // 1. Create Reader/Writer
-    
-    const reader = new WebSocketMessageReader(new WebSocketWrapper(client));
-    const writer = new WebSocketMessageWriter(new WebSocketWrapper(client));
+  async handleConnection(client: WebSocket) {
+    try {
+      const reader = new WebSocketMessageReader(new WebSocketWrapper(client));
+      const writer = new WebSocketMessageWriter(new WebSocketWrapper(client));
 
-    // 2. Fix the 'createConnection' error by using 'any' for the arguments
-    // This forces TS to pick the (reader, writer) overload
-    const connection = createConnection(reader as any, writer as any);
+      const originalListen = reader.listen.bind(reader);
+      reader.listen = (callback): Disposable => {
+        return originalListen((msg: Message) => {
+          if (Message.isRequest(msg) && msg.method === 'initialize') {
+            const params = msg.params as InitializeParams;
+            if (params.workspaceFolders) {
+              params.workspaceFolders = params.workspaceFolders.map(f => ({
+                ...f,
+                uri: decodeURIComponent(f.uri)
+              }));
+            }
+          }
+          try {
+            callback(msg);
+          } catch (e) {
+            console.error('[LSP] Error processing message:', e);
+          }
+        });
+      };
 
-    // 3. Merge everything into the Service Context
-    // We combine the NodeFileSystem implementation with our active connection
-    const services = createDndDslServices({
-      ...NodeFileSystem,
-      connection: connection
-    });
+      const connection = createConnection(reader as any, writer as any);
 
-    // 4. Start the server using ONLY the shared services
-    // The connection is already registered inside 'services' now
-    startLanguageServer(services.shared);
+      connection.onExit(() => console.log('[LSP] Connection closed'));
 
-    console.log('D&D Language Server is live.');
+      const services = createDndDslServices({
+        ...NodeFileSystem,
+        connection: connection
+      });
+
+      startLanguageServer(services.shared);
+      console.log('D&D Language Server is live.');
+    } catch (e) {
+      console.error('[LSP] Gateway handleConnection failed:', e);
+    }
   }
 }
 
