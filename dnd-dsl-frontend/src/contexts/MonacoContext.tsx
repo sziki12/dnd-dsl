@@ -8,11 +8,11 @@ const FILE_URI_STRING = toMonacoUri(`${FILE_URI.fsPath}`);
 
 const editorAppConfig: EditorAppConfig = {
     codeResources: {
-        original: {
+        /*original: {
             text: '// initial editor content',
             uri: FILE_URI_STRING,
             enforceLanguageId: 'dnd-dsl',
-        },
+        },*/
         modified: {
             text: '// modified editor content',
             uri: "file:///modified_file.dnd",

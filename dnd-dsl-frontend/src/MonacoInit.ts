@@ -8,6 +8,7 @@ import getTextmateServiceOverride from '@codingame/monaco-vscode-textmate-servic
 import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-override';
 import { BaseLanguageClient } from 'vscode-languageclient';
 import { Uri } from 'vscode';
+import tmGrammarUrl from './dnd-language/extension/syntaxes/dnd-dsl.tmLanguage.json?url';
 
 export function toMonacoUri(path: string): string {
     return 'file:///' + path
@@ -71,11 +72,16 @@ const vscodeApiConfig: MonacoVscodeApiConfig = {
                 grammars: [{
                 language: 'dnd-dsl',
                 scopeName: 'source.dnd-dsl',
-                path: './dnd-language/extension/syntaxes/dnd-dsl.tmLanguage.json'
+                path: './syntaxes/dnd-dsl.tmLanguage.json'
                 }]
             }
         },
-        //uri: `${window.location.origin}/extensions/dnd-dsl`
+        filesOrContents: new Map([
+        [
+            './syntaxes/dnd-dsl.tmLanguage.json',
+            new URL(tmGrammarUrl, window.location.origin)
+        ]
+        ])
     }],
     monacoWorkerFactory: configureDefaultWorkerFactory
 };
@@ -97,14 +103,14 @@ const languageClientConfig: LanguageClientConfig = {
     },
     clientOptions: {
         documentSelector: ['dnd-dsl'],
-        workspaceFolder: {
+        /*workspaceFolder: {
             index: 0,
             name: 'workspace',
             uri: Uri.parse(WORKSPACE_URI_STRING)
         },
         initializationOptions: {
             workspaceUri: WORKSPACE_URI_STRING
-        }
+        }*/
     },
 };
 
