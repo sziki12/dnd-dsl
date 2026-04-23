@@ -38,6 +38,8 @@ export class LangiumConnectionGateway implements OnGatewayConnection {
       const connection = createConnection(reader as any, writer as any);
 
       connection.onExit(() => console.log('[LSP] Connection closed'));
+      client.onmessage = (m) => console.log('LSP Message:', m.data);
+      client.onerror = (e) => console.log('LSP Error:', e);
 
       const services = createDndDslServices({
         ...NodeFileSystem,
@@ -45,6 +47,7 @@ export class LangiumConnectionGateway implements OnGatewayConnection {
       });
 
       startLanguageServer(services.shared);
+
       console.log('D&D Language Server is live.');
     } catch (e) {
       console.error('[LSP] Gateway handleConnection failed:', e);

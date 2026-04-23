@@ -9,11 +9,17 @@ import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-over
 import { BaseLanguageClient } from 'vscode-languageclient';
 import { Uri } from 'vscode';
 
-
+export function toMonacoUri(path: string): string {
+    return 'file:///' + path
+        .replace(/\\/g, '/')           // backslashes to forward slashes
+        .replace(/ /g, '%20');          // encode spaces only
+}
 
 const BACKEND_PATH = 'C:/Users/Szikszai Levente/Documents/GitHub/dnd-dsl/dnd-dsl-backend';
 const WORKSPACE_URI = Uri.file(BACKEND_PATH);
 export const FILE_URI = Uri.file(`${BACKEND_PATH}/test_file.dnd`);
+
+const WORKSPACE_URI_STRING = toMonacoUri(BACKEND_PATH);
 
 const vscodeApiConfig: MonacoVscodeApiConfig = {
     $type: 'extended',
@@ -65,7 +71,7 @@ const vscodeApiConfig: MonacoVscodeApiConfig = {
                 grammars: [{
                 language: 'dnd-dsl',
                 scopeName: 'source.dnd-dsl',
-                path: '../dnd-language/extension/syntaxes/dnd-dsl.tmLanguage.json'
+                path: './dnd-language/extension/syntaxes/dnd-dsl.tmLanguage.json'
                 }]
             }
         },
@@ -74,6 +80,7 @@ const vscodeApiConfig: MonacoVscodeApiConfig = {
     monacoWorkerFactory: configureDefaultWorkerFactory
 };
 
+console.log("WORKSPACE_URI_STRING", Uri.parse(WORKSPACE_URI_STRING).toString());
 const languageClientConfig: LanguageClientConfig = {
     languageId: 'dnd-dsl',
     connection: {
@@ -93,8 +100,11 @@ const languageClientConfig: LanguageClientConfig = {
         workspaceFolder: {
             index: 0,
             name: 'workspace',
-            uri: WORKSPACE_URI
+            uri: Uri.parse(WORKSPACE_URI_STRING)
         },
+        initializationOptions: {
+            workspaceUri: WORKSPACE_URI_STRING
+        }
     },
 };
 

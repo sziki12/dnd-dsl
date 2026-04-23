@@ -13,7 +13,7 @@ export const DslEditor = () => {
     return () => {
         monacoContext.disposeEditor();
     }
-  }, [containerRef.current]);
+  }, []);
 
   return <div ref={containerRef} style={{ height: '500px' }} />;
 };
