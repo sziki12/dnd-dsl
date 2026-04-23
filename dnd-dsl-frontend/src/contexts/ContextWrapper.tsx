@@ -1,10 +1,14 @@
+import { EditorContextNode } from "./EditorContext";
 import { MonacoContextNode } from "./MonacoContext";
 
 export function ContextWrapper({ children }: { children: React.ReactNode }) {
 
     return (
-        <MonacoContextNode>
-            {children}
-        </MonacoContextNode>
+        <EditorContextNode>
+            <MonacoContextNode>
+                {children}
+            </MonacoContextNode>
+        </EditorContextNode>
+        
     );
 }

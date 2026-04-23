@@ -5,6 +5,7 @@ import { pathToFileURL } from 'url';
 import { Model } from '@dnd-language/index.js';
 import { parseModel, stringifyModel } from '@dnd-cli/main.js';
 import { LangiumInterpreterService } from './langium-interpreter/langium-interpreter.service.js';
+import { ConfigurationService } from './configuration/configuration.service.js';
 
 @Controller()
 export class AppController {
@@ -12,7 +13,10 @@ export class AppController {
     private readonly appService: AppService,
     private readonly parserService: LangiumParserService,
     private readonly interpreterService: LangiumInterpreterService,
-  ) {}
+    private readonly configurationService: ConfigurationService,
+  ) {
+      configurationService.readConfig()
+  }
 
   private worldState : any = {};
   private model : Model | undefined = undefined;

@@ -1,42 +1,46 @@
-import { createContext, useRef } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { EditorApp, type EditorAppConfig } from 'monaco-languageclient/editorApp';
 import { FILE_URI, getMonacoInit, toMonacoUri } from '../MonacoInit';
+import { EditorContext } from '../contexts/EditorContext';
 
 export const MonacoContext = createContext<any>(null);
 
-const FILE_URI_STRING = toMonacoUri(`${FILE_URI.fsPath}`);
-
-const editorAppConfig: EditorAppConfig = {
-    codeResources: {
-        /*original: {
-            text: '// initial editor content',
-            uri: FILE_URI_STRING,
-            enforceLanguageId: 'dnd-dsl',
-        },*/
-        modified: {
-            text: '// modified editor content',
-            uri: "file:///modified_file.dnd",
-            enforceLanguageId: 'dnd-dsl',
-        },
-    },
-     // Register the language with Monaco so enforceLanguageId is recognized
-    languageDef: {
-        languageExtensionConfig: {
-            id: 'dnd-dsl',
-            extensions: ['.dnd'],
-            aliases: ['DnD DSL', 'dnd-dsl'],
-            mimetypes: ['text/x-dnd-dsl']
-        }
-        // No monarchLanguage needed yet — LSP will provide semantic tokens
-        // Add a monarchLanguage here later for basic syntax highlighting
-        // without LSP, or use a TextMate grammar via vscodeApiConfig.extensions
-    }
-};
-
 export function MonacoContextNode({ children }: { children: React.ReactNode }) {
-    // useRef instead of useState — survives re-renders without stale closures,
-    // and mutations don't trigger re-renders
     const editorAppRef = useRef<EditorApp | null>(null);
+    const editorContext = useContext(EditorContext);
+
+    const getEditorConfig = (content: string) =>
+    {
+        const editorAppConfig: EditorAppConfig = {
+            codeResources: {
+                /*original: {
+                    text: '// initial editor content',
+                    uri: FILE_URI_STRING,
+                    enforceLanguageId: 'dnd-dsl',
+                },*/
+                modified: {
+                    text: content,
+                    uri: "file:///modified_file.dnd",
+                    enforceLanguageId: 'dnd-dsl',
+                },
+            },
+            // Register the language with Monaco so enforceLanguageId is recognized
+            languageDef: {
+                languageExtensionConfig: {
+                    id: 'dnd-dsl',
+                    extensions: ['.dnd'],
+                    aliases: ['DnD DSL', 'dnd-dsl'],
+                    mimetypes: ['text/x-dnd-dsl']
+                }
+                // No monarchLanguage needed yet — LSP will provide semantic tokens
+                // Add a monarchLanguage here later for basic syntax highlighting
+                // without LSP, or use a TextMate grammar via vscodeApiConfig.extensions
+            }
+        }
+        return editorAppConfig
+    }
+
+    let editorAppConfig = getEditorConfig("//Initial content")
 
     const startEditor = async (element: HTMLDivElement) => {
         await getMonacoInit()
@@ -48,14 +52,8 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
             await editorAppRef.current.dispose().catch(() => {});
             editorAppRef.current = null;
         }
-
-        console.log('FILE_URI_STRING:', FILE_URI_STRING.toString());
-        console.log('editorAppConfig:', JSON.stringify({
-            ...editorAppConfig,
-            codeResources: editorAppConfig.codeResources
-        }, null, 2));
-
         const app = new EditorApp(editorAppConfig);
+
         editorAppRef.current = app;
         await app.start(element);
 
@@ -71,8 +69,26 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         }
     };
 
+    const saveFile = async () => {
+        const content = editorAppRef.current?.getEditor()?.getModel()?.getValue();
+        if (!content) return;
+
+        await editorContext?.saveFile({name: "", content: content})
+        console.log('File saved');
+    };
+
+    useEffect(()=>{
+        if(!editorContext.loaded)
+            return
+
+        editorContext.loadFile("").then(file => {
+            editorAppRef.current?.updateCode({modified:file.content})
+            editorAppConfig = getEditorConfig(file.content)
+        });
+    },[editorContext.loaded])
+
     return (
-        <MonacoContext.Provider value={{ startEditor, disposeEditor }}>
+        <MonacoContext.Provider value={{ startEditor, disposeEditor, saveFile }}>
             {children}
         </MonacoContext.Provider>
     );
