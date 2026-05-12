@@ -1,7 +1,7 @@
 import { useCallback, useState, useRef, useEffect, useContext } from 'react';
 import test_map_image from '../assets/test_map_image.webp';
 import { addEdge, Background, MarkerType, Panel, ReactFlow, useEdgesState, useNodesState, type Connection, type Node } from '@xyflow/react';
-import {World, Location, type VariableDeclaration, Model} from "@dnd-language/generated/ast.js"
+import type { SerializedModel, SerializedLocation, SerializedVariableDecl } from '../common/model-types';
 
 import MapNode from '../nodes/MapNode.js';
 import { useParams } from 'react-router-dom';
@@ -11,7 +11,7 @@ const LocationView = () => {
   let {locationName} = useParams()
   let {worldState} = useContext(DslContext)
   
-  let [locationData, setLocationData] = useState<Location>({variables: []} as unknown as Location)
+  let [locationData, setLocationData] = useState<SerializedLocation | undefined>(undefined)
 
   useEffect(()=>{
 
@@ -37,7 +37,7 @@ const LocationView = () => {
         <div className="text-center space-y-2 text-gray-300">
           <p className="text-sm font-semibold text-gray-400">Variables</p>
           {
-            locationData.variables.map((variable: VariableDeclaration)  => {
+            locationData?.variables.map((variable: SerializedVariableDecl)  => {
               return (<p>{variable.target} = {"Undefined"}</p>)
             })
           }
@@ -246,15 +246,11 @@ const markerColor = '#000000';
   );
 };
 
-const getLocationData = (worldState: Model, locationName: string) => 
+const getLocationData = (worldState: SerializedModel | undefined, locationName: string) =>
 {
-  if(typeof(worldState) == "undefined" || typeof(worldState.World) == "undefined")
+  if(worldState?.World == undefined)
     return undefined
-  console.log("worldState")
-  console.log(worldState)
-  const locations: Location[] | undefined = worldState.World.locations
-  
-  return locations.find(location => location.name == locationName)
+  return worldState.World.locations.find(location => location.name == locationName)
 }
 
 export default LocationView;

@@ -1,13 +1,13 @@
 import { createContext, useEffect, useState } from 'react';
 import { BackendURL } from './BackendContext';
-
+import type { SerializedModel } from '../common/model-types';
 
 type DslContext = {
     world: string,
     updateWorld: (newWorld: string) => Promise<void>,
     adventure: string,
     updateAdventure: (newAdventure: string) => Promise<void>,
-    worldState: any,
+    worldState: SerializedModel | undefined,
     updateWorldState: () => Promise<void>,
 }
 
@@ -16,7 +16,7 @@ export const DslContext = createContext<DslContext>({} as DslContext);
 export function DslContextNode({ children }: { children: React.ReactNode }) {
     const [world, setWorld] = useState("World")
     const [adventure, setAdventure] = useState("Adventure")
-    const [worldState, setWorldState] = useState({})
+    const [worldState, setWorldState] = useState<SerializedModel | undefined>(undefined)
 
     const stateEndpoint = `${BackendURL}/state`
     const parseWorldState = async () =>
