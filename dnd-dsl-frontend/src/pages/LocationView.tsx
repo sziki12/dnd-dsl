@@ -1,7 +1,7 @@
 import { useCallback, useState, useRef, useEffect, useContext } from 'react';
 import test_map_image from '../assets/test_map_image.webp';
 
-import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Node } from '@xyflow/react';
+import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Edge, type Node } from '@xyflow/react';
 import type { SerializedModel, SerializedLocation, SerializedVariableDecl, SerializedLocationExit } from '../common/model-types';
 import { evaluateExpression, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
 import Button from '@mui/material/Button';
@@ -142,14 +142,8 @@ const LocationView = () => {
         {/* Map Image Container */}
         <div className="w-full h-[60vw] max-h-[80vh] min-h-75 min-w-75 flex items-center justify-center">
           <ReactFlowProvider>
-            <MapFlow exits={locationData?.exits || []} />
+            <MapFlow location={locationData} />
           </ReactFlowProvider>
-        </div>
-        
-        {/* Location Labels (moved below map) */}
-        <div className="mt-4 space-y-1 text-center">
-          <p className="text-gray-400">Sub location 1</p>
-          <p className="text-gray-400">Sub location 2</p>
         </div>
       </div>
 
@@ -157,40 +151,12 @@ const LocationView = () => {
   );
 };
 
-const MapFlow = ({exits}: { exits: SerializedLocationExit[] }) => {
+const MapFlow = ({location}: { location: SerializedLocation | undefined }) => {
 const containerRef = useRef<HTMLDivElement>(null);
+let { getByReference } = useContext(DslContext)
 const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>([[0, 0], [0, 0]]);
 const targetSize = 50;
 const markerColor = '#000000';
-const initialNodes: Node<{ location: string }>[] = (exits.length > 0 ? exits.map((exit, index) => ({
-    id: exit.name,
-    position: { x: 50 + index * 50, y: 50 + index * 50 },
-    data: { location: exit.exit.$ref },
-    type: 'mapNode'
-})) : [
-    { id: 'n1', position: { x: 50, y: 50 }, data: { location: 'Place 1' }, type: 'mapNode' },
-    { id: 'n2', position: { x: 100, y: 100 }, data: { location: 'Place 2' }, type: 'mapNode' },
-  ]);
-const initialEdges = [{
-    id: 'n1-n2',
-    source: 'n1',
-    target: 'n2',
-    label: 'Transition Name',
-    data: { direction: 'both' },
-    type: 'floating',
-    markerStart: {
-      type: MarkerType.ArrowClosed,
-      width: targetSize,
-      height: targetSize,
-      color: markerColor,
-    },
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      width: targetSize,
-      height: targetSize,
-      color: markerColor,
-    },
-  }];
 
   const nodeTypes = {
     mapNode: MapNode,
@@ -202,8 +168,8 @@ const initialEdges = [{
 
   const nodeOrigin: [number, number] = [0.5, 0];
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([] as Edge[]);
 
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
@@ -219,7 +185,7 @@ const initialEdges = [{
           
           // Cycle: end → start → both
           const directionOrder = ['end', 'start', 'both'];
-          const currentIndex = directionOrder.indexOf(currentDir);
+          const currentIndex = directionOrder.indexOf(currentDir as string);
           const nextDir = directionOrder[(currentIndex + 1) % 3];
           var markerEnd: any | undefined = undefined;
           var markerStart: any | undefined = undefined;
@@ -293,6 +259,15 @@ const initialEdges = [{
     return () => resizeObserver.disconnect();
   }, []);
 
+  useEffect(() => {
+    if(typeof(location) == "undefined")
+      return;
+
+    const graph = buildGraphFromLocation(location, getByReference) || buildDefaultGraph()
+    setNodes(graph.nodes);
+    setEdges(graph.edges);
+  }, [location]);
+
   return (
     <div ref={containerRef} className="border-4 w-full aspect-square rounded-lg overflow-hidden bg-slate-800">   
       {mapBounds[1][0] > 0 && 
@@ -346,6 +321,116 @@ const initialEdges = [{
     </div>
   );
 };
+
+function buildGraphFromLocation(location: SerializedLocation, getByReference: <T extends object>(ref: string | undefined) => T | undefined) {
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+  const knownIds = new Set(location.sublocations.map(s => s.name));
+
+  //Create current location node
+  nodes.push({
+          id: location.name,
+          type: 'mapNode',
+          position: { x: 0, y: 0 },
+          data: {
+            location: location.name,
+            type: 'group',
+          },
+        });
+
+  for (const exit of location.exits ?? []) {
+    console.log(`exit.exit?.$ref ${exit.exit?.$ref}`);
+    const targetName = getByReference<SerializedLocation>(exit.exit?.$ref)?.name ?? 'Unknown';
+    console.log(`Processing exit ${exit.name} from ${location.name} to target ${targetName}`);
+    // Add external target
+    if (!knownIds.has(targetName)) {
+      knownIds.add(targetName);
+      nodes.push({
+        id: targetName,
+        type: 'mapNode',
+        position: { x: 0, y: 0 },
+        data: {
+          location: targetName,
+        },
+      });
+    }
+  }
+
+  for (const sub of location.sublocations) {
+    nodes.push({
+      id: sub.name,
+      type: 'mapNode',
+      position: { x: 0, y: 0 }, // laid out by auto-layout
+      data: {
+        location: sub.name,
+        isEntry: getByReference<SerializedLocation>(location.entry?.entry.$ref)?.name === sub.name,
+      },
+      parentId: location.name,
+    });
+
+    for (const exit of sub.exits ?? []) {
+      console.log(`sub -> exit.exit?.$ref ${exit.exit?.$ref}`);
+      const targetName = getByReference<SerializedLocation>(exit.exit?.$ref)?.name ?? 'Unknown';
+      console.log(`Processing exit ${exit.name} from ${sub.name} to target ${targetName}`);
+      // Add placeholder node for external targets
+      if (!knownIds.has(targetName)) {
+        knownIds.add(targetName);
+        nodes.push({
+          id: targetName,
+          type: 'mapNode',
+          position: { x: 0, y: 0 },
+          data: {
+            location: targetName,
+            isEntry: getByReference<SerializedLocation>(location.entry?.entry.$ref)?.name === targetName,
+          },
+        });
+      }
+
+      edges.push({
+        id: `${sub.name}->${targetName}-${exit.name}`,
+        source: sub.name,
+        target: targetName,
+        label: exit.name,
+        type: 'floating',
+        data: { identifiers: exit.identifiers },
+        markerEnd: { type: MarkerType.ArrowClosed },
+      });
+    }
+  }
+  console.log(location);
+  console.log(`Processed location ${location.name} with ${location.sublocations.length} sublocations`);
+  console.log(`Built graph with ${nodes.length} nodes and ${edges.length} edges from location ${location.name}`);
+  return { nodes, edges };
+}
+
+function buildDefaultGraph() {
+  const defaultNodes: Node<{ location: string }>[] = [
+    { id: 'n1', position: { x: 50, y: 50 }, data: { location: 'Place 1' }, type: 'mapNode' },
+    { id: 'n2', position: { x: 100, y: 100 }, data: { location: 'Place 2' }, type: 'mapNode' },
+  ];
+const defaultEdges = [{
+    id: 'n1-n2',
+    source: 'n1',
+    target: 'n2',
+    label: 'Transition Name',
+    data: { direction: 'both' },
+    type: 'floating',
+    markerStart: {
+      type: MarkerType.ArrowClosed,
+      //width: targetSize,
+      //height: targetSize,
+      //color: markerColor,
+    },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      //width: targetSize,
+      //height: targetSize,
+      //color: markerColor,
+    },
+  }];
+
+  return { nodes: defaultNodes, edges: defaultEdges };
+}
 
 const getLocationData = (worldState: SerializedModel | undefined, locationName: string) =>
 {

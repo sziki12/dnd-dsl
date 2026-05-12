@@ -1,6 +1,6 @@
 import { createContext, useEffect, useState } from 'react';
 import { BackendURL } from './BackendContext';
-import type { SerializedModel } from '../common/model-types';
+import type { SerializedModel, SerializedWorld } from '../common/model-types';
 
 type DslContext = {
     world: string,
@@ -9,6 +9,7 @@ type DslContext = {
     updateAdventure: (newAdventure: string) => Promise<void>,
     worldState: SerializedModel | undefined,
     updateWorldState: () => Promise<void>,
+    getByReference<T extends object>(ref: string | undefined): T | undefined
 }
 
 export const DslContext = createContext<DslContext>({} as DslContext);
@@ -55,6 +56,37 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
         setAdventure(newAdventure)
     }
 
+    const getByReference = <T extends object>(ref: string | undefined): T | undefined => {
+        if (!worldState || !ref) return undefined;
+
+        var referencePath = ref.split("#/World/")[1].split("/");
+        if(referencePath.length == 0)            
+            return undefined;
+        var current : any = worldState.World;
+        for(let i = 0; i < referencePath.length; i++){
+            var part = referencePath[i];
+            console.log(`Resolving part: ${part}`);
+            
+
+            if(part.includes("@")){
+                var [arrayName, id] = part.split("@");
+                if(current[arrayName] === undefined || !Array.isArray(current[arrayName]))
+                    return undefined;
+
+                current = current[arrayName][id];
+                if(current === undefined)
+                    return undefined;
+            }
+            else if(current[part] === undefined) {
+                return undefined;
+            }
+            else{
+                current = current[part];
+            }
+        }
+        return current;
+    }
+
     useEffect(()=>{
         if(typeof(world) == "undefined" || typeof(adventure) == "undefined")
             return
@@ -62,7 +94,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     },[world, adventure])
 
     return (
-        <DslContext.Provider value={{ world, updateWorld, adventure, updateAdventure, worldState, updateWorldState }}>
+        <DslContext.Provider value={{ world, updateWorld, adventure, updateAdventure, worldState, updateWorldState, getByReference }}>
             {children}
         </DslContext.Provider>
     );
