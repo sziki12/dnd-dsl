@@ -3,7 +3,7 @@ import { BackendURL } from './BackendContext';
 
 type EditorContext = {
     loadFile: (adventure: string, world: string) => Promise<FileDto>,
-    saveFile: (file: FileDto) => any,
+    saveFile: (file: FileDto) => Promise<void>,
     loaded: boolean
 }
 export const EditorContext = createContext<EditorContext>({loaded: false} as EditorContext);

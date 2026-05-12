@@ -4,7 +4,13 @@ import { FILE_URI, getMonacoInit, toMonacoUri } from '../MonacoInit';
 import { EditorContext } from '../contexts/EditorContext';
 import { DslContext } from './DslContext';
 
-export const MonacoContext = createContext<any>(null);
+type MonacoContext = {
+    startEditor: (element: HTMLDivElement) => Promise<void>,
+    disposeEditor: () => Promise<void>,
+    saveFile: () => Promise<void>,
+}
+
+export const MonacoContext = createContext<MonacoContext>({} as MonacoContext);
 
 export function MonacoContextNode({ children }: { children: React.ReactNode }) {
     const editorAppRef = useRef<EditorApp | null>(null);

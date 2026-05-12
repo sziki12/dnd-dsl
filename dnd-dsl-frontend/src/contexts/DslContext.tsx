@@ -1,7 +1,17 @@
 import { createContext, useEffect, useState } from 'react';
 import { BackendURL } from './BackendContext';
 
-export const DslContext = createContext<any>(null);
+
+type DslContext = {
+    world: string,
+    updateWorld: (newWorld: string) => Promise<void>,
+    adventure: string,
+    updateAdventure: (newAdventure: string) => Promise<void>,
+    worldState: any,
+    updateWorldState: () => Promise<void>,
+}
+
+export const DslContext = createContext<DslContext>({} as DslContext);
 
 export function DslContextNode({ children }: { children: React.ReactNode }) {
     const [world, setWorld] = useState("World")

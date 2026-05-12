@@ -18,14 +18,15 @@ export const DslEditor = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.ctrlKey && e.key === 's') {
             e.preventDefault();
+            e.stopPropagation();
             console.log('Ctrl+S pressed, saving file...');
             monacoContext.saveFile();
         }
     };
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
 
     return () => {
-        window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keydown', handleKeyDown, true);
         monacoContext.disposeEditor();
     };
   }, [editorContext.loaded]);
