@@ -1,14 +1,16 @@
 import { useCallback, useState, useRef, useEffect, useContext } from 'react';
 import test_map_image from '../assets/test_map_image.webp';
 
-import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow, type Connection, type Node } from '@xyflow/react';
-import type { SerializedModel, SerializedLocation, SerializedVariableDecl } from '../common/model-types';
+import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Node } from '@xyflow/react';
+import type { SerializedModel, SerializedLocation, SerializedVariableDecl, SerializedLocationExit } from '../common/model-types';
 import { evaluateExpression, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
 import Button from '@mui/material/Button';
 
 import MapNode from '../nodes/MapNode.js';
 import { useParams } from 'react-router-dom';
 import { DslContext } from '../contexts/DslContext.js';
+import FloatingEdge from '../edges/FloatingEdge.js';
+import FloatingConnectionLine from '../edges/FloatingConnectionLine.js';
 
 const LocationView = () => {
   let {locationName} = useParams()
@@ -140,7 +142,7 @@ const LocationView = () => {
         {/* Map Image Container */}
         <div className="w-full h-[60vw] max-h-[80vh] min-h-75 min-w-75 flex items-center justify-center">
           <ReactFlowProvider>
-            <MapFlow />
+            <MapFlow exits={locationData?.exits || []} />
           </ReactFlowProvider>
         </div>
         
@@ -155,22 +157,27 @@ const LocationView = () => {
   );
 };
 
-const MapFlow = () => {
+const MapFlow = ({exits}: { exits: SerializedLocationExit[] }) => {
 const containerRef = useRef<HTMLDivElement>(null);
 const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>([[0, 0], [0, 0]]);
 const targetSize = 50;
 const markerColor = '#000000';
-  const initialNodes: Node<{ location: string }>[] = [
+const initialNodes: Node<{ location: string }>[] = (exits.length > 0 ? exits.map((exit, index) => ({
+    id: exit.name,
+    position: { x: 50 + index * 50, y: 50 + index * 50 },
+    data: { location: exit.exit.$ref },
+    type: 'mapNode'
+})) : [
     { id: 'n1', position: { x: 50, y: 50 }, data: { location: 'Place 1' }, type: 'mapNode' },
     { id: 'n2', position: { x: 100, y: 100 }, data: { location: 'Place 2' }, type: 'mapNode' },
-  ];
-  const initialEdges = [{
+  ]);
+const initialEdges = [{
     id: 'n1-n2',
     source: 'n1',
     target: 'n2',
     label: 'Transition Name',
     data: { direction: 'both' },
-    type: 'straight',
+    type: 'floating',
     markerStart: {
       type: MarkerType.ArrowClosed,
       width: targetSize,
@@ -189,66 +196,21 @@ const markerColor = '#000000';
     mapNode: MapNode,
   };
 
-  let id = 1;
-  const getId = () => `${id++}`;
+  const edgeTypes = {
+    floating: FloatingEdge,
+  };
+
   const nodeOrigin: [number, number] = [0.5, 0];
 
-  //TODO const reactFlowWrapper = useRef(null);
-  
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const { screenToFlowPosition } = useReactFlow();
+
   const onConnect = useCallback(
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
     [setEdges]
   );
 
-  const onConnectEnd = useCallback(
-    (event: any, connectionState: any) => {
-      // when a connection is dropped on the pane it's not valid
-      if (!connectionState.isValid) {
-        // we need to remove the wrapper bounds, in order to get the correct position
-        const id = getId();
-        const { clientX, clientY } =
-          'changedTouches' in event ? event.changedTouches[0] : event;
-        const newNode = {
-          id,
-          position: screenToFlowPosition({
-            x: clientX,
-            y: clientY,
-          }),
-          data: { location: `Node ${id}` },
-          origin: [0.5, 0] as [number, number],
-        };
- 
-        setNodes((nds) => nds.concat(newNode));
-        setEdges((eds) =>
-          eds.concat({
-            id,
-            source: connectionState.fromNode.id,
-            target: id,
-            label: 'Transition',
-            data: { direction: 'both' },
-            type: 'straight',
-            markerStart: {
-              type: MarkerType.ArrowClosed,
-              width: targetSize,
-              height: targetSize,
-              color: markerColor,
-            },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              width: targetSize,
-              height: targetSize,
-              color: markerColor,
-            },
-          }),
-        );
-      }
-    },
-    [screenToFlowPosition],
-  );
-
+  // Edge click handler to toggle direction
   const onEdgeClick = useCallback((_event: React.MouseEvent, clickedEdge: any) => {
     setEdges((eds) =>
       eds.map((edge) => {
@@ -336,26 +298,27 @@ const markerColor = '#000000';
       {mapBounds[1][0] > 0 && 
       (
         <ReactFlow
+          // Nodes and Edges
           nodes={nodes}
           edges={edges}
-
+          // Change Handlers
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onConnectEnd={onConnectEnd}
-          onEdgeClick={onEdgeClick}
           nodeOrigin={nodeOrigin}
-          
+          // Types and Options
           proOptions={proOptions}
           nodeTypes={nodeTypes}
-          // MANUALLY CONTROLLED BOUNDS
+          edgeTypes={edgeTypes}
+          connectionLineComponent={FloatingConnectionLine}
+          // Manually controlled bounds and zoom
           translateExtent={mapBounds}
           nodeExtent={mapBounds}
-          // CAMERA DEFAULTS (No fitView)
+          // Camera defaults (No fitView)
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
           minZoom={1}
           maxZoom={1}
-          // LOCKING
+          // Locking
           panOnDrag={false}
           selectionOnDrag={false}
           zoomOnScroll={false}

@@ -19,11 +19,11 @@ Location:
     (Description)?
     ('sublocations' sublocations+=Location* 'end')?;
 LocationExit:
-    'exit' name=STRING 'to' exit=LocationChain identifiers+=Identifier*;
+    'exit' name=STRING 'to' exit=[Location:STRING] identifiers+=Identifier*;
 LocationEntry:
-    'entry' entry=LocationChain;
-LocationChain:
-    locations+=[Location:STRING] ('->' locations+=[Location:STRING])*;
+    'entry' entry=[Location:STRING];
+//LocationChain:
+//    locations+=[Location:STRING] ('->' locations+=[Location:STRING])*;
 Identifier:
     '['tag=STRING ((':'|'=') value=ConstantExpression)? ']';
 
