@@ -3,6 +3,7 @@ import test_map_image from '../assets/test_map_image.webp';
 
 import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow, type Connection, type Node } from '@xyflow/react';
 import type { SerializedModel, SerializedLocation, SerializedVariableDecl } from '../common/model-types';
+import { evaluateExpression, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
 
 import MapNode from '../nodes/MapNode.js';
 import { useParams } from 'react-router-dom';
@@ -39,7 +40,25 @@ const LocationView = () => {
           <p className="text-sm font-semibold text-gray-400">Variables</p>
           {
             locationData?.variables.map((variable: SerializedVariableDecl)  => {
-              return (<p>{variable.target} = {"Undefined"}</p>)
+              let value = evaluateExpression(variable.value, {variableName: variable.target, worldState: worldState});
+              if(typeof(value) === 'object')
+              {
+                value = value as SerialisedObjectDeclaration
+                return (
+                  <div key={variable.target} className="border p-2 rounded bg-gray-800">
+                    <p className="font-bold">{variable.target}</p>
+                    <div className="text-left ml-4">
+                      {Object.entries(value.properties).map(([propName, propValue]) => (
+                        <p key={propName}>{propName}: {propValue?.toString() ?? '?'}</p>
+                      ))}
+                    </div>
+                   </div>
+                )
+              }
+              else
+              {
+                return (<p key={variable.target}>{variable.target} = {value?.toString() ?? '?'}</p>)
+              }
             })
           }
           <p className="text-xs italic text-gray-500 max-w-xs mt-4">
