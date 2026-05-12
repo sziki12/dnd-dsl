@@ -1,14 +1,14 @@
 import React, { useContext, useEffect, useRef } from 'react';
 import { MonacoContext } from '../contexts/MonacoContext';
-import { EditorContext } from '../contexts/EditorContext';
+import { FileContext } from '../contexts/FileContext';
 
 export const DslEditor = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const monacoContext = useContext(MonacoContext);
-  const editorContext = useContext(EditorContext);
+  const fileContext = useContext(FileContext);
 
   useEffect(() => {
-    if(!editorContext.loaded)
+    if(!fileContext.loaded)
       return
 
     if (containerRef.current) {
@@ -29,7 +29,7 @@ export const DslEditor = () => {
         window.removeEventListener('keydown', handleKeyDown, true);
         monacoContext.disposeEditor();
     };
-  }, [editorContext.loaded]);
+  }, [fileContext.loaded]);
 
   return <div ref={containerRef} className='h-screen' />;
 };

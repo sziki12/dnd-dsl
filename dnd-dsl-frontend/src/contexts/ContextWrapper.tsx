@@ -1,6 +1,6 @@
 import { BackendContextNode } from "./BackendContext";
 import { DslContextNode } from "./DslContext";
-import { EditorContextNode } from "./EditorContext";
+import { FileContextNode } from "./FileContext";
 import { MonacoContextNode } from "./MonacoContext";
 
 export function ContextWrapper({ children }: { children: React.ReactNode }) {
@@ -8,11 +8,11 @@ export function ContextWrapper({ children }: { children: React.ReactNode }) {
     return (
         <BackendContextNode>
             <DslContextNode>
-                <EditorContextNode>
+                <FileContextNode>
                     <MonacoContextNode>
                         {children}
                     </MonacoContextNode>
-                </EditorContextNode>
+                </FileContextNode>
             </DslContextNode>
         </BackendContextNode>
     );

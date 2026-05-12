@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { EditorApp, type EditorAppConfig } from 'monaco-languageclient/editorApp';
 import { FILE_URI, getMonacoInit, toMonacoUri } from '../MonacoInit';
-import { EditorContext } from '../contexts/EditorContext';
+import { FileContext } from './FileContext';
 import { DslContext } from './DslContext';
 
 type MonacoContext = {
@@ -14,7 +14,7 @@ export const MonacoContext = createContext<MonacoContext>({} as MonacoContext);
 
 export function MonacoContextNode({ children }: { children: React.ReactNode }) {
     const editorAppRef = useRef<EditorApp | null>(null);
-    const editorContext = useContext(EditorContext);
+    const fileContext = useContext(FileContext);
     const dlsContext = useContext(DslContext);
 
     const getEditorConfig = (content: string) =>
@@ -81,19 +81,18 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         const content = editorAppRef.current?.getEditor()?.getModel()?.getValue();
         if (!content) return;
 
-        await editorContext?.saveFile({identifier: {adventure: dlsContext.adventure, world:dlsContext.world}, content: content})
-        console.log('File saved');
+        await fileContext?.saveFile({identifier: {adventure: dlsContext.adventure, world:dlsContext.world}, content: content})
     };
 
     useEffect(()=>{
-        if(!editorContext.loaded)
+        if(!fileContext.loaded)
             return
 
-        editorContext.loadFile(dlsContext.adventure, dlsContext.world).then(file => {
+        fileContext.loadFile(dlsContext.adventure, dlsContext.world).then(file => {
             editorAppRef.current?.updateCode({modified:file.content})
             editorAppConfig = getEditorConfig(file.content)
         });
-    },[editorContext.loaded])
+    },[fileContext.loaded])
 
     return (
         <MonacoContext.Provider value={{ startEditor, disposeEditor, saveFile }}>

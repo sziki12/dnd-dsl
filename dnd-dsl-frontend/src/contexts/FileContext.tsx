@@ -1,12 +1,12 @@
 import { createContext, useContext, useRef, useState } from 'react';
 import { BackendURL } from './BackendContext';
 
-type EditorContext = {
+type FileContext = {
     loadFile: (adventure: string, world: string) => Promise<FileDto>,
     saveFile: (file: FileDto) => Promise<void>,
     loaded: boolean
 }
-export const EditorContext = createContext<EditorContext>({loaded: false} as EditorContext);
+export const FileContext = createContext<FileContext>({loaded: false} as FileContext);
 
 type FileDto = {
     identifier:{
@@ -16,7 +16,7 @@ type FileDto = {
     content: string
 }
 
-export function EditorContextNode({ children }: { children: React.ReactNode }) {
+export function FileContextNode({ children }: { children: React.ReactNode }) {
     const fileEndpoint = `${BackendURL}/file`
     const [loaded, setLoaded] = useState(true)
 
@@ -48,12 +48,12 @@ export function EditorContextNode({ children }: { children: React.ReactNode }) {
                 content: file.content
             })
         });
-        console.log('File saved');
+        console.log('File content saved');
     }
 
     return (
-        <EditorContext.Provider value={{ loadFile, saveFile, loaded }}>
+        <FileContext.Provider value={{ loadFile, saveFile, loaded }}>
             {children}
-        </EditorContext.Provider>
+        </FileContext.Provider>
     );
 }
