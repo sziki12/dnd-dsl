@@ -1,5 +1,9 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import LocationView from './pages/LocationView';
+import { DslEditor } from './pages/DslEditor';
+import { ContextWrapper } from './contexts/ContextWrapper';
+import type { JSX, ReactNode } from 'react';
+import PageWrapper from './common/PageWrapper';
 
 //import '@xyflow/react/dist/style.css';
 
@@ -16,16 +20,22 @@ function Contact() {
   return <h1>Contact Page</h1>;
 }
 
+function createRoute({path, name, element, }:{path:string, name:string, element:JSX.Element})
+{
+  return  <Route path={path} element={<PageWrapper name={name}>{element}</PageWrapper>}  />
+}
+
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="/location" element={<LocationView />} />
-      </Routes>
-    </BrowserRouter>
+    <ContextWrapper>
+      <BrowserRouter>
+        <Routes>
+          {createRoute({path:"/", element:<Home />, name:"Home Page"})}
+          {createRoute({path:"/location/:locationName", element:<LocationView />, name:"Location Page"})}
+          {createRoute({path:"/editor", element:<DslEditor />, name:"Editor Page"})}
+        </Routes>
+      </BrowserRouter>
+    </ContextWrapper>
   );
 }
 

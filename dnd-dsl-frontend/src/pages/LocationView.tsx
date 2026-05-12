@@ -1,16 +1,31 @@
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useCallback, useState, useRef, useEffect, useContext } from 'react';
 import test_map_image from '../assets/test_map_image.webp';
 import { addEdge, Background, MarkerType, Panel, ReactFlow, useEdgesState, useNodesState, type Connection, type Node } from '@xyflow/react';
+import type { SerializedModel, SerializedLocation, SerializedVariableDecl } from '../common/model-types';
 
 import MapNode from '../nodes/MapNode.js';
+import { useParams } from 'react-router-dom';
+import { DslContext } from '../contexts/DslContext.js';
 
 const LocationView = () => {
+  let {locationName} = useParams()
+  let {worldState} = useContext(DslContext)
+  
+  let [locationData, setLocationData] = useState<SerializedLocation | undefined>(undefined)
+
+  useEffect(()=>{
+
+    const newLocation = getLocationData(worldState, locationName ?? "Lcoation")
+    if(typeof(newLocation) == "undefined")
+      return
+    setLocationData(newLocation)
+  },[worldState])
   return (
     // 1. Parent Container: use 'flex' and 'flex-col lg:flex-row' for responsiveness
     <div className="h-screen w-full bg-slate-900 text-white p-4 flex flex-col lg:flex-row gap-4">
       {/* 2. Left Column: Variables Panel */}
       <div className="flex-1 flex flex-col items-center justify-center min-w-75 max-w-full">
-        <h1 className="text-4xl font-bold mb-6">Location View</h1>
+        <h1 className="text-4xl font-bold mb-6">{locationName}</h1>
         
         {/* Tab Buttons */}
         <div className="flex gap-2 mb-4">
@@ -21,13 +36,11 @@ const LocationView = () => {
         {/* Content List */}
         <div className="text-center space-y-2 text-gray-300">
           <p className="text-sm font-semibold text-gray-400">Variables</p>
-          <p>int population = 100</p>
-          <p>int food = 2</p>
-          <p>string state = "Peace"</p>
-          <div className="flex justify-center items-center gap-2">
-            <input type="checkbox" checked readOnly className="accent-blue-500" />
-            <span>bool IsStarving</span>
-          </div>
+          {
+            locationData?.variables.map((variable: SerializedVariableDecl)  => {
+              return (<p>{variable.target} = {"Undefined"}</p>)
+            })
+          }
           <p className="text-xs italic text-gray-500 max-w-xs mt-4">
             Lorem ipsum dolor sit amet, consectetur adipiscing elit...
           </p>
@@ -64,8 +77,8 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
 const targetSize = 50;
 const markerColor = '#000000';
   const initialNodes: Node<{ location: string }>[] = [
-    { id: 'n1', position: { x: 0, y: 0 }, data: { location: 'Place 1' }, type: 'mapNode' },
-    { id: 'n2', position: { x: 0, y: 50 }, data: { location: 'Place 2' }, type: 'mapNode' },
+    { id: 'n1', position: { x: 50, y: 50 }, data: { location: 'Place 1' }, type: 'mapNode' },
+    { id: 'n2', position: { x: 100, y: 100 }, data: { location: 'Place 2' }, type: 'mapNode' },
   ];
   const initialEdges = [{
     id: 'n1-n2',
@@ -232,5 +245,12 @@ const markerColor = '#000000';
     </div>
   );
 };
+
+const getLocationData = (worldState: SerializedModel | undefined, locationName: string) =>
+{
+  if(worldState?.World == undefined)
+    return undefined
+  return worldState.World.locations.find(location => location.name == locationName)
+}
 
 export default LocationView;
