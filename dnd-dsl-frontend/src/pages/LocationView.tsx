@@ -3,7 +3,8 @@ import test_map_image from '../assets/test_map_image.webp';
 
 import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow, type Connection, type Node } from '@xyflow/react';
 import type { SerializedModel, SerializedLocation, SerializedVariableDecl } from '../common/model-types';
-import { evaluateExpression, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
+import { evaluateExpression, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
+import Button from '@mui/material/Button';
 
 import MapNode from '../nodes/MapNode.js';
 import { useParams } from 'react-router-dom';
@@ -14,6 +15,41 @@ const LocationView = () => {
   let {worldState} = useContext(DslContext)
   
   let [locationData, setLocationData] = useState<SerializedLocation | undefined>(undefined)
+  // null = calculated but not resolvable (e.g. FunctionCall/RefChain)
+  // undefined = not yet calculated (button not clicked)
+  const [computedValues, setComputedValues] = useState<Record<string, EvalResult | null>>({})
+
+  const calculateVariable = (variable: SerializedVariableDecl, key?: string) => {
+    const storeKey = key ?? variable.target ?? ''
+    const result = evaluateExpression(variable.value, { variableName: variable.target, worldState })
+    setComputedValues(prev => ({ ...prev, [storeKey]: result ?? null }))
+  }
+
+  const renderObjectProps = (obj: SerialisedObjectDeclaration, parentKey: string) => (
+    <>
+      {Object.entries(obj.staticProperties).map(([propName, propValue]) => (
+        <p key={propName}>{propName}: {propValue?.toString() ?? '?'}</p>
+      ))}
+      {obj.computedPropertyDecls.map((propDecl) => {
+        const propKey = `${parentKey}.${propDecl.target ?? ''}`
+        const hasPropCalc = propKey in computedValues
+        const propComputed = computedValues[propKey]
+        return (
+          <div key={propDecl.target} className="flex items-center gap-2">
+            <span>{propDecl.target}</span>
+            <Button variant="contained" size="small" onClick={() => calculateVariable(propDecl, propKey)}>
+              Calculate
+            </Button>
+            {hasPropCalc && (
+              propComputed === null
+                ? <span className="text-gray-500 italic">?</span>
+                : <span>= {propComputed!.toString()}</span>
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
 
   useEffect(()=>{
 
@@ -39,26 +75,52 @@ const LocationView = () => {
         <div className="text-center space-y-2 text-gray-300">
           <p className="text-sm font-semibold text-gray-400">Variables</p>
           {
-            locationData?.variables.map((variable: SerializedVariableDecl)  => {
-              let value = evaluateExpression(variable.value, {variableName: variable.target, worldState: worldState});
-              if(typeof(value) === 'object')
-              {
-                value = value as SerialisedObjectDeclaration
+            locationData?.variables.map((variable: SerializedVariableDecl) => {
+              const isComputed = variable.isComputed === 'computed'
+              console.log(`Variable ${variable.target} is computed: ${isComputed}`)
+              if (isComputed) {
+                const key = variable.target ?? ''
+                const hasCalculated = key in computedValues
+                const computed = computedValues[key]  // EvalResult | null | undefined
+                const computedObj = computed !== null && typeof computed === 'object'
+                  ? computed as SerialisedObjectDeclaration
+                  : undefined
+                return (
+                  <div key={variable.target} className="flex flex-col items-center gap-1">
+                    <div className="flex items-center gap-2">
+                      <span>{variable.target}</span>
+                      <Button variant="contained" size="small" onClick={() => calculateVariable(variable)}>
+                        Calculate
+                      </Button>
+                    </div>
+                    {hasCalculated && (
+                      computed === null ? (
+                        <span className="text-gray-500 italic">= ?</span>
+                      ) : computedObj ? (
+                        <div className="border p-2 rounded bg-gray-800 w-full text-left">
+                          {renderObjectProps(computedObj, key)}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">= {computed!.toString()}</span>
+                      )
+                    )}
+                  </div>
+                )
+              }
+
+              let value = evaluateExpression(variable.value, { variableName: variable.target, worldState })
+              if (typeof value === 'object') {
+                const obj = value as SerialisedObjectDeclaration
                 return (
                   <div key={variable.target} className="border p-2 rounded bg-gray-800">
                     <p className="font-bold">{variable.target}</p>
                     <div className="text-left ml-4">
-                      {Object.entries(value.properties).map(([propName, propValue]) => (
-                        <p key={propName}>{propName}: {propValue?.toString() ?? '?'}</p>
-                      ))}
+                      {renderObjectProps(obj, variable.target ?? '')}
                     </div>
-                   </div>
+                  </div>
                 )
               }
-              else
-              {
-                return (<p key={variable.target}>{variable.target} = {value?.toString() ?? '?'}</p>)
-              }
+              return (<p key={variable.target}>{variable.target} = {value?.toString() ?? '?'}</p>)
             })
           }
           <p className="text-xs italic text-gray-500 max-w-xs mt-4">

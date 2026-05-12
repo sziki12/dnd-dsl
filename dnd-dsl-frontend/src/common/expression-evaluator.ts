@@ -1,4 +1,4 @@
-import type { SerializedModel, SerializedNode } from './model-types';
+import type { SerializedModel, SerializedNode, SerializedVariableDecl } from './model-types';
 import type {
     Expression, BoolVal, IntVal, StringVal,
     IntExpression, BoolExpression, IntToBoolExpression, GroupedExpression,
@@ -7,7 +7,10 @@ import type {
 
 export type SerialisedObjectDeclaration = {
     name: string,
-    properties: Record<string, EvalResult | undefined>
+    /** Pre-evaluated values for non-computed sub-properties */
+    staticProperties: Record<string, EvalResult | undefined>,
+    /** Original declarations for computed sub-properties — evaluated on demand */
+    computedPropertyDecls: SerializedVariableDecl[],
 };
 
 export type EvalResult = number | boolean | string | SerialisedObjectDeclaration;
@@ -75,9 +78,14 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
         }
         case 'ObjectDeclaration': {
             const e = expr as unknown as SerializedNode<ObjectDeclaration>;
+            const staticVars = e.variables.filter(v => v.isComputed !== 'computed');
+            const computedVars = e.variables.filter(v => v.isComputed === 'computed');
             return {
                 name: options?.variableName ?? "Object",
-                properties: Object.fromEntries(e.variables.map(v => [v.target, evaluateExpression(v.value, options)]))
+                staticProperties: Object.fromEntries(
+                    staticVars.map(v => [v.target ?? '', evaluateExpression(v.value, options)])
+                ),
+                computedPropertyDecls: computedVars as SerializedVariableDecl[],
             };
         }
         case 'Expression':
