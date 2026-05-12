@@ -7,8 +7,9 @@ import { evaluateExpression, type EvalResult, type SerialisedObjectDeclaration }
 import Button from '@mui/material/Button';
 
 import MapNode from '../nodes/MapNode.js';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { DslContext } from '../contexts/DslContext.js';
+import { BackendURL } from '../contexts/BackendContext.js';
 import FloatingEdge from '../edges/FloatingEdge.js';
 import FloatingConnectionLine from '../edges/FloatingConnectionLine.js';
 
@@ -55,11 +56,12 @@ const LocationView = () => {
 
   useEffect(()=>{
 
-    const newLocation = getLocationData(worldState, locationName ?? "Lcoation")
+    const newLocation = getLocationData(worldState, locationName ?? "Location")
     if(typeof(newLocation) == "undefined")
       return
     setLocationData(newLocation)
-  },[worldState])
+    console.log(`Loaded location data for ${locationName}:`, newLocation)
+  },[worldState, locationName])
   return (
     // 1. Parent Container: use 'flex' and 'flex-col lg:flex-row' for responsiveness
     <div className="h-screen w-full bg-slate-900 text-white p-4 flex flex-col lg:flex-row gap-4">
@@ -152,11 +154,10 @@ const LocationView = () => {
 };
 
 const MapFlow = ({location}: { location: SerializedLocation | undefined }) => {
+const navigate = useNavigate();
 const containerRef = useRef<HTMLDivElement>(null);
-let { getByReference } = useContext(DslContext)
+let { getByReference, adventure, world } = useContext(DslContext)
 const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>([[0, 0], [0, 0]]);
-const targetSize = 50;
-const markerColor = '#000000';
 
   const nodeTypes = {
     mapNode: MapNode,
@@ -176,8 +177,12 @@ const markerColor = '#000000';
     [setEdges]
   );
 
+  const onNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
+    navigate(`/location/${node.data.location}`);
+  }, [navigate]);
+
   // Edge click handler to toggle direction
-  const onEdgeClick = useCallback((_event: React.MouseEvent, clickedEdge: any) => {
+  /*const onEdgeClick = useCallback((_event: React.MouseEvent, clickedEdge: any) => {
     setEdges((eds) =>
       eds.map((edge) => {
         if (edge.id === clickedEdge.id) {
@@ -237,7 +242,7 @@ const markerColor = '#000000';
         return edge;
       })
     );
-  }, [setEdges]);
+  }, [setEdges]);*/
 
   const proOptions = { hideAttribution: true };
 
@@ -260,13 +265,38 @@ const markerColor = '#000000';
   }, []);
 
   useEffect(() => {
-    if(typeof(location) == "undefined")
-      return;
+    if (typeof location == "undefined") return;
 
-    const graph = buildGraphFromLocation(location, getByReference) || buildDefaultGraph()
-    setNodes(graph.nodes);
+    const graph = buildGraphFromLocation(location, getByReference) || buildDefaultGraph();
     setEdges(graph.edges);
-  }, [location]);
+
+    fetch(`${BackendURL}/file/layout/load?adventure=${adventure}&world=${world}&location=${encodeURIComponent(location.name)}`)
+      .then(r => r.json())
+      .then((saved: Record<string, { x: number; y: number }>) => {
+        setNodes(graph.nodes.map(node =>
+          saved[node.id] ? { ...node, position: saved[node.id] } : node
+        ));
+      })
+      .catch(() => setNodes(graph.nodes));
+  }, [location?.name]);
+
+  useEffect(() => {
+    if (typeof location == "undefined") return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.key !== 's') return;
+      e.preventDefault();
+      const positions = Object.fromEntries(nodes.map(n => [n.id, n.position]));
+      fetch(`${BackendURL}/file/layout/save?adventure=${adventure}&world=${world}&location=${encodeURIComponent(location!.name)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(positions),
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [nodes, location?.name, adventure, world]);
 
   return (
     <div ref={containerRef} className="border-4 w-full aspect-square rounded-lg overflow-hidden bg-slate-800">   
@@ -280,6 +310,7 @@ const markerColor = '#000000';
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeDoubleClick={onNodeDoubleClick}
           nodeOrigin={nodeOrigin}
           // Types and Options
           proOptions={proOptions}
@@ -313,7 +344,7 @@ const markerColor = '#000000';
             }}
             color="transparent" 
           />
-          <Panel position="top-right" className="bg-gray-100 p-2 rounded shadow text-black">
+          <Panel position="top-right" className="bg-gray-100 p-2 rounded shadow text-black ">
             Canvas Locked | Nodes Draggable
           </Panel>
       </ReactFlow>
@@ -327,6 +358,8 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
   const edges: Edge[] = [];
   const knownIds = new Set(location.sublocations.map(s => s.name));
 
+  const targetSize = 50;
+  const markerColor = '#000000';
   //Create current location node
   nodes.push({
           id: location.name,
@@ -354,18 +387,42 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
         },
       });
     }
+    edges.push({
+        id: `${location.name}->${targetName}-${exit.name}`,
+        source: location.name,
+        target: targetName,
+        label: exit.name,
+        type: 'floating',
+        data: { identifiers: exit.identifiers },
+        markerEnd: { 
+          type: MarkerType.ArrowClosed, 
+          width: targetSize,
+          height: targetSize,
+          color: markerColor, 
+        },
+      });
   }
 
   for (const sub of location.sublocations) {
     nodes.push({
       id: sub.name,
       type: 'mapNode',
-      position: { x: 0, y: 0 }, // laid out by auto-layout
+      position: { x: 0, y: 0 },
       data: {
         location: sub.name,
         isEntry: getByReference<SerializedLocation>(location.entry?.entry.$ref)?.name === sub.name,
       },
       parentId: location.name,
+    });
+    edges.push({
+      id: `${location.name}->${sub.name}-sublocation`,
+      source: location.name,
+      target: sub.name,
+      type: 'floating',
+      style: {
+        strokeWidth: 1,
+        stroke: '#B2BEB5',
+      },
     });
 
     for (const exit of sub.exits ?? []) {
@@ -432,11 +489,18 @@ const defaultEdges = [{
   return { nodes: defaultNodes, edges: defaultEdges };
 }
 
-const getLocationData = (worldState: SerializedModel | undefined, locationName: string) =>
-{
-  if(worldState?.World == undefined)
-    return undefined
-  return worldState.World.locations.find(location => location.name == locationName)
+function findLocation(locations: SerializedLocation[], name: string): SerializedLocation | undefined {
+  for (const loc of locations) {
+    if (loc.name === name) return loc;
+    const found = findLocation(loc.sublocations, name);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+const getLocationData = (worldState: SerializedModel | undefined, locationName: string) => {
+  if (worldState?.World == undefined) return undefined;
+  return findLocation(worldState.World.locations, locationName);
 }
 
 export default LocationView;

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import fs from "fs"
 import { type FileDto } from "./dto/save-file.dto.js"
 import { ConfigurationService } from '../configuration/configuration.service.js';
@@ -30,5 +30,34 @@ export class FileController {
         const fileContent = fs.readFileSync(`${dndFilePath}`, 'utf-8');
         console.log("Loaded")
         return { content: fileContent, identifier:{adventure, world} };
+    }
+
+    @Post('layout/save')
+    saveLayout(
+        @Query('adventure') adventure: string,
+        @Query('world') world: string,
+        @Query('location') location: string,
+        @Body() positions: Record<string, { x: number; y: number }>
+    ): { success: boolean } {
+        const layoutPath = this.fileService.getLayoutFilePath(adventure, world);
+        let allLayouts: Record<string, Record<string, { x: number; y: number }>> = {};
+        if (fs.existsSync(layoutPath)) {
+            allLayouts = JSON.parse(fs.readFileSync(layoutPath, 'utf-8'));
+        }
+        allLayouts[location] = positions;
+        fs.writeFileSync(layoutPath, JSON.stringify(allLayouts, null, 2), 'utf-8');
+        return { success: true };
+    }
+
+    @Get('layout/load')
+    loadLayout(
+        @Query('adventure') adventure: string,
+        @Query('world') world: string,
+        @Query('location') location: string,
+    ): Record<string, { x: number; y: number }> {
+        const layoutPath = this.fileService.getLayoutFilePath(adventure, world);
+        if (!fs.existsSync(layoutPath)) return {};
+        const allLayouts = JSON.parse(fs.readFileSync(layoutPath, 'utf-8'));
+        return allLayouts[location] ?? {};
     }
 }

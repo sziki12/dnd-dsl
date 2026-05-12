@@ -12,4 +12,9 @@ export class FileService {
         const dndFilePath = `${this.configurationService.DefaultFilePath}/${adventure}/${world}.dnd`
         return dndFilePath
     }
+
+    getLayoutFilePath(adventure: string, world: string): string
+    {
+        return `${this.configurationService.DefaultFilePath}/${adventure}/${world}.layout.json`
+    }
 }
