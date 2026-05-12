@@ -1,4 +1,9 @@
 export interface FileDto {
-    name: string;
+    identifier: FileIdentifier;
     content: string;
+}
+
+export interface FileIdentifier {
+    world: string;
+    adventure: string;
 }

@@ -6,10 +6,14 @@ import { LangiumInterpreterService } from './langium-interpreter/langium-interpr
 import { LangiumConnectionGateway } from './langium-connection/langium-connection.service.js';
 import { FileController } from './file/file.controller.js';
 import { ConfigurationService } from './configuration/configuration.service.js';
+import { ImageController } from './image/image.controller.js';
+import { LangiumExportService } from './langium-export/langium-export.service.js';
+import { FileService } from './file/file.service.js';
+import { ImageService } from './image/image.service.js';
 
 @Module({
   imports: [],
-  controllers: [AppController, FileController],
-  providers: [AppService, LangiumParserService, LangiumInterpreterService, LangiumConnectionGateway, ConfigurationService],
+  controllers: [AppController, FileController, ImageController],
+  providers: [AppService, LangiumParserService, LangiumInterpreterService, LangiumConnectionGateway, ConfigurationService, LangiumExportService, FileService, ImageService],
 })
 export class AppModule {}

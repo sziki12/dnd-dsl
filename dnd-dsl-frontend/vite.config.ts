@@ -11,6 +11,8 @@ export default defineConfig({
 
   resolve: {
     alias: [
+      { find: '@dnd-language', replacement: path.resolve(__dirname, './src/dnd-language/language/src') },
+      { find: '@dnd-cli',      replacement: path.resolve(__dirname, './src/dnd-language/cli/src') },
       // Must come before the bare `vscode` alias — more specific match first
       {
         find: /^vscode$/,
@@ -38,6 +40,8 @@ export default defineConfig({
 
   optimizeDeps: {
     exclude: [
+      '@dnd-language',
+      "@dnd-cli",
       'monaco-editor',
       '@codingame/monaco-vscode-api',
       '@codingame/monaco-vscode-configuration-service-override',

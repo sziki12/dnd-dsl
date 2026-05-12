@@ -6,6 +6,7 @@ import { Model } from '@dnd-language/index.js';
 import { parseModel, stringifyModel } from '@dnd-cli/main.js';
 import { LangiumInterpreterService } from './langium-interpreter/langium-interpreter.service.js';
 import { ConfigurationService } from './configuration/configuration.service.js';
+import { FileService } from './file/file.service.js';
 
 @Controller()
 export class AppController {
@@ -14,6 +15,7 @@ export class AppController {
     private readonly parserService: LangiumParserService,
     private readonly interpreterService: LangiumInterpreterService,
     private readonly configurationService: ConfigurationService,
+    private readonly fileService: FileService,
   ) {
       configurationService.readConfig()
   }
@@ -27,9 +29,9 @@ export class AppController {
 
 
   
-  @Post("/generate")
-  async generateLanguage() {
-    this.model = (await parseModel('./test_file.dnd'));
+  @Post("/state/parse")
+  async parseLanguage(@Query("adventure") adventure: string, @Query("world") world: string) {
+    this.model = (await parseModel(this.fileService.getDnDFilePath(adventure, world)));
     return "Model generated successfully";
   }
 
@@ -41,13 +43,13 @@ export class AppController {
     return generatedModule;
   }
 
-  @Post("/load/locations")
+  @Get("/state/load")
   async loadLocations() {
     if(this.model === undefined)
       return
 
-    const fileUrl = pathToFileURL("./language-output/worldstate.js").href + `?update=${Date.now()}`;
-    const worldStetModule = await import(fileUrl);
+    //const fileUrl = pathToFileURL("./language-output/worldstate.js").href + `?update=${Date.now()}`;
+    //const worldStetModule = await import(fileUrl);
     this.worldState = JSON.parse(stringifyModel(this.model));
     
     this.worldState["functions"] = []

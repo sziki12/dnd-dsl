@@ -1,15 +1,18 @@
-import { createContext, useRef, useState } from 'react';
+import { createContext, useContext, useRef, useState } from 'react';
 import { BackendURL } from './BackendContext';
 
 type EditorContext = {
-    loadFile: (name: string) => Promise<FileDto>,
+    loadFile: (adventure: string, world: string) => Promise<FileDto>,
     saveFile: (file: FileDto) => any,
     loaded: boolean
 }
 export const EditorContext = createContext<EditorContext>({loaded: false} as EditorContext);
 
 type FileDto = {
-    name: string,
+    identifier:{
+        world: string,
+        adventure: string,
+    },
     content: string
 }
 
@@ -17,9 +20,9 @@ export function EditorContextNode({ children }: { children: React.ReactNode }) {
     const fileEndpoint = `${BackendURL}/file`
     const [loaded, setLoaded] = useState(true)
 
-    const loadFile = async (name: string) : Promise<FileDto> =>
+    const loadFile = async (adventure: string, world: string) : Promise<FileDto> =>
     {
-        const endpoint = `${fileEndpoint}/load?name=test_file.dnd`
+        const endpoint = `${fileEndpoint}/load?adventure=${adventure}&world=${world}`
         console.log(`endpoint: ${endpoint}`)
         const response = await fetch(`${endpoint}`, {
             method: 'GET',
@@ -38,7 +41,10 @@ export function EditorContextNode({ children }: { children: React.ReactNode }) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                name: 'test_file.dnd',
+                identifier: {
+                    adventure: file.identifier.adventure,
+                    world: file.identifier.world
+                },
                 content: file.content
             })
         });

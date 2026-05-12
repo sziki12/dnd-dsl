@@ -22,7 +22,12 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+
+    "paths": {
+      "@dnd-language/*": ["./src/dnd-language/language/src/*"],
+      "@dnd-cli/*": ["./src/dnd-language/cli/src/*"],
+    },
   },
   "include": ["src"]
 }

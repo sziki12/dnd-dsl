@@ -14,9 +14,11 @@ export const DslEditor = () => {
     if (containerRef.current) {
         monacoContext.startEditor(containerRef.current);
     }
+    console.log('Editor handleKeyDown registered');
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.ctrlKey && e.key === 's') {
             e.preventDefault();
+            console.log('Ctrl+S pressed, saving file...');
             monacoContext.saveFile();
         }
     };

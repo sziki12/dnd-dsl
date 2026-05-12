@@ -2,12 +2,14 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { EditorApp, type EditorAppConfig } from 'monaco-languageclient/editorApp';
 import { FILE_URI, getMonacoInit, toMonacoUri } from '../MonacoInit';
 import { EditorContext } from '../contexts/EditorContext';
+import { DslContext } from './DslContext';
 
 export const MonacoContext = createContext<any>(null);
 
 export function MonacoContextNode({ children }: { children: React.ReactNode }) {
     const editorAppRef = useRef<EditorApp | null>(null);
     const editorContext = useContext(EditorContext);
+    const dlsContext = useContext(DslContext);
 
     const getEditorConfig = (content: string) =>
     {
@@ -73,7 +75,7 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         const content = editorAppRef.current?.getEditor()?.getModel()?.getValue();
         if (!content) return;
 
-        await editorContext?.saveFile({name: "", content: content})
+        await editorContext?.saveFile({identifier: {adventure: dlsContext.adventure, world:dlsContext.world}, content: content})
         console.log('File saved');
     };
 
@@ -81,7 +83,7 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         if(!editorContext.loaded)
             return
 
-        editorContext.loadFile("").then(file => {
+        editorContext.loadFile(dlsContext.adventure, dlsContext.world).then(file => {
             editorAppRef.current?.updateCode({modified:file.content})
             editorAppConfig = getEditorConfig(file.content)
         });
