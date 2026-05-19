@@ -25,7 +25,18 @@ const LocationView = () => {
   const calculateVariable = (variable: SerializedVariableDecl, key?: string) => {
     const storeKey = key ?? variable.target ?? ''
     const result = evaluateExpression(variable.value, { variableName: variable.target, worldState })
-    setComputedValues(prev => ({ ...prev, [storeKey]: result ?? null }))
+    const updates: Record<string, EvalResult | null> = { [storeKey]: result ?? null }
+
+    if (result !== null && typeof result === 'object') {
+      const obj = result as SerialisedObjectDeclaration
+      for (const propDecl of obj.computedPropertyDecls) {
+        const propKey = `${storeKey}.${propDecl.target ?? ''}`
+        const propResult = evaluateExpression(propDecl.value, { variableName: propDecl.target, worldState })
+        updates[propKey] = propResult ?? null
+      }
+    }
+
+    setComputedValues(prev => ({ ...prev, ...updates }))
   }
 
   const renderObjectProps = (obj: SerialisedObjectDeclaration, parentKey: string) => (
@@ -85,10 +96,14 @@ const LocationView = () => {
               if (isComputed) {
                 const key = variable.target ?? ''
                 const hasCalculated = key in computedValues
-                const computed = computedValues[key]  // EvalResult | null | undefined
-                const computedObj = computed !== null && typeof computed === 'object'
-                  ? computed as SerialisedObjectDeclaration
+                const computed = computedValues[key]
+
+                // Evaluate eagerly to get object structure for preview (safe — ObjectDeclaration has no side effects)
+                const preview = evaluateExpression(variable.value, { variableName: variable.target, worldState })
+                const previewObj = preview !== null && typeof preview === 'object'
+                  ? preview as SerialisedObjectDeclaration
                   : undefined
+
                 return (
                   <div key={variable.target} className="flex flex-col items-center gap-1">
                     <div className="flex items-center gap-2">
@@ -97,16 +112,14 @@ const LocationView = () => {
                         Calculate
                       </Button>
                     </div>
-                    {hasCalculated && (
-                      computed === null ? (
-                        <span className="text-gray-500 italic">= ?</span>
-                      ) : computedObj ? (
-                        <div className="border p-2 rounded bg-gray-800 w-full text-left">
-                          {renderObjectProps(computedObj, key)}
-                        </div>
-                      ) : (
-                        <span className="text-gray-300">= {computed!.toString()}</span>
-                      )
+                    {previewObj ? (
+                      <div className="border p-2 rounded bg-gray-800 w-full text-left">
+                        {renderObjectProps(previewObj, key)}
+                      </div>
+                    ) : hasCalculated && (
+                      computed === null
+                        ? <span className="text-gray-500 italic">= ?</span>
+                        : <span className="text-gray-300">= {computed!.toString()}</span>
                     )}
                   </div>
                 )
@@ -359,7 +372,9 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
   const knownIds = new Set(location.sublocations.map(s => s.name));
 
   const targetSize = 50;
-  const markerColor = '#000000';
+  
+  const lineColor = '#71797E'; // Steel Gray for exit edges
+  const markerColor = '#36454F'; // Charcoal for exit edges
   //Create current location node
   nodes.push({
           id: location.name,
@@ -400,6 +415,10 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
           height: targetSize,
           color: markerColor, 
         },
+        style: {
+        strokeWidth: 1,
+        stroke: lineColor,
+        },
       });
   }
 
@@ -421,7 +440,8 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
       type: 'floating',
       style: {
         strokeWidth: 1,
-        stroke: '#B2BEB5',
+        stroke: '#7FFFD4', // Aquamarine for sublocation edges
+        strokeDasharray: '5 5', // Dashed line for sublocation edges
       },
     });
 
@@ -450,7 +470,16 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
         label: exit.name,
         type: 'floating',
         data: { identifiers: exit.identifiers },
-        markerEnd: { type: MarkerType.ArrowClosed },
+        markerEnd: { 
+          type: MarkerType.ArrowClosed, 
+          width: targetSize, 
+          height: targetSize, 
+          color: markerColor
+        },
+        style: {
+        strokeWidth: 1,
+        stroke: lineColor,
+        },
       });
     }
   }
