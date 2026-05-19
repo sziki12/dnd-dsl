@@ -1,16 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { WorldStateService } from '../world-state/world-state.service.js';
-import type {
-  Command,
-  CommandResponse,
-  SetVariableCommand,
-  SimulateDayCommand,
-} from './command.types.js';
+
 import { parseReferenceFromModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
 import { Model } from '@dnd-language/index.js';
 import { AstNode } from 'langium';
+import { 
+  Command, 
+  CommandResponse,
+  SetVariableCommand,
+  SimulateDayCommand 
+} from '@dnd-language/evaluation/dnd-dsl-commands.js';
 
-type HistoryEntry = {
+type HistoryEntry =   {
   command: Command;
   /** Deep-cloned snapshot of worldState before this command was applied */
   previousState: any;

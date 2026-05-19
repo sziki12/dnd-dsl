@@ -3,7 +3,7 @@ import { Model } from '@dnd-language/index.js';
 import { parseModel, stringifyModel } from '@dnd-cli/main.js';
 import { parseReferenceFromModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
-import type { SerializedRef } from '../command/command.types.js';
+import { SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 @Injectable()
 export class WorldStateService {

@@ -1,6 +1,6 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { CommandService } from './command.service.js';
-import type { Command, CommandResponse } from './command.types.js';
+import type { Command, CommandResponse } from '@dnd-language/evaluation/dnd-dsl-commands.js';
 
 @Controller('command')
 export class CommandController {

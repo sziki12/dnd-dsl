@@ -6,7 +6,7 @@ import { LangiumInterpreterService } from './langium-interpreter/langium-interpr
 import { ConfigurationService } from './configuration/configuration.service.js';
 import { FileService } from './file/file.service.js';
 import { WorldStateService } from './world-state/world-state.service.js';
-import type { SerializedRef } from './command/command.types.js';
+import type { SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 @Controller()
 export class AppController {
