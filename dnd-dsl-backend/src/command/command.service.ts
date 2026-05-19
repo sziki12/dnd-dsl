@@ -109,12 +109,17 @@ export class CommandService {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No model loaded');
 
+    const previousState = structuredClone(this.worldStateService.getWorldState());
     const state = this.worldStateService.getWorldState();
-    const scope = { ...(state.runtimeVariables ?? {}) };
+    state.runtimeVariables ??= {};
 
-    this.interpreterService.triggerEventByName(model, cmd.eventName, scope);
+    // Pass runtimeVariables directly so in-place mutations from VariableAssignment
+    // and VariableDeclaration statements inside the event body persist.
+    this.interpreterService.triggerEventByName(model, cmd.eventName, state.runtimeVariables);
 
-    return { ...this.buildResponse() };
+    this.history.push({ command: cmd, previousState });
+    this.future.splice(0);
+    return this.buildResponse();
   }
 
   private applyCommand(cmd: Command, state: Model): Model {

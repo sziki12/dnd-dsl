@@ -5,6 +5,17 @@ import { parseReferenceFromModel } from '@dnd-language/evaluation/dnd-dsl-refere
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 import { SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
+export type FunctionSummary = {
+  name: string;
+  params: string[];
+  description?: string;
+};
+
+export type EventSummary = {
+  name: string;
+  description?: string;
+};
+
 @Injectable()
 export class WorldStateService {
   private _model: Model | undefined = undefined;
@@ -38,6 +49,23 @@ export class WorldStateService {
   //toRef(node: object): SerializedRef | undefined {
   //  return this.pathCache.toRef(this._worldState, node);
   //}
+
+  getFunctions(): FunctionSummary[] {
+    if (!this._model) return [];
+    return this._model.World.functions.map(f => ({
+      name: f.name,
+      params: f.params.map(p => p.name ?? p.target ?? ''),
+      description: f.description,
+    }));
+  }
+
+  getEvents(): EventSummary[] {
+    if (!this._model) return [];
+    return this._model.World.events.map(e => ({
+      name: e.name,
+      description: e.description,
+    }));
+  }
 
   async resolveReference(reference: SerializedRef): Promise<any> {
     if (!this._model) return undefined;

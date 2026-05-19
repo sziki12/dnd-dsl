@@ -6,6 +6,7 @@ import { LangiumInterpreterService } from './langium-interpreter/langium-interpr
 import { ConfigurationService } from './configuration/configuration.service.js';
 import { FileService } from './file/file.service.js';
 import { WorldStateService } from './world-state/world-state.service.js';
+import { CommandService } from './command/command.service.js';
 import type { SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 @Controller()
@@ -17,6 +18,7 @@ export class AppController {
     private readonly configurationService: ConfigurationService,
     private readonly fileService: FileService,
     private readonly worldStateService: WorldStateService,
+    private readonly commandService: CommandService,
   ) {
     configurationService.readConfig()
   }
@@ -57,6 +59,26 @@ export class AppController {
   @Get('/world')
   async getWorldState() {
     return this.worldStateService.getWorldState()
+  }
+
+  @Get('/world/functions')
+  getFunctions() {
+    return this.worldStateService.getFunctions()
+  }
+
+  @Post('/world/functions/:name')
+  callFunction(@Param('name') name: string, @Body() body: { args?: any[] }) {
+    return this.commandService.execute({ type: 'CALL_FUNCTION', functionName: name, args: body.args ?? [] })
+  }
+
+  @Get('/world/events')
+  getEvents() {
+    return this.worldStateService.getEvents()
+  }
+
+  @Post('/world/events/:name')
+  triggerEvent(@Param('name') name: string) {
+    return this.commandService.execute({ type: 'TRIGGER_EVENT', eventName: name })
   }
 
   @Post('/resolve')
