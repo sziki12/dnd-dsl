@@ -88,6 +88,11 @@ export class LangiumInterpreterService {
         if (isFunctionCall(expression)) {
             return this.executeFunctionCall(scope, expression);
         }
+
+        if(expression.$type === 'Expression'){
+            return this.evaluateExpression(scope, expression.exp);
+        }
+
         throw new Error(`Unhandled expression type: ${expression.$type}`);
     }
 
@@ -129,8 +134,18 @@ export class LangiumInterpreterService {
      * Returns the function's return value, or undefined if the function has no return statement.
      */
     callFunctionByName(model: Model, functionName: string, args: any[], scope: RuntimeScope): any {
-        const decl = model.World.functions.find(f => f.name === functionName);
+        let decl = model.World.functions.find(f => f.name === functionName);
+        if(!decl) {
+            console.log("Calling predefined function:", functionName, args);
+            const predefined = this.predefinedFunctions[functionName];
+            if (!predefined) throw new Error(`Function '${functionName}' not found`);
+
+            const result = predefined(...args);
+            console.log(`Function '${functionName}' returned:`, result);
+            return result;
+        }
         if (!decl) throw new Error(`Function '${functionName}' not found`);
+        console.log("Calling function:", functionName, args);
         return this.callFunctionDecl(scope, decl, args);
     }
 
@@ -145,6 +160,7 @@ export class LangiumInterpreterService {
         if (!decl.codeBlock) return undefined;
 
         const result = this.runCodeBlock(localScope, decl.codeBlock);
+        console.log(`Function '${decl.name}' returned:`, result instanceof ReturnSignal ? result.value : undefined);
         return result instanceof ReturnSignal ? result.value : undefined;
     }
 

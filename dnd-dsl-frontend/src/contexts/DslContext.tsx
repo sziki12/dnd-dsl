@@ -34,7 +34,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
-  const stateEndpoint = `${BackendURL}/state`;
+  const stateEndpoint = `${BackendURL}`;
 
   const parseWorldState = async () => {
     const endpoint = `${stateEndpoint}/parse?adventure=${adventure}&world=${world}`;
@@ -44,7 +44,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   };
 
   const updateWorldState = async () => {
-    const endpoint = `${stateEndpoint}/load?adventure=${adventure}&world=${world}`;
+    const endpoint = `${stateEndpoint}/world`;
     console.log(`endpoint: ${endpoint}`);
     const response = await fetch(endpoint, { method: 'GET' });
     console.log(`Status: ${response.status}`);

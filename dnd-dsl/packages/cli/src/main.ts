@@ -9,6 +9,7 @@ import { NodeFileSystem } from 'langium/node';
 import * as url from 'node:url';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { AstNode } from 'langium';
 
 export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
     var model: Model = await parseModel(fileName);
@@ -24,14 +25,14 @@ export const parseModelAndStringify = async (fileName: string): Promise<string> 
     const services = createDndDslServices(NodeFileSystem).DndDsl;
     var model: Model = await parseModel(fileName, services);
 
-    return stringifyModel(model, services);
+    return stringifyNode(model, services);
 }
 
-export const stringifyModel = (model: Model, paramServices: DndDslServices | undefined = undefined): string => {
+export const stringifyNode = (node: AstNode, paramServices: DndDslServices | undefined = undefined): string => {
     const services = paramServices || createDndDslServices(NodeFileSystem).DndDsl;
 
     const jsonSerializer = services.serializer.JsonSerializer;
-    const serializedModel = jsonSerializer.serialize(model);
+    const serializedModel = jsonSerializer.serialize(node);
     return serializedModel;
 }
 

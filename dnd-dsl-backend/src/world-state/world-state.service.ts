@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Model } from '@dnd-language/index.js';
-import { parseModel, stringifyModel } from '@dnd-cli/main.js';
+import { parseModel, stringifyNode } from '@dnd-cli/main.js';
 import { parseReferenceFromModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 import { SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
@@ -26,7 +26,7 @@ export class WorldStateService {
 
   async loadFromFile(filePath: string): Promise<any> {
     this._model = await parseModel(filePath);
-    this._worldState = JSON.parse(stringifyModel(this._model));
+    this._worldState = JSON.parse(stringifyNode(this._model));
     // this.pathCache.invalidateAll();
     return this._worldState;
   }
@@ -71,6 +71,8 @@ export class WorldStateService {
     if (!this._model) return undefined;
     if (!reference.$ref.startsWith('#')) reference.$ref = `#${reference.$ref}`;
     console.log(`Resolving reference: ${reference.$ref}`);
-    return parseReferenceFromModel(this._model, reference);
+    const node = parseReferenceFromModel(this._model, reference);
+    if (!node) return undefined;
+    return stringifyNode(node);
   }
 }

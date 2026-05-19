@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, HttpCode } from '@nestjs/common';
 import { AppService } from './app.service.js';
 import { LangiumParserService } from './langium-parser/langium-parser.service.js';
 import { pathToFileURL } from 'url';
@@ -28,7 +28,7 @@ export class AppController {
     return this.appService.getHello()
   }
 
-  @Post('/state/parse')
+  @Post('/parse')
   async parseLanguage(@Query('adventure') adventure: string, @Query('world') world: string) {
     await this.worldStateService.loadFromFile(this.fileService.getDnDFilePath(adventure, world))
     return 'Model generated successfully'
@@ -39,13 +39,6 @@ export class AppController {
     const fileUrl = pathToFileURL('./language-output/generated.js').href + `?update=${Date.now()}`
     const generatedModule = await import(fileUrl)
     return generatedModule
-  }
-
-  @Get('/state/load')
-  async loadLocations() {
-    const state = this.worldStateService.getWorldState()
-    if (!state || Object.keys(state).length === 0) return undefined
-    return state
   }
 
   @Post('/declare/:name/:value')
@@ -82,7 +75,9 @@ export class AppController {
   }
 
   @Post('/resolve')
+  @HttpCode(200)
   async resolveReference(@Body() reference: SerializedRef) {
+    //console.log('Resolving reference via controller:', reference)
     return this.worldStateService.resolveReference(reference)
   }
 }
