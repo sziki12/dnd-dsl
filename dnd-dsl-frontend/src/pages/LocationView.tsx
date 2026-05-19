@@ -2,7 +2,6 @@ import { useCallback, useState, useRef, useEffect, useContext } from 'react';
 import test_map_image from '../assets/test_map_image.webp';
 
 import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Edge, type Node } from '@xyflow/react';
-import type { SerializedModel, SerializedLocation, SerializedVariableDecl, SerializedLocationExit } from '../common/model-types';
 import { evaluateExpression, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
 import Button from '@mui/material/Button';
 
@@ -12,6 +11,7 @@ import { DslContext } from '../contexts/DslContext.js';
 import { BackendURL } from '../contexts/BackendContext.js';
 import FloatingEdge from '../edges/FloatingEdge.js';
 import FloatingConnectionLine from '../edges/FloatingConnectionLine.js';
+import type { SerializedModel, SerializedLocation, SerializedVariableDecl, SerializedAstNode, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 const LocationView = () => {
   let {locationName} = useParams()
@@ -366,7 +366,7 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
   );
 };
 
-function buildGraphFromLocation(location: SerializedLocation, getByReference: <T extends object>(ref: string | undefined) => T | undefined) {
+function buildGraphFromLocation(location: SerializedLocation, getByReference: <T extends SerializedAstNode>(ref: SerializedRef | undefined) => T | undefined) {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
   const knownIds = new Set(location.sublocations.map(s => s.name));
@@ -388,7 +388,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
 
   for (const exit of location.exits ?? []) {
     console.log(`exit.exit?.$ref ${exit.exit?.$ref}`);
-    const targetName = getByReference<SerializedLocation>(exit.exit?.$ref)?.name ?? 'Unknown';
+    const targetName = getByReference<SerializedLocation>(exit.exit)?.name ?? 'Unknown';
     console.log(`Processing exit ${exit.name} from ${location.name} to target ${targetName}`);
     // Add external target
     if (!knownIds.has(targetName)) {
@@ -429,7 +429,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
       position: { x: 0, y: 0 },
       data: {
         location: sub.name,
-        isEntry: getByReference<SerializedLocation>(location.entry?.entry.$ref)?.name === sub.name,
+        isEntry: getByReference<SerializedLocation>(location.entry?.entry)?.name === sub.name,
       },
       parentId: location.name,
     });
@@ -447,7 +447,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
 
     for (const exit of sub.exits ?? []) {
       console.log(`sub -> exit.exit?.$ref ${exit.exit?.$ref}`);
-      const targetName = getByReference<SerializedLocation>(exit.exit?.$ref)?.name ?? 'Unknown';
+      const targetName = getByReference<SerializedLocation>(exit.exit)?.name ?? 'Unknown';
       console.log(`Processing exit ${exit.name} from ${sub.name} to target ${targetName}`);
       // Add placeholder node for external targets
       if (!knownIds.has(targetName)) {
@@ -458,7 +458,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
           position: { x: 0, y: 0 },
           data: {
             location: targetName,
-            isEntry: getByReference<SerializedLocation>(location.entry?.entry.$ref)?.name === targetName,
+            isEntry: getByReference<SerializedLocation>(location.entry?.entry)?.name === targetName,
           },
         });
       }

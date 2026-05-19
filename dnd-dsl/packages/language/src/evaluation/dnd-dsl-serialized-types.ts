@@ -1,7 +1,7 @@
-import type * as ast from '../dnd-language/language/src/generated/ast.js';
+import type * as ast from '../generated/ast.js';
 import type { Reference, AstNode } from 'langium';
 
-/** A Langium cross-reference after JSON serialization: { "$ref": "/World/locations/0" } */
+/** A Langium cross-reference after JSON serialization: { "$ref": "#/World/locations@0" } */
 export type SerializedRef = { $ref: string };
 
 // Langium node fields that are not emitted by JsonSerializer
@@ -31,3 +31,5 @@ export type SerializedFunctionDecl   = SerializedNode<ast.FunctionDeclaration>;
 export type SerializedVariableDecl   = SerializedNode<ast.VariableDeclaration>;
 export type SerializedExpression     = SerializedNode<ast.Expression>;
 export type SerializedCodeBlock      = SerializedNode<ast.CodeBlock>;
+
+export type SerializedAstNode       = SerializedNode<AstNode>;

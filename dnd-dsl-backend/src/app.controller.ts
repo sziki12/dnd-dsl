@@ -1,12 +1,12 @@
-import { Controller, Get, Post, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
 import { AppService } from './app.service.js';
 import { LangiumParserService } from './langium-parser/langium-parser.service.js';
 import { pathToFileURL } from 'url';
-import { Model } from '@dnd-language/index.js';
-import { parseModel, stringifyModel } from '@dnd-cli/main.js';
 import { LangiumInterpreterService } from './langium-interpreter/langium-interpreter.service.js';
 import { ConfigurationService } from './configuration/configuration.service.js';
 import { FileService } from './file/file.service.js';
+import { WorldStateService } from './world-state/world-state.service.js';
+import type { SerializedRef } from './command/command.types.js';
 
 @Controller()
 export class AppController {
@@ -16,70 +16,51 @@ export class AppController {
     private readonly interpreterService: LangiumInterpreterService,
     private readonly configurationService: ConfigurationService,
     private readonly fileService: FileService,
+    private readonly worldStateService: WorldStateService,
   ) {
-      configurationService.readConfig()
+    configurationService.readConfig()
   }
 
-  private worldState : any = {};
-  private model : Model | undefined = undefined;
   @Get()
   getHello(): string {
-    return this.appService.getHello();
+    return this.appService.getHello()
   }
 
-
-  
-  @Post("/state/parse")
-  async parseLanguage(@Query("adventure") adventure: string, @Query("world") world: string) {
-    this.model = (await parseModel(this.fileService.getDnDFilePath(adventure, world)));
-    return "Model generated successfully";
+  @Post('/state/parse')
+  async parseLanguage(@Query('adventure') adventure: string, @Query('world') world: string) {
+    await this.worldStateService.loadFromFile(this.fileService.getDnDFilePath(adventure, world))
+    return 'Model generated successfully'
   }
 
-  @Post("/execute")
+  @Post('/execute')
   async executeLanguage() {
-    const fileUrl = pathToFileURL("./language-output/generated.js").href + `?update=${Date.now()}`;
-    const generatedModule = await import(fileUrl);
-
-    return generatedModule;
+    const fileUrl = pathToFileURL('./language-output/generated.js').href + `?update=${Date.now()}`
+    const generatedModule = await import(fileUrl)
+    return generatedModule
   }
 
-  @Get("/state/load")
+  @Get('/state/load')
   async loadLocations() {
-    if(this.model === undefined)
-      return
-
-    //const fileUrl = pathToFileURL("./language-output/worldstate.js").href + `?update=${Date.now()}`;
-    //const worldStetModule = await import(fileUrl);
-    this.worldState = JSON.parse(stringifyModel(this.model));
-    
-    this.worldState["functions"] = []
-    this.worldState["functions"][0] = (min, max) => {return Math.random()*(max-min)+min}
-
-    //console.log(this.worldState["functions"]["Random"](10,20))
-    //worldStetModule["initWorldState"](this.worldState);
-    return this.worldState;
+    const state = this.worldStateService.getWorldState()
+    if (!state || Object.keys(state).length === 0) return undefined
+    return state
   }
 
-  @Post("/declare/:name/:value")
+  @Post('/declare/:name/:value')
   async declare(@Param() params: any) {
-    this.worldState[params.name] = params.value
-    return this.worldState;
+    const state = this.worldStateService.getWorldState()
+    state[params.name] = params.value
+    this.worldStateService.setWorldState(state)
+    return state
   }
 
-  @Get("/world")
+  @Get('/world')
   async getWorldState() {
-    return this.worldState;
+    return this.worldStateService.getWorldState()
   }
 
-  @Post("/resolve")
-  async resolveReference(@Query('reference') reference: string) {
-    if(this.model === undefined)
-      return undefined;
-
-    if(!reference.startsWith("#"))
-        reference = `#${reference}`;
-
-    console.log(`Resolving reference: ${reference}`);
-    return this.interpreterService.parseReference(this.model, reference);
+  @Post('/resolve')
+  async resolveReference(@Body() reference: SerializedRef) {
+    return this.worldStateService.resolveReference(reference)
   }
 }
