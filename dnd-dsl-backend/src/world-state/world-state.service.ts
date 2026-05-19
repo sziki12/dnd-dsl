@@ -4,6 +4,8 @@ import { parseModel, stringifyNode } from '@dnd-cli/main.js';
 import { parseReferenceFromModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 import { SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import { get } from 'http';
+import { predefinedFunctions, predefinedFunctionsAsMap } from '../predefined/predefined-functions.js';
 
 export type FunctionSummary = {
   name: string;
@@ -11,9 +13,21 @@ export type FunctionSummary = {
   description?: string;
 };
 
+export type PredefinedFunctionSummary = {
+  name: string;
+  params: string[];
+  description?: string;
+  code: (...args: any[]) => any;
+};
+
 export type EventSummary = {
   name: string;
   description?: string;
+};
+
+export type DeclaredFunctionsResponse = {
+  functions: FunctionSummary[];
+  predefinedFunctions: PredefinedFunctionSummary[];
 };
 
 @Injectable()
@@ -27,6 +41,8 @@ export class WorldStateService {
   async loadFromFile(filePath: string): Promise<any> {
     this._model = await parseModel(filePath);
     this._worldState = JSON.parse(stringifyNode(this._model));
+    // Inject predefined functions into the world state so they can be called from the interpreted code.
+    this._worldState.predefinedFunctions = predefinedFunctionsAsMap;
     // this.pathCache.invalidateAll();
     return this._worldState;
   }
@@ -50,13 +66,16 @@ export class WorldStateService {
   //  return this.pathCache.toRef(this._worldState, node);
   //}
 
-  getFunctions(): FunctionSummary[] {
-    if (!this._model) return [];
-    return this._model.World.functions.map(f => ({
-      name: f.name,
-      params: f.params.map(p => p.name ?? p.target ?? ''),
-      description: f.description,
-    }));
+  getFunctions(): DeclaredFunctionsResponse {
+    if (!this._model) return { functions: [], predefinedFunctions: [] };
+    return {
+      functions : this._model.World.functions.map(f => ({
+        name: f.name,
+        params: f.params.map(p => p.name ?? p.target ?? ''),
+        description: f.description,
+      })),
+      predefinedFunctions: predefinedFunctions
+    }
   }
 
   getEvents(): EventSummary[] {

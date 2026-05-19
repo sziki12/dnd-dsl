@@ -21,6 +21,7 @@ import {
     VariableDeclaration,
 } from '@dnd-language/index.js';
 import { Injectable } from '@nestjs/common';
+import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
 
 type RuntimeScope = Record<string, any>;
 
@@ -30,10 +31,6 @@ class ReturnSignal {
 
 @Injectable()
 export class LangiumInterpreterService {
-
-    private readonly predefinedFunctions: Record<string, (...args: any[]) => any> = {
-        randomfv: (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min,
-    };
 
     evaluateExpression(scope: RuntimeScope, expression: Expression): any {
         if (isIntVal(expression)) {
@@ -112,7 +109,7 @@ export class LangiumInterpreterService {
         const args = call.params.map(p => this.evaluateExpression(scope, p));
 
         if (call.predefined) {
-            const fn = this.predefinedFunctions[call.predefinedTarget!];
+            const fn = predefinedFunctionsAsMap[call.predefinedTarget!];
             if (!fn) throw new Error(`Unknown predefined function: ${call.predefinedTarget}`);
             return fn(...args);
         }
@@ -137,7 +134,7 @@ export class LangiumInterpreterService {
         let decl = model.World.functions.find(f => f.name === functionName);
         if(!decl) {
             console.log("Calling predefined function:", functionName, args);
-            const predefined = this.predefinedFunctions[functionName];
+            const predefined = predefinedFunctionsAsMap[functionName];
             if (!predefined) throw new Error(`Function '${functionName}' not found`);
 
             const result = predefined(...args);
