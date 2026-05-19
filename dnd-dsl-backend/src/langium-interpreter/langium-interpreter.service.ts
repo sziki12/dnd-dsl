@@ -15,6 +15,7 @@ import {
     isObjectDeclaration,
     isRefChain,
     isStringVal,
+    Model,
     RefChain,
     ReturnStatement,
     VariableDeclaration,
@@ -113,6 +114,23 @@ export class LangiumInterpreterService {
 
         const decl = call.target?.val.ref;
         if (!decl) throw new Error(`Unresolved function ref: ${call.target?.val.$refText}`);
+        return this.callFunctionDecl(scope, decl, args);
+    }
+
+    triggerEventByName(model: Model, eventName: string, scope: RuntimeScope) {
+        const eventDecl = model.World.events.find(e => e.name === eventName);
+        if (!eventDecl) throw new Error(`Event '${eventName}' not found`);
+        if(!eventDecl.codeBlock) return;
+        this.runCodeBlock(scope, eventDecl.codeBlock);
+    }
+
+    /**
+     * Look up a function by name in the parsed model and execute it.
+     * Returns the function's return value, or undefined if the function has no return statement.
+     */
+    callFunctionByName(model: Model, functionName: string, args: any[], scope: RuntimeScope): any {
+        const decl = model.World.functions.find(f => f.name === functionName);
+        if (!decl) throw new Error(`Function '${functionName}' not found`);
         return this.callFunctionDecl(scope, decl, args);
     }
 
