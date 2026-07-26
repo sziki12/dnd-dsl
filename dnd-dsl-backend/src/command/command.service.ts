@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { WorldStateService } from '../world-state/world-state.service.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 
-import { parseReferenceFromModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
-import { Model } from '@dnd-language/index.js';
+import { isVariableDeclaration } from '@dnd-language/index.js';
+import { statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import {
   AssignRuntimeVariableCommand,
   AssignVariableCommand,
@@ -16,35 +16,15 @@ import {
 
 type HistoryEntry = {
   command: Command;
-  /** Deep-cloned snapshot of worldState before this command was applied */
-  previousState: any;
+  previousOverlay: Record<string, unknown>;
+  previousRuntimeVars: Record<string, unknown>;
+  /** Only captured for CALL_FUNCTION/TRIGGER_EVENT. Lets redo restore the exact
+   *  post-execution result instead of re-running the interpreter, which could be
+   *  non-deterministic (e.g. a predefined random function). Every other command
+   *  type is pure/deterministic, so its redo just reapplies the command instead. */
+  postOverlay?: Record<string, unknown>;
+  postRuntimeVars?: Record<string, unknown>;
 };
-
-
-// ─── Command handlers (operate on a deep-cloned state copy) ──────────────────
-
-function applySimulateDay(state: Model, _cmd: SimulateDayCommand): any {
-  // TODO: implement day tick — evaluate events, tick quests, apply resource changes
-  console.log(`Simulating day ${_cmd.dayNumber}`);
-  return state;
-}
-
-function applyAssignRuntimeVariable(state: any, cmd: AssignRuntimeVariableCommand): any {
-  state.runtimeVariables ??= {};
-  state.runtimeVariables[cmd.variableName] = cmd.newValue;
-  return state;
-}
-
-function applyAssignVariable(state: any, cmd: AssignVariableCommand): any {
-  const ref: any = parseReferenceFromModel(state, cmd);
-  if (!ref) return state;
-  const variable = (ref.variables ?? []).find((v: any) => v.target === cmd.variableName);
-  if (!variable) return state;
-  variable.value = cmd.newValue;
-  return state;
-}
-
-
 
 @Injectable()
 export class CommandService {
@@ -57,17 +37,14 @@ export class CommandService {
   ) {}
 
   execute(cmd: Command): CommandResponse {
-    if (cmd.type === 'CALL_FUNCTION') {
-      return this.executeCallFunction(cmd);
-    }
-    else if (cmd.type === 'TRIGGER_EVENT') {
-      return this.executeTriggerEvent(cmd);
-    }
+    if (cmd.type === 'CALL_FUNCTION') return this.executeCallFunction(cmd);
+    if (cmd.type === 'TRIGGER_EVENT') return this.executeTriggerEvent(cmd);
 
-    const previousState = structuredClone(this.worldStateService.getWorldState());
-    const updated = this.applyCommand(cmd, structuredClone(previousState));
-    this.worldStateService.setWorldState(updated);
-    this.history.push({ command: cmd, previousState });
+    const previousOverlay = structuredClone(this.worldStateService.getOverlay());
+    const previousRuntimeVars = structuredClone(this.getRuntimeVariables());
+    this.applyCommand(cmd);
+    this.worldStateService.persistOverlay();
+    this.history.push({ command: cmd, previousOverlay, previousRuntimeVars });
     this.future.splice(0);
     return this.buildResponse();
   }
@@ -76,7 +53,9 @@ export class CommandService {
     const entry = this.history.pop();
     if (entry) {
       this.future.unshift(entry);
-      this.worldStateService.setWorldState(structuredClone(entry.previousState));
+      this.worldStateService.restoreOverlay(structuredClone(entry.previousOverlay));
+      this.setRuntimeVariables(structuredClone(entry.previousRuntimeVars));
+      this.worldStateService.persistOverlay();
     }
     return this.buildResponse();
   }
@@ -84,11 +63,14 @@ export class CommandService {
   redo(): CommandResponse {
     const entry = this.future.shift();
     if (entry) {
-      if (entry.command.type === 'CALL_FUNCTION' || entry.command.type === 'TRIGGER_EVENT') return this.buildResponse();
-      const previousState = structuredClone(this.worldStateService.getWorldState());
-      const updated = this.applyCommand(entry.command, structuredClone(this.worldStateService.getWorldState()));
-      this.worldStateService.setWorldState(updated);
-      this.history.push({ command: entry.command, previousState });
+      if (entry.postOverlay) {
+        this.worldStateService.restoreOverlay(structuredClone(entry.postOverlay));
+        this.setRuntimeVariables(structuredClone(entry.postRuntimeVars ?? {}));
+      } else {
+        this.applyCommand(entry.command);
+      }
+      this.worldStateService.persistOverlay();
+      this.history.push(entry);
     }
     return this.buildResponse();
   }
@@ -97,10 +79,18 @@ export class CommandService {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No model loaded');
 
+    const previousOverlay = structuredClone(this.worldStateService.getOverlay());
+    const previousRuntimeVars = structuredClone(this.getRuntimeVariables());
+
     const state = this.worldStateService.getWorldState();
     const scope = { ...(state.runtimeVariables ?? {}) };
-
     const result = this.interpreterService.callFunctionByName(model, cmd.functionName, cmd.args, scope);
+
+    const postOverlay = structuredClone(this.worldStateService.getOverlay());
+    const postRuntimeVars = structuredClone(this.getRuntimeVariables());
+
+    this.history.push({ command: cmd, previousOverlay, previousRuntimeVars, postOverlay, postRuntimeVars });
+    this.future.splice(0);
 
     return { ...this.buildResponse(), result };
   }
@@ -109,7 +99,9 @@ export class CommandService {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No model loaded');
 
-    const previousState = structuredClone(this.worldStateService.getWorldState());
+    const previousOverlay = structuredClone(this.worldStateService.getOverlay());
+    const previousRuntimeVars = structuredClone(this.getRuntimeVariables());
+
     const state = this.worldStateService.getWorldState();
     state.runtimeVariables ??= {};
 
@@ -117,19 +109,58 @@ export class CommandService {
     // and VariableDeclaration statements inside the event body persist.
     this.interpreterService.triggerEventByName(model, cmd.eventName, state.runtimeVariables);
 
-    this.history.push({ command: cmd, previousState });
+    const postOverlay = structuredClone(this.worldStateService.getOverlay());
+    const postRuntimeVars = structuredClone(this.getRuntimeVariables());
+
+    this.history.push({ command: cmd, previousOverlay, previousRuntimeVars, postOverlay, postRuntimeVars });
     this.future.splice(0);
+
     return this.buildResponse();
   }
 
-  private applyCommand(cmd: Command, state: Model): Model {
+  private applyCommand(cmd: Command): void {
     switch (cmd.type) {
-      case 'SIMULATE_DAY':    return applySimulateDay(state, cmd);
-      case 'ASSIGN_VARIABLE': return applyAssignVariable(state, cmd);
-      case 'ASSIGN_RUNTIME_VARIABLE': return applyAssignRuntimeVariable(state, cmd);
-
-      default: return state;
+      case 'SIMULATE_DAY': this.applySimulateDay(cmd); break;
+      case 'ASSIGN_VARIABLE': this.applyAssignVariable(cmd); break;
+      case 'ASSIGN_RUNTIME_VARIABLE': this.applyAssignRuntimeVariable(cmd); break;
     }
+  }
+
+  private applySimulateDay(cmd: SimulateDayCommand): void {
+    // TODO: implement day tick — evaluate events, tick quests, apply resource changes
+    console.log(`Simulating day ${cmd.dayNumber}`);
+  }
+
+  private applyAssignRuntimeVariable(cmd: AssignRuntimeVariableCommand): void {
+    const state = this.worldStateService.getWorldState();
+    state.runtimeVariables ??= {};
+    state.runtimeVariables[cmd.variableName] = cmd.newValue;
+  }
+
+  /** The client explicitly asked to assign to a specific path, so — unlike the state
+   *  overlay's own load-time merge, which treats an unresolved path as recoverable —
+   *  an unresolved or computed target here is a real error the client needs to see. */
+  private applyAssignVariable(cmd: AssignVariableCommand): void {
+    const model = this.worldStateService.getModel();
+    if (!model) throw new Error('No model loaded');
+
+    const node = statePathToNode(model, cmd.path);
+    if (!node || !isVariableDeclaration(node)) {
+      throw new Error(`Unresolved state path for ASSIGN_VARIABLE: ${JSON.stringify(cmd.path)}`);
+    }
+    if (node.isComputed === 'computed') {
+      throw new Error(`Cannot assign to computed variable at path: ${JSON.stringify(cmd.path)}`);
+    }
+
+    this.worldStateService.setOverlayEntry(cmd.path, cmd.newValue);
+  }
+
+  private getRuntimeVariables(): Record<string, unknown> {
+    return this.worldStateService.getWorldState().runtimeVariables ?? {};
+  }
+
+  private setRuntimeVariables(vars: Record<string, unknown>): void {
+    this.worldStateService.getWorldState().runtimeVariables = vars;
   }
 
   private buildResponse(): CommandResponse {

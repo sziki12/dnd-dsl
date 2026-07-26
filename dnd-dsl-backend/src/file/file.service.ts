@@ -17,4 +17,9 @@ export class FileService {
     {
         return `${this.configurationService.DefaultFilePath}/${adventure}/${world}.layout.json`
     }
+
+    getStateFilePath(adventure: string, world: string): string
+    {
+        return `${this.configurationService.DefaultFilePath}/${adventure}/${world}.state.json`
+    }
 }

@@ -1,11 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { Model } from '@dnd-language/index.js';
+import { isVariableDeclaration, Model } from '@dnd-language/index.js';
 import { parseModel, stringifyNode } from '@dnd-cli/main.js';
-import { parseReferenceFromModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
+import {
+  decodeStatePath,
+  encodeStatePath,
+  statePathToNode,
+  type StatePath,
+} from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
-import { SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
-import { get } from 'http';
 import { predefinedFunctions, predefinedFunctionsAsMap } from '../predefined/predefined-functions.js';
+import { type StateOverlayFile } from './state-overlay.types.js';
+import * as fs from 'fs';
 
 export type FunctionSummary = {
   name: string;
@@ -34,17 +39,29 @@ export type DeclaredFunctionsResponse = {
 export class WorldStateService {
   private _model: Model | undefined = undefined;
   private _worldState: any = {};
-  //readonly pathCache = new SerializedPathCache();
+  private _overlay: Record<string, unknown> = {};
+  private _staleOverlayEntries: StatePath[] = [];
+  private _statePath: string | undefined = undefined;
 
   constructor(private readonly interpreterService: LangiumInterpreterService) {}
 
-  async loadFromFile(filePath: string): Promise<any> {
-    this._model = await parseModel(filePath);
-    this._worldState = JSON.parse(stringifyNode(this._model));
-    // Inject predefined functions into the world state so they can be called from the interpreted code.
-    this._worldState.predefinedFunctions = predefinedFunctionsAsMap;
-    // this.pathCache.invalidateAll();
+  async loadFromFile(dndFilePath: string, statePath?: string): Promise<any> {
+    this._model = await parseModel(dndFilePath);
+    this._statePath = statePath;
+    this._overlay = statePath && fs.existsSync(statePath)
+      ? (JSON.parse(fs.readFileSync(statePath, 'utf-8')) as StateOverlayFile).entries
+      : {};
+    this.rebuildWorldState();
     return this._worldState;
+  }
+
+  /** Writes the current overlay to the `.state.json` sidecar it was loaded with (a
+   *  no-op if it wasn't loaded from a file path, e.g. in a unit test). Called by
+   *  CommandService after every mutating command. */
+  persistOverlay(): void {
+    if (!this._statePath) return;
+    const overlayFile: StateOverlayFile = { version: 1, entries: this._overlay };
+    fs.writeFileSync(this._statePath, JSON.stringify(overlayFile, null, 2), 'utf-8');
   }
 
   getModel(): Model | undefined {
@@ -57,14 +74,7 @@ export class WorldStateService {
 
   setWorldState(state: any): void {
     this._worldState = state;
-    // Old WeakMap entries for the previous state objects will be GC'd automatically.
-    // this.pathCache.invalidateAll();
   }
-
-  /** Get a $ref for any node currently in the serialized state tree. */
-  //toRef(node: object): SerializedRef | undefined {
-  //  return this.pathCache.toRef(this._worldState, node);
-  //}
 
   getFunctions(): DeclaredFunctionsResponse {
     if (!this._model) return { functions: [], predefinedFunctions: [] };
@@ -86,12 +96,63 @@ export class WorldStateService {
     }));
   }
 
-  async resolveReference(reference: SerializedRef): Promise<any> {
-    if (!this._model) return undefined;
-    if (!reference.$ref.startsWith('#')) reference.$ref = `#${reference.$ref}`;
-    console.log(`Resolving reference: ${reference.$ref}`);
-    const node = parseReferenceFromModel(this._model, reference);
-    if (!node) return undefined;
-    return stringifyNode(node);
+  getOverlay(): Record<string, unknown> {
+    return this._overlay;
+  }
+
+  getStaleOverlayEntries(): StatePath[] {
+    return this._staleOverlayEntries;
+  }
+
+  /** Writes one overlay entry and immediately re-splices `_worldState` so
+   *  `getWorldState()` reflects it without a full reload. This is meant to be the
+   *  only way `_worldState`'s variable values change post-load — see CommandService. */
+  setOverlayEntry(path: StatePath, value: unknown): void {
+    this._overlay[encodeStatePath(path)] = value;
+    this.spliceOverlayValue(path, value);
+  }
+
+  /** Replaces the whole overlay (undo/redo) and rebuilds `_worldState` from scratch
+   *  against it, so no stray in-place mutation from before the swap can linger. */
+  restoreOverlay(overlay: Record<string, unknown>): void {
+    this._overlay = overlay;
+    this.rebuildWorldState();
+  }
+
+  /** Drops all overlay entries, reverting `_worldState` to the `.dnd`-declared defaults. */
+  resetOverlay(): void {
+    this._overlay = {};
+    this.rebuildWorldState();
+  }
+
+  private rebuildWorldState(): void {
+    if (!this._model) {
+      this._worldState = {};
+      this._staleOverlayEntries = [];
+      return;
+    }
+    this._worldState = JSON.parse(stringifyNode(this._model));
+    this._worldState.predefinedFunctions = predefinedFunctionsAsMap;
+    this._staleOverlayEntries = this.applyOverlay();
+  }
+
+  private applyOverlay(): StatePath[] {
+    const stale: StatePath[] = [];
+    for (const [encodedPath, value] of Object.entries(this._overlay)) {
+      const path = decodeStatePath(encodedPath);
+      if (!this.spliceOverlayValue(path, value)) stale.push(path);
+    }
+    return stale;
+  }
+
+  /** Resolves `path` against the serialized `_worldState` (structurally generic — walks
+   *  plain JSON the same way it walks real AST nodes) and, if it points at a non-computed
+   *  variable, writes `value` into it. Returns false without writing anything if the path
+   *  no longer resolves or now points at something else (renamed/removed/became computed). */
+  private spliceOverlayValue(path: StatePath, value: unknown): boolean {
+    const node = statePathToNode(this._worldState, path);
+    if (!node || !isVariableDeclaration(node) || node.isComputed === 'computed') return false;
+    (node as any).value = value;
+    return true;
   }
 }

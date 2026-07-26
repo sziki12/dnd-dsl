@@ -1,5 +1,6 @@
 /** This file defines the shape of commands that can be issued to the DnD DSL interpreter. */
 
+import type { StatePath } from './dnd-dsl-state-path.js';
 
 export type SimulateDayCommand = {
   type: 'SIMULATE_DAY';
@@ -13,11 +14,11 @@ export type AssignRuntimeVariableCommand = {
   newValue: any;
 };
 
-/** Assign a value to a named variable in the interpreter runtime scope. */
+/** Assign a value to a declared (non-computed) `let` variable, addressed by its
+ *  stable name-based path rather than a positional $ref — see dnd-dsl-state-path.ts. */
 export type AssignVariableCommand = {
   type: 'ASSIGN_VARIABLE';
-  $ref: string;
-  variableName: string;
+  path: StatePath;
   newValue: any;
 };
 

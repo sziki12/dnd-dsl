@@ -3,15 +3,18 @@ import fs from "fs"
 import { type FileDto } from "./dto/save-file.dto.js"
 import { ConfigurationService } from '../configuration/configuration.service.js';
 import { FileService } from './file.service.js';
+import { WorldStateService } from '../world-state/world-state.service.js';
+import { EMPTY_STATE_OVERLAY, type StateOverlayFile } from '../world-state/state-overlay.types.js';
 
 @Controller('file')
 export class FileController {
-    
+
     world: string = ""
     adventure: string = ""
     constructor(
         private readonly configurationService: ConfigurationService,
-        private readonly fileService: FileService
+        private readonly fileService: FileService,
+        private readonly worldStateService: WorldStateService,
       ) {
         this.world = configurationService.WorldName!
         this.adventure = configurationService.AdventureName!
@@ -59,5 +62,20 @@ export class FileController {
         if (!fs.existsSync(layoutPath)) return {};
         const allLayouts = JSON.parse(fs.readFileSync(layoutPath, 'utf-8'));
         return allLayouts[location] ?? {};
+    }
+
+    @Get('state/load')
+    loadState(@Query('adventure') adventure: string, @Query('world') world: string): StateOverlayFile {
+        const statePath = this.fileService.getStateFilePath(adventure, world);
+        if (!fs.existsSync(statePath)) return EMPTY_STATE_OVERLAY;
+        return JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+    }
+
+    @Post('state/reset')
+    resetState(@Query('adventure') adventure: string, @Query('world') world: string): { success: boolean } {
+        const statePath = this.fileService.getStateFilePath(adventure, world);
+        if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+        this.worldStateService.resetOverlay();
+        return { success: true };
     }
 }
