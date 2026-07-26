@@ -3,7 +3,7 @@ import { WorldStateService } from '../world-state/world-state.service.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 
 import { isVariableDeclaration } from '@dnd-language/index.js';
-import { statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import {
   AssignRuntimeVariableCommand,
   AssignVariableCommand,
@@ -139,17 +139,27 @@ export class CommandService {
 
   /** The client explicitly asked to assign to a specific path, so — unlike the state
    *  overlay's own load-time merge, which treats an unresolved path as recoverable —
-   *  an unresolved or computed target here is a real error the client needs to see. */
+   *  an unresolved or computed target here is a real error the client needs to see.
+   *
+   *  If the leaf variable itself doesn't exist yet, that's not an error as long as its
+   *  parent container does (a real Location/Quest/etc, or an already-declared `object`
+   *  block) — ASSIGN_VARIABLE creates it in that case. WorldStateService.setOverlayEntry
+   *  does the actual creation (see spliceOverlayValue), since that logic also has to run
+   *  on every rebuild (undo/redo/restart), not just here. */
   private applyAssignVariable(cmd: AssignVariableCommand): void {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No model loaded');
 
     const node = statePathToNode(model, cmd.path);
-    if (!node || !isVariableDeclaration(node)) {
+    if (node) {
+      if (!isVariableDeclaration(node)) {
+        throw new Error(`Path does not point to a variable: ${JSON.stringify(cmd.path)}`);
+      }
+      if (node.isComputed === 'computed') {
+        throw new Error(`Cannot assign to computed variable at path: ${JSON.stringify(cmd.path)}`);
+      }
+    } else if (!resolveVariableContainer(model, cmd.path)) {
       throw new Error(`Unresolved state path for ASSIGN_VARIABLE: ${JSON.stringify(cmd.path)}`);
-    }
-    if (node.isComputed === 'computed') {
-      throw new Error(`Cannot assign to computed variable at path: ${JSON.stringify(cmd.path)}`);
     }
 
     this.worldStateService.setOverlayEntry(cmd.path, cmd.newValue);

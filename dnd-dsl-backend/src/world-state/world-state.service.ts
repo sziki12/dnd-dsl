@@ -4,6 +4,7 @@ import { parseModel, stringifyNode } from '@dnd-cli/main.js';
 import {
   decodeStatePath,
   encodeStatePath,
+  resolveVariableContainer,
   statePathToNode,
   type StatePath,
 } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
@@ -147,12 +148,24 @@ export class WorldStateService {
 
   /** Resolves `path` against the serialized `_worldState` (structurally generic — walks
    *  plain JSON the same way it walks real AST nodes) and, if it points at a non-computed
-   *  variable, writes `value` into it. Returns false without writing anything if the path
-   *  no longer resolves or now points at something else (renamed/removed/became computed). */
+   *  variable, writes `value` into it. If the leaf doesn't exist yet but its parent
+   *  container does (a real Location/Quest/etc, or an already-declared `object` block),
+   *  creates it — this is what lets ASSIGN_VARIABLE create a variable that wasn't
+   *  declared in the `.dnd` source, and it runs on every rebuild (load/undo/redo), so a
+   *  created variable persists the same way a real one does. Returns false without
+   *  writing anything if neither the leaf nor its parent resolve (renamed/removed
+   *  location, became computed, etc). */
   private spliceOverlayValue(path: StatePath, value: unknown): boolean {
     const node = statePathToNode(this._worldState, path);
-    if (!node || !isVariableDeclaration(node) || node.isComputed === 'computed') return false;
-    (node as any).value = value;
+    if (node) {
+      if (!isVariableDeclaration(node) || node.isComputed === 'computed') return false;
+      (node as any).value = value;
+      return true;
+    }
+
+    const containerInfo = resolveVariableContainer(this._worldState, path);
+    if (!containerInfo) return false;
+    containerInfo.variables.push({ $type: 'VariableDeclaration', target: containerInfo.target, value } as any);
     return true;
   }
 }

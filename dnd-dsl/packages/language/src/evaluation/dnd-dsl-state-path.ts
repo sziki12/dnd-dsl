@@ -133,6 +133,33 @@ export function statePathToNode(model: Model, path: StatePath): AstNode | undefi
     }, root);
 }
 
+/**
+ * Resolves everything in `path` except its final 'variable' segment, and returns the
+ * `.variables` array that segment's VariableDeclaration would live in — Location.variables,
+ * or a nested ObjectDeclaration's own .variables — plus the leaf's target name.
+ *
+ * This is what lets ASSIGN_VARIABLE create a variable that doesn't exist yet: the leaf
+ * variable itself is allowed to be missing, but its PARENT container is not — a real
+ * Location/Quest/etc, or an already-declared `object` block must already resolve.
+ * Deliberately does NOT auto-vivify a missing Location or a missing intermediate
+ * `object` block; only a missing leaf variable is creatable.
+ */
+export function resolveVariableContainer(model: Model, path: StatePath): { variables: VariableDeclaration[]; target: string } | undefined {
+    const last = path[path.length - 1];
+    if (!last || last.kind !== 'variable') return undefined;
+
+    const parentPath = path.slice(0, -1);
+    if (parentPath.length === 0) return undefined; // a lone 'variable' segment can't be a path head
+
+    const container = statePathToNode(model, parentPath);
+    if (!container) return undefined;
+
+    const variables = getVariablesArray(container);
+    if (!variables) return undefined;
+
+    return { variables, target: last.target };
+}
+
 /** Langium's `... infers Expression` grammar chain (Bool/Comparison/Int/PrimaryExpression)
  *  wraps a value in one or more generic `{ $type: 'Expression', exp: ... }` passthrough
  *  nodes whenever no operator is present at that level — e.g. `let Resources = object ... end`
