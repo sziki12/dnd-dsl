@@ -82,8 +82,8 @@ const LocationView = () => {
         
         {/* Tab Buttons */}
         <div className="flex gap-2 mb-4">
-          <button className="bg-gray-700 px-4 py-1 rounded text-sm hover:bg-gray-600">Variables</button>
-          <button className="bg-gray-700 px-4 py-1 rounded text-sm hover:bg-gray-600">NPCs</button>
+          <Button className="bg-gray-700 px-4 py-1 rounded text-sm hover:bg-gray-600">Variables</Button>
+          <Button className="bg-gray-700 px-4 py-1 rounded text-sm hover:bg-gray-600">NPCs</Button>
         </div>
 
         {/* Content List */}
@@ -149,9 +149,9 @@ const LocationView = () => {
       {/* 3. Right Column: Map Panel */}
       <div className="flex-1 flex flex-col items-center justify-center min-w-75 max-w-full">
         {/* Map/Tree Toggle */}
-        <div className="flex gap-2 mb-4 self-center lg:self-end">
-          <button className="bg-gray-700 px-3 py-1 rounded text-xs">Map</button>
-          <button className="bg-gray-700 px-3 py-1 rounded text-xs">Tree</button>
+        <div className="flex gap-2 mb-4 pb-6 self-center lg:self-end">
+          <Button  className="bg-gray-700 px-3 py-1 rounded text-xs">Map</Button >
+          <Button  className="bg-gray-700 px-3 py-1 rounded text-xs">Tree</Button >
         </div>
 
         {/* Map Image Container */}
