@@ -31,5 +31,5 @@ export const DslEditor = () => {
     };
   }, [fileContext.loaded]);
 
-  return <div ref={containerRef} className='h-screen' />;
+  return <div ref={containerRef} className='h-full w-full' />;
 };

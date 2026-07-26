@@ -1,9 +1,6 @@
-import MenuAppBar from "./MenuAppBar"
+import AppShell from "./shell/AppShell"
 
 export default function PageWrapper({ children, name }: { children: React.ReactNode, name: string }) {
 
-    return (<>
-    <MenuAppBar name={name}/>
-     {children}
-    </>)
+    return <AppShell pageName={name}>{children}</AppShell>
 }

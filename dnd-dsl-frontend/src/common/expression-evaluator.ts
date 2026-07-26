@@ -15,6 +15,19 @@ export type SerialisedObjectDeclaration = {
 
 export type EvalResult = number | boolean | string | SerialisedObjectDeclaration;
 
+export type InferredKind = 'int' | 'string' | 'bool' | 'object' | 'unknown';
+
+/** SerializedVariableDecl has no `kind` field — infer a display kind from the runtime-evaluated value. */
+export function inferKind(value: EvalResult | null | undefined): InferredKind {
+    switch (typeof value) {
+        case 'number': return 'int';
+        case 'string': return 'string';
+        case 'boolean': return 'bool';
+        case 'object': return value === null ? 'unknown' : 'object';
+        default: return 'unknown';
+    }
+}
+
 export type EvaluateExpressionOptions = {
     variableName?: string,
     worldState?: SerializedModel,

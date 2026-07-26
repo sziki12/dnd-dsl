@@ -5,6 +5,7 @@ import App from './App.tsx'
 import '@xyflow/react/dist/base.css';
 import '@xyflow/react/dist/style.css';
 import './index.css';
+import './theme/darkplus.css';
 
 createRoot(document.getElementById('root')!).render(
   //<StrictMode>

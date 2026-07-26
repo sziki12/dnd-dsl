@@ -1,9 +1,11 @@
 import { useCallback, useState, useRef, useEffect, useContext } from 'react';
-import test_map_image from '../assets/test_map_image.webp';
 
-import { addEdge, Background, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Edge, type Node } from '@xyflow/react';
-import { evaluateExpression, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
-import Button from '@mui/material/Button';
+import { addEdge, Background, BackgroundVariant, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Edge, type Node } from '@xyflow/react';
+import { evaluateExpression, inferKind, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
+import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
+import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
+import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 
 import MapNode from '../nodes/MapNode.js';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -12,15 +14,20 @@ import { BackendURL } from '../contexts/BackendContext.js';
 import FloatingEdge from '../edges/FloatingEdge.js';
 import FloatingConnectionLine from '../edges/FloatingConnectionLine.js';
 import type { SerializedModel, SerializedLocation, SerializedVariableDecl, SerializedAstNode, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import { findLocation } from '../common/location-tree';
+import { layoutAsTree } from './tree-layout';
 
 const LocationView = () => {
   let {locationName} = useParams()
   let {worldState} = useContext(DslContext)
-  
+
   let [locationData, setLocationData] = useState<SerializedLocation | undefined>(undefined)
   // null = calculated but not resolvable (e.g. FunctionCall/RefChain)
   // undefined = not yet calculated (button not clicked)
   const [computedValues, setComputedValues] = useState<Record<string, EvalResult | null>>({})
+  const [leftTab, setLeftTab] = useState<'variables' | 'npcs'>('variables')
+  const [viewMode, setViewMode] = useState<'map' | 'tree'>('map')
+  const [selectedVariable, setSelectedVariable] = useState<string | null>(null)
 
   const calculateVariable = (variable: SerializedVariableDecl, key?: string) => {
     const storeKey = key ?? variable.target ?? ''
@@ -39,30 +46,45 @@ const LocationView = () => {
     setComputedValues(prev => ({ ...prev, ...updates }))
   }
 
+  const renderValueToken = (value: EvalResult | null | undefined) => {
+    if (value === null || value === undefined) return <span className="tok-comment italic">?</span>
+    const kind = inferKind(value)
+    if (kind === 'string') return <span className="tok-string">"{value as string}"</span>
+    if (kind === 'int') return <span className="tok-number">{value as number}</span>
+    if (kind === 'bool') return <span className="tok-keyword">{String(value)}</span>
+    return <span className="tok-operator">{String(value)}</span>
+  }
+
   const renderObjectProps = (obj: SerialisedObjectDeclaration, parentKey: string) => (
-    <>
+    <div style={{ marginLeft: 16, marginTop: 2 }}>
       {Object.entries(obj.staticProperties).map(([propName, propValue]) => (
-        <p key={propName}>{propName}: {propValue?.toString() ?? '?'}</p>
+        <div key={propName} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span className="tok-variable">{propName}</span>
+          <span className="tok-operator">=</span>
+          {renderValueToken(propValue)}
+        </div>
       ))}
       {obj.computedPropertyDecls.map((propDecl) => {
         const propKey = `${parentKey}.${propDecl.target ?? ''}`
         const hasPropCalc = propKey in computedValues
         const propComputed = computedValues[propKey]
         return (
-          <div key={propDecl.target} className="flex items-center gap-2">
-            <span>{propDecl.target}</span>
-            <Button variant="contained" size="small" onClick={() => calculateVariable(propDecl, propKey)}>
+          <div key={propDecl.target} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="tok-comment">computed</span>
+            <span className="tok-variable">{propDecl.target}</span>
+            <button className="var-calc-btn" onClick={() => calculateVariable(propDecl, propKey)}>
               Calculate
-            </Button>
+            </button>
             {hasPropCalc && (
-              propComputed === null
-                ? <span className="text-gray-500 italic">?</span>
-                : <span>= {propComputed!.toString()}</span>
+              <>
+                <span className="tok-operator">=</span>
+                {renderValueToken(propComputed)}
+              </>
             )}
           </div>
         )
       })}
-    </>
+    </div>
   )
 
   useEffect(()=>{
@@ -71,93 +93,157 @@ const LocationView = () => {
     if(typeof(newLocation) == "undefined")
       return
     setLocationData(newLocation)
+    setSelectedVariable(null)
     console.log(`Loaded location data for ${locationName}:`, newLocation)
   },[worldState, locationName])
+
+  const selectedVar = locationData?.variables.find(v => v.target === selectedVariable)
+
   return (
-    // 1. Parent Container: use 'flex' and 'flex-col lg:flex-row' for responsiveness
-    <div className="h-screen w-full bg-slate-900 text-white p-4 flex flex-col lg:flex-row gap-4">
-      {/* 2. Left Column: Variables Panel */}
-      <div className="flex-1 flex flex-col items-center justify-center min-w-75 max-w-full">
-        <h1 className="text-4xl font-bold mb-6">{locationName}</h1>
-        
-        {/* Tab Buttons */}
-        <div className="flex gap-2 mb-4">
-          <Button className="bg-gray-700 px-4 py-1 rounded text-sm hover:bg-gray-600">Variables</Button>
-          <Button className="bg-gray-700 px-4 py-1 rounded text-sm hover:bg-gray-600">NPCs</Button>
+    <div className="h-full w-full flex flex-col lg:flex-row" style={{ background: 'var(--bg-editor)', color: 'var(--fg-primary)' }}>
+      {/* Left pane: Variables / NPCs */}
+      <div className="flex-1 flex flex-col min-w-75 max-w-full" style={{ borderRight: '1px solid var(--bd-divider)', minHeight: 0 }}>
+        <div className="pane-hd">
+          <div className="pane-tabs">
+            <button className={"pane-tab " + (leftTab === 'variables' ? 'active' : '')} onClick={() => setLeftTab('variables')}>
+              <CodeOutlinedIcon style={{ fontSize: 13 }} /> Variables
+              <span className="cnt">{locationData?.variables.length ?? 0}</span>
+            </button>
+            <button className={"pane-tab " + (leftTab === 'npcs' ? 'active' : '')} onClick={() => setLeftTab('npcs')}>
+              <PersonOutlineIcon style={{ fontSize: 13 }} /> NPCs
+            </button>
+          </div>
         </div>
 
-        {/* Content List */}
-        <div className="text-center space-y-2 text-gray-300">
-          <p className="text-sm font-semibold text-gray-400">Variables</p>
-          {
-            locationData?.variables.map((variable: SerializedVariableDecl) => {
-              const isComputed = variable.isComputed === 'computed'
-              console.log(`Variable ${variable.target} is computed: ${isComputed}`)
-              if (isComputed) {
-                const key = variable.target ?? ''
-                const hasCalculated = key in computedValues
-                const computed = computedValues[key]
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          {leftTab === 'variables' ? (
+            <>
+              <div className="var-banner">
+                <h1>{locationName}</h1>
+              </div>
+              <div style={{ padding: '8px 0' }}>
+                {locationData?.variables.map((variable: SerializedVariableDecl, i: number) => {
+                  const isComputed = variable.isComputed === 'computed'
+                  const isSelected = selectedVariable === variable.target
 
-                // Evaluate eagerly to get object structure for preview (safe — ObjectDeclaration has no side effects)
-                const preview = evaluateExpression(variable.value, { variableName: variable.target, worldState })
-                const previewObj = preview !== null && typeof preview === 'object'
-                  ? preview as SerialisedObjectDeclaration
-                  : undefined
+                  if (isComputed) {
+                    const key = variable.target ?? ''
+                    const hasCalculated = key in computedValues
+                    const computed = computedValues[key]
 
-                return (
-                  <div key={variable.target} className="flex flex-col items-center gap-1">
-                    <div className="flex items-center gap-2">
-                      <span>{variable.target}</span>
-                      <Button variant="contained" size="small" onClick={() => calculateVariable(variable)}>
-                        Calculate
-                      </Button>
-                    </div>
-                    {previewObj ? (
-                      <div className="border p-2 rounded bg-gray-800 w-full text-left">
-                        {renderObjectProps(previewObj, key)}
+                    // Evaluate eagerly to get object structure for preview (safe — ObjectDeclaration has no side effects)
+                    const preview = evaluateExpression(variable.value, { variableName: variable.target, worldState })
+                    const previewObj = preview !== null && typeof preview === 'object'
+                      ? preview as SerialisedObjectDeclaration
+                      : undefined
+
+                    return (
+                      <div
+                        key={variable.target}
+                        className={"var-row " + (isSelected ? 'selected' : '')}
+                        style={{ alignItems: 'flex-start' }}
+                        onClick={() => setSelectedVariable(variable.target ?? null)}
+                      >
+                        <div className="gutter">{i + 1}</div>
+                        <div>
+                          <div className="declaration">
+                            <span className="tok-comment">computed</span>
+                            <span className="tok-variable">{variable.target}</span>
+                            {!previewObj && (
+                              <button className="var-calc-btn" onClick={(e) => { e.stopPropagation(); calculateVariable(variable) }}>
+                                Calculate
+                              </button>
+                            )}
+                            {!previewObj && hasCalculated && (
+                              <>
+                                <span className="tok-operator">=</span>
+                                {renderValueToken(computed)}
+                              </>
+                            )}
+                          </div>
+                          {previewObj && renderObjectProps(previewObj, key)}
+                        </div>
                       </div>
-                    ) : hasCalculated && (
-                      computed === null
-                        ? <span className="text-gray-500 italic">= ?</span>
-                        : <span className="text-gray-300">= {computed!.toString()}</span>
-                    )}
-                  </div>
-                )
-              }
+                    )
+                  }
 
-              let value = evaluateExpression(variable.value, { variableName: variable.target, worldState })
-              if (typeof value === 'object') {
-                const obj = value as SerialisedObjectDeclaration
-                return (
-                  <div key={variable.target} className="border p-2 rounded bg-gray-800">
-                    <p className="font-bold">{variable.target}</p>
-                    <div className="text-left ml-4">
-                      {renderObjectProps(obj, variable.target ?? '')}
+                  const value = evaluateExpression(variable.value, { variableName: variable.target, worldState })
+                  if (typeof value === 'object') {
+                    const obj = value as SerialisedObjectDeclaration
+                    return (
+                      <div
+                        key={variable.target}
+                        className={"var-row " + (isSelected ? 'selected' : '')}
+                        style={{ alignItems: 'flex-start' }}
+                        onClick={() => setSelectedVariable(variable.target ?? null)}
+                      >
+                        <div className="gutter">{i + 1}</div>
+                        <div>
+                          <div className="declaration">
+                            <span className="tok-keyword">object</span>
+                            <span className="tok-variable">{variable.target}</span>
+                          </div>
+                          {renderObjectProps(obj, variable.target ?? '')}
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  const kind = inferKind(value)
+                  return (
+                    <div
+                      key={variable.target}
+                      className={"var-row " + (isSelected ? 'selected' : '')}
+                      onClick={() => setSelectedVariable(variable.target ?? null)}
+                    >
+                      <div className="gutter">{i + 1}</div>
+                      <div className="declaration">
+                        <span className="tok-keyword">{kind === 'unknown' ? 'let' : kind}</span>
+                        <span className="tok-variable">{variable.target}</span>
+                        <span className="tok-operator">=</span>
+                        {renderValueToken(value)}
+                      </div>
                     </div>
+                  )
+                })}
+              </div>
+
+              {selectedVar && (
+                <div className="var-doc">
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span className="tok-type">{selectedVar.isComputed === 'computed' ? 'computed' : 'let'}</span>
+                    <span className="tok-variable">{selectedVar.target}</span>
                   </div>
-                )
-              }
-              return (<p key={variable.target}>{variable.target} = {value?.toString() ?? '?'}</p>)
-            })
-          }
-          <p className="text-xs italic text-gray-500 max-w-xs mt-4">
-            Lorem ipsum dolor sit amet, consectetur adipiscing elit...
-          </p>
+                  <div className="meta">
+                    <span><strong>computed:</strong> {selectedVar.isComputed === 'computed' ? 'yes' : 'no'}</span>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="npc-stub">
+              No NPC data available — not supported by the current DSL grammar yet.
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 3. Right Column: Map Panel */}
-      <div className="flex-1 flex flex-col items-center justify-center min-w-75 max-w-full">
-        {/* Map/Tree Toggle */}
-        <div className="flex gap-2 mb-4 pb-6 self-center lg:self-end">
-          <Button  className="bg-gray-700 px-3 py-1 rounded text-xs">Map</Button >
-          <Button  className="bg-gray-700 px-3 py-1 rounded text-xs">Tree</Button >
+      {/* Right pane: Map / Tree */}
+      <div className="flex-1 flex flex-col min-w-75 max-w-full" style={{ minHeight: 0 }}>
+        <div className="pane-hd">
+          <div className="pane-tabs">
+            <button className={"pane-tab " + (viewMode === 'map' ? 'active' : '')} onClick={() => setViewMode('map')}>
+              <RoomOutlinedIcon style={{ fontSize: 13 }} /> Map
+            </button>
+            <button className={"pane-tab " + (viewMode === 'tree' ? 'active' : '')} onClick={() => setViewMode('tree')}>
+              <AccountTreeOutlinedIcon style={{ fontSize: 13 }} /> Tree
+            </button>
+          </div>
         </div>
 
-        {/* Map Image Container */}
-        <div className="w-full h-[60vw] max-h-[80vh] min-h-75 min-w-75 flex items-center justify-center">
+        <div style={{ flex: 1, minHeight: 0 }}>
           <ReactFlowProvider>
-            <MapFlow location={locationData} />
+            <MapFlow location={locationData} mode={viewMode} />
           </ReactFlowProvider>
         </div>
       </div>
@@ -166,7 +252,7 @@ const LocationView = () => {
   );
 };
 
-const MapFlow = ({location}: { location: SerializedLocation | undefined }) => {
+const MapFlow = ({location, mode}: { location: SerializedLocation | undefined, mode: 'map' | 'tree' }) => {
 const navigate = useNavigate();
 const containerRef = useRef<HTMLDivElement>(null);
 let { getByReference, adventure, world } = useContext(DslContext)
@@ -283,6 +369,11 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
     const graph = buildGraphFromLocation(location, getByReference) || buildDefaultGraph();
     setEdges(graph.edges);
 
+    if (mode === 'tree') {
+      setNodes(layoutAsTree(graph.nodes, location.name));
+      return;
+    }
+
     fetch(`${BackendURL}/file/layout/load?adventure=${adventure}&world=${world}&location=${encodeURIComponent(location.name)}`)
       .then(r => r.json())
       .then((saved: Record<string, { x: number; y: number }>) => {
@@ -291,10 +382,10 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
         ));
       })
       .catch(() => setNodes(graph.nodes));
-  }, [location?.name]);
+  }, [location?.name, mode]);
 
   useEffect(() => {
-    if (typeof location == "undefined") return;
+    if (typeof location == "undefined" || mode !== 'map') return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.key !== 's') return;
@@ -309,11 +400,11 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [nodes, location?.name, adventure, world]);
+  }, [nodes, location?.name, adventure, world, mode]);
 
   return (
-    <div ref={containerRef} className="border-4 w-full aspect-square rounded-lg overflow-hidden bg-slate-800">   
-      {mapBounds[1][0] > 0 && 
+    <div ref={containerRef} className="w-full h-full overflow-hidden" style={{ background: 'var(--bg-editor)' }}>
+      {mapBounds[1][0] > 0 &&
       (
         <ReactFlow
           // Nodes and Edges
@@ -344,21 +435,15 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
           zoomOnPinch={false}
           zoomOnDoubleClick={false}
           preventScrolling={true}
-          nodesDraggable={true}
+          nodesDraggable={mode === 'map'}
           // Styles
         >
-          {/* The Image Layer */}
-          <Background 
-            style={{
-              backgroundImage: `url('${test_map_image}')`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              opacity: 0.6,
-            }}
-            color="transparent" 
-          />
-          <Panel position="top-right" className="bg-gray-100 p-2 rounded shadow text-black ">
-            Canvas Locked | Nodes Draggable
+          <Background variant={BackgroundVariant.Dots} color="var(--bd-soft)" gap={16} />
+          <Panel position="top-right" style={{
+            background: 'var(--bg-panel)', border: '1px solid var(--bd-soft)', color: 'var(--fg-secondary)',
+            padding: '4px 10px', borderRadius: 4, fontSize: 11, fontFamily: 'var(--font-mono)',
+          }}>
+            {mode === 'map' ? 'Draggable · Ctrl+S to save' : 'Tree layout · read-only'}
           </Panel>
       </ReactFlow>
       )}
@@ -372,9 +457,9 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
   const knownIds = new Set(location.sublocations.map(s => s.name));
 
   const targetSize = 50;
-  
-  const lineColor = '#71797E'; // Steel Gray for exit edges
-  const markerColor = '#36454F'; // Charcoal for exit edges
+
+  const lineColor = '#9d9d9d'; // mirrors --fg-secondary — exit edges
+  const markerColor = '#cccccc'; // mirrors --fg-primary — exit edge arrowheads
   //Create current location node
   nodes.push({
           id: location.name,
@@ -440,7 +525,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
       type: 'floating',
       style: {
         strokeWidth: 1,
-        stroke: '#7FFFD4', // Aquamarine for sublocation edges
+        stroke: '#4ec9b0', // mirrors --syn-type — sublocation edges
         strokeDasharray: '5 5', // Dashed line for sublocation edges
       },
     });
@@ -516,15 +601,6 @@ const defaultEdges = [{
   }];
 
   return { nodes: defaultNodes, edges: defaultEdges };
-}
-
-function findLocation(locations: SerializedLocation[], name: string): SerializedLocation | undefined {
-  for (const loc of locations) {
-    if (loc.name === name) return loc;
-    const found = findLocation(loc.sublocations, name);
-    if (found) return found;
-  }
-  return undefined;
 }
 
 const getLocationData = (worldState: SerializedModel | undefined, locationName: string) => {
