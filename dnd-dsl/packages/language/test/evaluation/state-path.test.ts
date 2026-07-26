@@ -7,6 +7,7 @@ import {
     decodeStatePath,
     encodeStatePath,
     nodeToStatePath,
+    resolveVariableContainer,
     statePathToNode,
     type StatePath,
 } from "../../src/evaluation/dnd-dsl-state-path.js";
@@ -142,6 +143,64 @@ describe('StatePath round-trip', () => {
         `);
         const localDecl = model.World.functions[0].codeBlock!.code[0] as any; // VariableDeclaration 'temp'
         expect(nodeToStatePath(localDecl)).toBeUndefined();
+    });
+
+    describe('resolveVariableContainer (leaf-only auto-creation support)', () => {
+
+        test('resolves the parent for a missing top-level Location variable', async () => {
+            const model = await parseModel(FIXTURE);
+            const result = resolveVariableContainer(model, [
+                { kind: 'location', name: 'High Castle' },
+                { kind: 'variable', target: 'Population' },
+            ]);
+            expect(result?.target).toBe('Population');
+            expect(result?.variables).toBe(model.World.locations[0].variables);
+        });
+
+        test('resolves the parent for a missing property inside an existing nested object', async () => {
+            const model = await parseModel(FIXTURE);
+            const resourcesPath: StatePath = [{ kind: 'location', name: 'High Castle' }, { kind: 'variable', target: 'Resources' }];
+            const objectDecl = statePathToNode(model, resourcesPath) as any;
+
+            const result = resolveVariableContainer(model, [...resourcesPath, { kind: 'variable', target: 'Silver' }]);
+            expect(result?.target).toBe('Silver');
+            expect(result?.variables).toBe(objectDecl.variables);
+        });
+
+        test('returns undefined when the Location itself does not exist', async () => {
+            const model = await parseModel(FIXTURE);
+            const result = resolveVariableContainer(model, [
+                { kind: 'location', name: 'Does Not Exist' },
+                { kind: 'variable', target: 'Population' },
+            ]);
+            expect(result).toBeUndefined();
+        });
+
+        test('returns undefined when an intermediate object block does not exist (no auto-vivifying intermediates)', async () => {
+            const model = await parseModel(FIXTURE);
+            const result = resolveVariableContainer(model, [
+                { kind: 'location', name: 'High Castle' },
+                { kind: 'variable', target: 'DoesNotExistEither' },
+                { kind: 'variable', target: 'Population' },
+            ]);
+            expect(result).toBeUndefined();
+        });
+
+        test('returns undefined for a path whose head is a variable segment', async () => {
+            const model = await parseModel(FIXTURE);
+            const result = resolveVariableContainer(model, [{ kind: 'variable', target: 'Population' }]);
+            expect(result).toBeUndefined();
+        });
+
+        test('returns undefined when the container has no .variables (e.g. an Event)', async () => {
+            const model = await parseModel(FIXTURE);
+            const result = resolveVariableContainer(model, [
+                { kind: 'event', name: 'Ambush' },
+                { kind: 'variable', target: 'Population' },
+            ]);
+            expect(result).toBeUndefined();
+        });
+
     });
 
 });
