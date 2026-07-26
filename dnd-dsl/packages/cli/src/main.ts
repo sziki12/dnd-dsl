@@ -3,13 +3,15 @@ import { createDndDslServices, DndDslServices } from '../../language/src/dnd-dsl
 import { DndDslLanguageMetaData } from '../../language/src/generated/module.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { extractDocument } from './util.js';
+import { extractDocument, DndDslParseError } from './util.js';
 import { generateJavaScript, /*generateWorldState*/ } from './generator.js';
 import { NodeFileSystem } from 'langium/node';
 import * as url from 'node:url';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { AstNode } from 'langium';
+
+export { DndDslParseError };
 
 export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
     var model: Model = await parseModel(fileName);
@@ -56,9 +58,7 @@ export const parseModel = async (fileName: string, paramServices: DndDslServices
     // 3. Ellenőrizd a linkelési hibákat
     const errors = document.diagnostics?.filter(d => d.severity === 1) ?? [];
     if (errors.length > 0) {
-        console.error(chalk.red("Linking errors found:"));
-        errors.forEach(e => console.error(chalk.red(` - ${e.message}`)));
-        process.exit(1);
+        throw new DndDslParseError('DSL validation failed', errors);
     }
     
     // 4. Most már biztonságos a model kinyerése

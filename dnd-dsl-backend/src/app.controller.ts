@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, Body, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, BadRequestException } from '@nestjs/common';
 import { AppService } from './app.service.js';
 import { LangiumParserService } from './langium-parser/langium-parser.service.js';
 import { pathToFileURL } from 'url';
@@ -7,7 +7,7 @@ import { ConfigurationService } from './configuration/configuration.service.js';
 import { FileService } from './file/file.service.js';
 import { WorldStateService } from './world-state/world-state.service.js';
 import { CommandService } from './command/command.service.js';
-import type { SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import { DndDslParseError } from '@dnd-cli/main.js';
 
 @Controller()
 export class AppController {
@@ -30,8 +30,18 @@ export class AppController {
 
   @Post('/parse')
   async parseLanguage(@Query('adventure') adventure: string, @Query('world') world: string) {
-    await this.worldStateService.loadFromFile(this.fileService.getDnDFilePath(adventure, world))
-    return 'Model generated successfully'
+    try {
+      await this.worldStateService.loadFromFile(
+        this.fileService.getDnDFilePath(adventure, world),
+        this.fileService.getStateFilePath(adventure, world),
+      )
+      return 'Model generated successfully'
+    } catch (e) {
+      if (e instanceof DndDslParseError) {
+        throw new BadRequestException({ success: false, errors: e.diagnostics.map(d => d.message) })
+      }
+      throw e
+    }
   }
 
   @Post('/execute')
@@ -39,14 +49,6 @@ export class AppController {
     const fileUrl = pathToFileURL('./language-output/generated.js').href + `?update=${Date.now()}`
     const generatedModule = await import(fileUrl)
     return generatedModule
-  }
-
-  @Post('/declare/:name/:value')
-  async declare(@Param() params: any) {
-    const state = this.worldStateService.getWorldState()
-    state[params.name] = params.value
-    this.worldStateService.setWorldState(state)
-    return state
   }
 
   @Get('/world')
@@ -72,12 +74,5 @@ export class AppController {
   @Post('/world/events/:name')
   triggerEvent(@Param('name') name: string) {
     return this.commandService.execute({ type: 'TRIGGER_EVENT', eventName: name })
-  }
-
-  @Post('/resolve')
-  @HttpCode(200)
-  async resolveReference(@Body() reference: SerializedRef) {
-    //console.log('Resolving reference via controller:', reference)
-    return this.worldStateService.resolveReference(reference)
   }
 }
