@@ -1,6 +1,5 @@
 import type { AstNode } from "langium";
 import type { Model } from "../generated/ast.js";
-import type { DndDslServices } from "../dnd-dsl-module.js";
 import type { SerializedAstNode, SerializedModel, SerializedRef } from "./dnd-dsl-serialized-types.js";
 
 // All three Langium imports above are TYPE-ONLY (used only as TypeScript type
@@ -47,9 +46,4 @@ function resolveReference<T>(model: any, reference: SerializedRef): T | undefine
     }
 
     return current as T;
-}
-
-export function convertNodeToReference(node: AstNode, services: DndDslServices): SerializedRef {
-    const path = services.workspace.AstNodeLocator.getAstNodePath(node);
-    return { $ref: `#${path}` };
 }
