@@ -10,10 +10,24 @@ import { ImageController } from './image/image.controller.js';
 import { LangiumExportService } from './langium-export/langium-export.service.js';
 import { FileService } from './file/file.service.js';
 import { ImageService } from './image/image.service.js';
+import { WorldStateService } from './world-state/world-state.service.js';
+import { CommandController } from './command/command.controller.js';
+import { CommandService } from './command/command.service.js';
 
 @Module({
   imports: [],
-  controllers: [AppController, FileController, ImageController],
-  providers: [AppService, LangiumParserService, LangiumInterpreterService, LangiumConnectionGateway, ConfigurationService, LangiumExportService, FileService, ImageService],
+  controllers: [AppController, FileController, ImageController, CommandController],
+  providers: [
+    AppService,
+    LangiumParserService,
+    LangiumInterpreterService,
+    LangiumConnectionGateway,
+    ConfigurationService,
+    LangiumExportService,
+    FileService,
+    ImageService,
+    WorldStateService,
+    CommandService,
+  ],
 })
 export class AppModule {}

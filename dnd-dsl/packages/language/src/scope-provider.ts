@@ -1,4 +1,5 @@
-import { AstNode, DefaultScopeProvider, MapScope, ReferenceInfo, Scope, stream } from "langium";
+import { DefaultScopeProvider, MapScope, stream } from "langium";
+import type { AstNode, ReferenceInfo, Scope } from "langium";
 import { isCodeBlock, isVariableDeclaration, isVariableRef, VariableDeclaration } from "./generated/ast.js";
 
 export class DndScopeProvider extends DefaultScopeProvider 
