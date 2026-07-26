@@ -125,9 +125,15 @@ ComparisonExpression infers Expression:
         right=IntExpression
     )?;
 IntExpression infers Expression:
+    exp=MultiplicativeExpression (
+        {infer IntExpression.left=current}
+        operator=('+' | '-')
+        right=MultiplicativeExpression
+    )*;
+MultiplicativeExpression infers Expression:
     exp=PrimaryExpression (
-        {infer IntExpression.left=current} 
-        operator=('+' | '-' | '*' | '/') 
+        {infer IntExpression.left=current}
+        operator=('*' | '/')
         right=PrimaryExpression
     )*;
 PrimaryExpression infers Expression:
