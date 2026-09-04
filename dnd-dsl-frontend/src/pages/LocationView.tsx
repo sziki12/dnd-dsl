@@ -16,6 +16,7 @@ import FloatingConnectionLine from '../edges/FloatingConnectionLine.js';
 import type { SerializedModel, SerializedLocation, SerializedVariableDecl, SerializedAstNode, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { findLocation } from '../common/location-tree';
 import { layoutAsTree } from './tree-layout';
+import { computeContainRect, normalizedToPixel, pixelToNormalized, type Size } from './map-coords';
 
 const LocationView = () => {
   let {locationName} = useParams()
@@ -131,7 +132,7 @@ const LocationView = () => {
                     const hasCalculated = key in computedValues
                     const computed = computedValues[key]
 
-                    // Evaluate eagerly to get object structure for preview (safe — ObjectDeclaration has no side effects)
+                    // Evaluate eagerly to get object structure for preview (safe - ObjectDeclaration has no side effects)
                     const preview = evaluateExpression(variable.value, { variableName: variable.target, worldState })
                     const previewObj = preview !== null && typeof preview === 'object'
                       ? preview as SerialisedObjectDeclaration
@@ -222,7 +223,7 @@ const LocationView = () => {
             </>
           ) : (
             <div className="npc-stub">
-              No NPC data available — not supported by the current DSL grammar yet.
+              No NPC data available - not supported by the current DSL grammar yet.
             </div>
           )}
         </div>
@@ -256,7 +257,16 @@ const MapFlow = ({location, mode}: { location: SerializedLocation | undefined, m
 const navigate = useNavigate();
 const containerRef = useRef<HTMLDivElement>(null);
 let { getByReference, adventure, world } = useContext(DslContext)
-const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>([[0, 0], [0, 0]]);
+const [containerSize, setContainerSize] = useState<Size>({ width: 0, height: 0 });
+const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(null);
+
+  // "Usable" area - same margin the canvas has always used, whether or not an image is present.
+  const usableSize: Size = { width: Math.max(containerSize.width - 20, 100), height: Math.max(containerSize.height - 20, 100) };
+  const mapBounds: [[number, number], [number, number]] = [[0, 0], [usableSize.width, usableSize.height]];
+  // The rect every node position is normalized against: the image's letterboxed
+  // contain-rect when one resolves, otherwise the full usable canvas (today's behavior).
+  const rect = computeContainRect(usableSize, mapImage?.natural ?? null);
+  const rectRef = useRef(rect);
 
   const nodeTypes = {
     mapNode: MapNode,
@@ -287,7 +297,7 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
         if (edge.id === clickedEdge.id) {
           const currentDir = edge.data?.direction || 'both';
           
-          // Cycle: end → start → both
+          // Cycle: end -> start -> both
           const directionOrder = ['end', 'start', 'both'];
           const currentIndex = directionOrder.indexOf(currentDir as string);
           const nextDir = directionOrder[(currentIndex + 1) % 3];
@@ -345,23 +355,68 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
 
   const proOptions = { hideAttribution: true };
 
+  // Track the container's rendered size (drives both mapBounds and the image contain-rect).
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const updateBounds = () => {
+    const updateSize = () => {
       const { width, height } = container.getBoundingClientRect();
-      const newBounds: [[number, number], [number, number]] = [[0, 0], [Math.max(width - 20, 100), Math.max(height - 20, 100) ]];
-      setMapBounds(newBounds);
+      setContainerSize({ width, height });
     };
 
-    updateBounds();
+    updateSize();
 
-    const resizeObserver = new ResizeObserver(updateBounds);
+    const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(container);
 
     return () => resizeObserver.disconnect();
   }, []);
+
+  // Resolve this location's map image (if any). Falls back to no image (dot-grid
+  // background) on any failure - a location without a Maps.json entry is the
+  // normal case today, not an error state the user should see.
+  useEffect(() => {
+    if (!location) { setMapImage(null); return; }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    fetch(`${BackendURL}/image/load?adventure=${adventure}&location=${encodeURIComponent(location.name)}`)
+      .then(res => { if (!res.ok) throw new Error('no map image'); return res.blob(); })
+      .then(blob => new Promise<{ url: string; natural: Size }>((resolve, reject) => {
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => resolve({ url, natural: { width: img.naturalWidth, height: img.naturalHeight } });
+        img.onerror = () => reject(new Error('failed to decode map image'));
+        img.src = url;
+      }))
+      .then(result => {
+        if (cancelled) { URL.revokeObjectURL(result.url); return; }
+        objectUrl = result.url;
+        setMapImage(result);
+      })
+      .catch(() => { if (!cancelled) setMapImage(null); });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [location?.name, adventure]);
+
+  // Whenever the map rect changes (window resize, or an image resolving/swapping),
+  // re-project every node's pixel position through the old->new rect so it stays
+  // visually anchored to the same normalized point instead of jumping.
+  useEffect(() => {
+    const oldRect = rectRef.current;
+    const changed = oldRect.x !== rect.x || oldRect.y !== rect.y || oldRect.width !== rect.width || oldRect.height !== rect.height;
+    if (changed && oldRect.width > 0 && oldRect.height > 0) {
+      setNodes(nds => nds.map(n => {
+        const norm = pixelToNormalized(oldRect, n.position.x, n.position.y);
+        return { ...n, position: normalizedToPixel(rect, norm.x, norm.y) };
+      }));
+    }
+    rectRef.current = rect;
+  }, [rect.x, rect.y, rect.width, rect.height]);
 
   useEffect(() => {
     if (typeof location == "undefined") return;
@@ -370,18 +425,22 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
     setEdges(graph.edges);
 
     if (mode === 'tree') {
-      setNodes(layoutAsTree(graph.nodes, location.name));
+      const treeNodes = layoutAsTree(graph.nodes, location.name);
+      setNodes(treeNodes.map(n => ({ ...n, position: normalizedToPixel(rect, n.position.x, n.position.y) })));
       return;
     }
 
     fetch(`${BackendURL}/file/layout/load?adventure=${adventure}&world=${world}&location=${encodeURIComponent(location.name)}`)
       .then(r => r.json())
       .then((saved: Record<string, { x: number; y: number }>) => {
-        setNodes(graph.nodes.map(node =>
-          saved[node.id] ? { ...node, position: saved[node.id] } : node
-        ));
+        setNodes(graph.nodes.map(node => {
+          // Saved positions (and buildGraphFromLocation's {x:0,y:0} default) are
+          // both normalized fractions - always project through the current rect.
+          const norm = saved[node.id] ?? node.position;
+          return { ...node, position: normalizedToPixel(rect, norm.x, norm.y) };
+        }));
       })
-      .catch(() => setNodes(graph.nodes));
+      .catch(() => setNodes(graph.nodes.map(node => ({ ...node, position: normalizedToPixel(rect, node.position.x, node.position.y) }))));
   }, [location?.name, mode]);
 
   useEffect(() => {
@@ -390,7 +449,7 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.key !== 's') return;
       e.preventDefault();
-      const positions = Object.fromEntries(nodes.map(n => [n.id, n.position]));
+      const positions = Object.fromEntries(nodes.map(n => [n.id, pixelToNormalized(rect, n.position.x, n.position.y)]));
       fetch(`${BackendURL}/file/layout/save?adventure=${adventure}&world=${world}&location=${encodeURIComponent(location!.name)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -400,10 +459,21 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [nodes, location?.name, adventure, world, mode]);
+  }, [nodes, location?.name, adventure, world, mode, rect]);
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-hidden" style={{ background: 'var(--bg-editor)' }}>
+    <div ref={containerRef} className="w-full h-full overflow-hidden" style={{ background: 'var(--bg-editor)', position: 'relative' }}>
+      {mapImage && (
+        <img
+          src={mapImage.url}
+          alt=""
+          style={{
+            position: 'absolute',
+            left: rect.x, top: rect.y, width: rect.width, height: rect.height,
+            objectFit: 'contain', pointerEvents: 'none', userSelect: 'none',
+          }}
+        />
+      )}
       {mapBounds[1][0] > 0 &&
       (
         <ReactFlow
@@ -438,7 +508,7 @@ const [mapBounds, setMapBounds] = useState<[[number, number], [number, number]]>
           nodesDraggable={mode === 'map'}
           // Styles
         >
-          <Background variant={BackgroundVariant.Dots} color="var(--bd-soft)" gap={16} />
+          {!mapImage && <Background variant={BackgroundVariant.Dots} color="var(--bd-soft)" gap={16} />}
           <Panel position="top-right" style={{
             background: 'var(--bg-panel)', border: '1px solid var(--bd-soft)', color: 'var(--fg-secondary)',
             padding: '4px 10px', borderRadius: 4, fontSize: 11, fontFamily: 'var(--font-mono)',
@@ -458,8 +528,8 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
 
   const targetSize = 50;
 
-  const lineColor = '#9d9d9d'; // mirrors --fg-secondary — exit edges
-  const markerColor = '#cccccc'; // mirrors --fg-primary — exit edge arrowheads
+  const lineColor = '#9d9d9d'; // mirrors --fg-secondary - exit edges
+  const markerColor = '#cccccc'; // mirrors --fg-primary - exit edge arrowheads
   //Create current location node
   nodes.push({
           id: location.name,
@@ -525,7 +595,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
       type: 'floating',
       style: {
         strokeWidth: 1,
-        stroke: '#4ec9b0', // mirrors --syn-type — sublocation edges
+        stroke: '#4ec9b0', // mirrors --syn-type - sublocation edges
         strokeDasharray: '5 5', // Dashed line for sublocation edges
       },
     });

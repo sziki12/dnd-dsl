@@ -1,4 +1,4 @@
-import { Controller, Get, Query, StreamableFile } from '@nestjs/common';
+import { Controller, Get, Query, StreamableFile, NotFoundException } from '@nestjs/common';
 import { ConfigurationService } from '../configuration/configuration.service.js';
 import fs, { createReadStream } from "fs"
 import { join } from 'path';
@@ -17,14 +17,28 @@ export class ImageController {
 
     @Get('load')
     loadImage(@Query('adventure') adventure: string, @Query('location') location: string): StreamableFile {
-    
+
     const adventurePath = join(this.configurationService.DefaultFilePath!, adventure)
     const mapperFilePath = join(adventurePath, "Maps.json")
 
-    const locationImageMapper = JSON.parse(fs.readFileSync(mapperFilePath, "utf-8"))
-    const fileName: string = locationImageMapper[location]
+    let fileName: string | undefined
+    try {
+      const locationImageMapper = JSON.parse(fs.readFileSync(mapperFilePath, "utf-8"))
+      fileName = locationImageMapper[location]
+    } catch {
+      throw new NotFoundException(`No map image configured for adventure "${adventure}"`)
+    }
 
-    const file = createReadStream(join(adventurePath, `Maps`, location, fileName))
+    if (!fileName) {
+      throw new NotFoundException(`No map image configured for location "${location}"`)
+    }
+
+    const imagePath = join(adventurePath, `Maps`, location, fileName)
+    if (!fs.existsSync(imagePath)) {
+      throw new NotFoundException(`Map image file not found for location "${location}"`)
+    }
+
+    const file = createReadStream(imagePath)
     const fileType = fileName.split('.').pop()
     let response = new StreamableFile(file)
     response.options.type=`image/${fileType}`

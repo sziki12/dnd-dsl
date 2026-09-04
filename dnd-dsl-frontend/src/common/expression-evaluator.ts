@@ -1,4 +1,5 @@
-import type { SerializedModel, SerializedNode, SerializedVariableDecl } from './model-types';
+import type { SerializedModel, SerializedNode, SerializedRefChain, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import { resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type {
     Expression, BoolVal, IntVal, StringVal,
     IntExpression, BoolExpression, IntToBoolExpression, GroupedExpression,
@@ -9,7 +10,7 @@ export type SerialisedObjectDeclaration = {
     name: string,
     /** Pre-evaluated values for non-computed sub-properties */
     staticProperties: Record<string, EvalResult | undefined>,
-    /** Original declarations for computed sub-properties — evaluated on demand */
+    /** Original declarations for computed sub-properties - evaluated on demand */
     computedPropertyDecls: SerializedVariableDecl[],
 };
 
@@ -17,7 +18,7 @@ export type EvalResult = number | boolean | string | SerialisedObjectDeclaration
 
 export type InferredKind = 'int' | 'string' | 'bool' | 'object' | 'unknown';
 
-/** SerializedVariableDecl has no `kind` field — infer a display kind from the runtime-evaluated value. */
+/** SerializedVariableDecl has no `kind` field - infer a display kind from the runtime-evaluated value. */
 export function inferKind(value: EvalResult | null | undefined): InferredKind {
     switch (typeof value) {
         case 'number': return 'int';
@@ -35,6 +36,11 @@ export type EvaluateExpressionOptions = {
 
 export function evaluateExpression(expr: SerializedNode<Expression> | undefined, options?: EvaluateExpressionOptions): EvalResult | undefined {
     if (!expr) return undefined;
+
+    // An ASSIGN_VARIABLE overlay write replaces a leaf VariableDeclaration.value with a
+    // bare JS primitive, no $type tag at all (see WorldStateService.spliceOverlayValue) -
+    // without this check, every overlaid leaf would silently evaluate to `undefined`.
+    if (typeof expr !== 'object') return expr as EvalResult;
 
     switch (expr.$type) {
         case 'BoolVal': {
@@ -112,15 +118,25 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
             return 0;
         }
         case 'RefChain': {
-            if(!options?.worldState)
+            if (!options?.worldState) return undefined;
+            try {
+                const target = resolveSerializedRefChain(options.worldState, expr as unknown as SerializedRefChain);
+                if (target.kind === 'location') {
+                    // Reuse the ObjectDeclaration case above rather than duplicating record-building.
+                    return evaluateExpression({ $type: 'ObjectDeclaration', variables: target.node.variables } as any, options);
+                }
+                return evaluateExpression(target.node.value, { variableName: target.node.target, worldState: options.worldState });
+            } catch {
+                // Unresolved/unsupported chain (e.g. a quest/event head - not implemented
+                // yet). This function runs eagerly during render (LocationView), so a
+                // throw here would crash the page - treat it like any other unresolvable
+                // expression instead.
                 return undefined;
-
-            return undefined;
-            // TODO Resolve reference chain on Backend
+            }
         }
     }
 
     // FunctionCall, RefChain, EventCalledExpression, quest/objective expressions etc.
-    // can't be resolved without runtime state — caller decides how to display these
+    // can't be resolved without runtime state - caller decides how to display these
     return undefined;
 }

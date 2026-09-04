@@ -72,6 +72,11 @@
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "moduleNameMapper": {
+      "^@dnd-language/(.*)\\.js$": "<rootDir>/dnd-language/language/src/$1",
+      "^@dnd-cli/(.*)\\.js$": "<rootDir>/dnd-language/cli/src/$1",
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],

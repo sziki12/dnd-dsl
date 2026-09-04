@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { WorldStateService } from '../world-state/world-state.service.js';
-import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
+import { LangiumInterpreterService, type EvalContext } from '../langium-interpreter/langium-interpreter.service.js';
 
 import { isVariableDeclaration } from '@dnd-language/index.js';
 import { resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
@@ -83,8 +83,8 @@ export class CommandService {
     const previousRuntimeVars = structuredClone(this.getRuntimeVariables());
 
     const state = this.worldStateService.getWorldState();
-    const scope = { ...(state.runtimeVariables ?? {}) };
-    const result = this.interpreterService.callFunctionByName(model, cmd.functionName, cmd.args, scope);
+    const ctx: EvalContext = { scope: { ...(state.runtimeVariables ?? {}) }, worldState: state };
+    const result = this.interpreterService.callFunctionByName(model, cmd.functionName, cmd.args, ctx);
 
     const postOverlay = structuredClone(this.worldStateService.getOverlay());
     const postRuntimeVars = structuredClone(this.getRuntimeVariables());
@@ -107,7 +107,8 @@ export class CommandService {
 
     // Pass runtimeVariables directly so in-place mutations from VariableAssignment
     // and VariableDeclaration statements inside the event body persist.
-    this.interpreterService.triggerEventByName(model, cmd.eventName, state.runtimeVariables);
+    const ctx: EvalContext = { scope: state.runtimeVariables, worldState: state };
+    this.interpreterService.triggerEventByName(model, cmd.eventName, ctx);
 
     const postOverlay = structuredClone(this.worldStateService.getOverlay());
     const postRuntimeVars = structuredClone(this.getRuntimeVariables());
