@@ -31,5 +31,8 @@ export type SerializedFunctionDecl   = SerializedNode<ast.FunctionDeclaration>;
 export type SerializedVariableDecl   = SerializedNode<ast.VariableDeclaration>;
 export type SerializedExpression     = SerializedNode<ast.Expression>;
 export type SerializedCodeBlock      = SerializedNode<ast.CodeBlock>;
+export type SerializedRefChain          = SerializedNode<ast.RefChain>;
+export type SerializedVariableRefItem   = SerializedNode<ast.VariableRefItem>;
+export type SerializedLocationRefItem   = SerializedNode<ast.LocationRefItem>;
 
 export type SerializedAstNode       = SerializedNode<AstNode>;

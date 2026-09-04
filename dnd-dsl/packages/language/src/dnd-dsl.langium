@@ -1,7 +1,9 @@
 grammar DndDsl
 
 entry Model:
-    (World=World);
+    (World=World)
+    //| (Script=CodeBlock)
+    ;
 
 World:
     'world' name=STRING
@@ -165,7 +167,7 @@ Parameter infers VariableDeclaration:
 
 //References
 RefChain:
-    first=RefChainStart ('->' rest+=RefChainItem)*;
+    first=RefChainStart ('.' rest+=VariableRefItem)*;
 
 RefChainStart:
     VariableRefItem
@@ -173,11 +175,6 @@ RefChainStart:
     | QuestRefItem
     | EventRefItem;
 
-RefChainItem:
-    VariableRefItem
-    | LocationRefItem
-    | QuestRefItem
-    | EventRefItem;
 VariableRefItem:
     val=VariableRef;
 LocationRefItem:

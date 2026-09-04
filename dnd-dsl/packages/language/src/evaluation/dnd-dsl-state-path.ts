@@ -166,7 +166,7 @@ export function resolveVariableContainer(model: Model, path: StatePath): { varia
  *  parses `Resources.value` as a stack of `Expression` wrappers around the real
  *  `ObjectDeclaration` node, not the ObjectDeclaration directly. Same unwrap
  *  `LangiumInterpreterService.evaluateExpression` already does for the same reason. */
-function unwrapExpression(node: AstNode | undefined): AstNode | undefined {
+export function unwrapExpression(node: AstNode | undefined): AstNode | undefined {
     while (node && node.$type === 'Expression') {
         node = (node as unknown as { exp?: AstNode }).exp;
     }
