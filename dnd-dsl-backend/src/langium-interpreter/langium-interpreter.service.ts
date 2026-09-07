@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
     Code,
     CodeBlock,
@@ -22,6 +23,7 @@ import {
     isVariableRefItem,
     Model,
     RefChain,
+    RemindStatement,
     ReturnStatement,
     VariableDeclaration,
 } from '@dnd-language/index.js';
@@ -30,6 +32,8 @@ import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
 import { nodeToStatePath, statePathToNode, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
+import { computeRemindBodyLocator, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 
 type RuntimeScope = Record<string, any>;
 
@@ -38,9 +42,15 @@ type RuntimeScope = Record<string, any>;
  * WorldStateService already has a (currently unused) constructor dependency on this
  * service, so the reverse edge would be a real DI cycle. `worldState` is the current,
  * overlay-applied JSON world state (WorldStateService.getWorldState()), used to resolve
- * persistent (Location-owned) RefChain reads; `scope` is the local/function runtime scope.
+ * persistent (Location-owned) RefChain reads; `scope` is the local/function runtime scope;
+ * `clock`/`reminders` back RemindStatement scheduling.
  */
-export type EvalContext = { scope: RuntimeScope; worldState: SerializedModel };
+export type EvalContext = {
+    scope: RuntimeScope;
+    worldState: SerializedModel;
+    clock: number;
+    reminders: ScheduledReminder[];
+};
 
 class ReturnSignal {
     constructor(public readonly value: any) {}
@@ -206,7 +216,12 @@ export class LangiumInterpreterService {
     }
 
     private callFunctionDecl(callerCtx: EvalContext, decl: FunctionDeclaration, args: any[]): any {
-        const localCtx: EvalContext = { scope: Object.create(callerCtx.scope), worldState: callerCtx.worldState };
+        const localCtx: EvalContext = {
+            scope: Object.create(callerCtx.scope),
+            worldState: callerCtx.worldState,
+            clock: callerCtx.clock,
+            reminders: callerCtx.reminders,
+        };
 
         decl.params.forEach((param, i) => {
             const name = param.name ?? param.target ?? '';
@@ -267,7 +282,46 @@ export class LangiumInterpreterService {
                 // TODO: dispatch event execution
                 break;
             }
+            case 'RemindStatement': {
+                const c = code as unknown as RemindStatement;
+                const amount = this.evaluateExpression(ctx, c.delay.amount);
+                if (typeof amount !== 'number') throw new Error(`Duration amount must evaluate to a number`);
+                const delayRounds = durationToRounds(amount, c.delay.unit);
+                const pin = c.pin ? this.resolveRefChainToStatePath(c.pin) : undefined;
+                const bodyLocator = c.body ? computeRemindBodyLocator(c) : undefined;
+                ctx.reminders.push({
+                    id: randomUUID(),
+                    label: c.label,
+                    severity: c.severity ?? 'info',
+                    createdAtRound: ctx.clock,
+                    fireAtRound: ctx.clock + delayRounds,
+                    pin,
+                    bodyLocator,
+                });
+                break;
+            }
         }
         return undefined;
+    }
+
+    /** Resolves a RefChain to its StatePath address rather than its value - used by
+     *  RemindStatement's `show on <chain>` pin. Mirrors evaluateRefChain's head/tail
+     *  resolution and throw conventions. */
+    private resolveRefChainToStatePath(chain: RefChain): StatePath {
+        if (isQuestRefItem(chain.first) || isEventRefItem(chain.first)) {
+            throw new Error(`Cannot pin a reminder to a '${chain.first.$type}' reference`);
+        }
+        if (isLocationRefItem(chain.first) && chain.rest.length === 0) {
+            const loc = chain.first.val.val.ref;
+            if (!loc) throw new Error(`Unresolved location ref: ${chain.first.val.val.$refText}`);
+            return nodeToStatePath(loc)!;
+        }
+        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
+        if (!isVariableRefItem(tail)) throw new Error(`Unsupported pin target: ${tail.$type}`);
+        const decl = tail.val.val.ref;
+        if (!decl) throw new Error(`Unresolved variable ref: ${tail.val.val.$refText}`);
+        const path = nodeToStatePath(decl);
+        if (!path) throw new Error(`Cannot pin a reminder to a local/non-persistent variable`);
+        return path;
     }
 }

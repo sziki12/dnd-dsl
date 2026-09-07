@@ -1,10 +1,22 @@
 /** This file defines the shape of commands that can be issued to the DnD DSL interpreter. */
 
+import type { ClockUnit } from './dnd-dsl-clock.js';
+import type { FiredReminder } from './dnd-dsl-reminders.js';
 import type { StatePath } from './dnd-dsl-state-path.js';
 
-export type SimulateDayCommand = {
-  type: 'SIMULATE_DAY';
-  dayNumber: number;
+/** Advances the world clock and fires any reminder now due. Replaces the old
+ *  SIMULATE_DAY command, which had no dispatch site anywhere and was never
+ *  reachable from any client. */
+export type AdvanceTimeCommand = {
+  type: 'ADVANCE_TIME';
+  amount: number;
+  unit: ClockUnit;
+};
+
+/** Removes one fired reminder from the needs-acknowledgement list. */
+export type AckReminderCommand = {
+  type: 'ACK_REMINDER';
+  reminderId: string;
 };
 
 /** Assign a value to a named variable in the interpreter runtime scope. */
@@ -40,7 +52,8 @@ export type TriggerEventCommand = {
 };
 
 export type Command =
-  | SimulateDayCommand
+  | AdvanceTimeCommand
+  | AckReminderCommand
   | AssignVariableCommand
   | AssignRuntimeVariableCommand
   | CallFunctionCommand
@@ -52,4 +65,6 @@ export type CommandResponse = {
   canRedo: boolean;
   /** Return value produced by a CallFunctionCommand, undefined otherwise. */
   result?: any;
+  /** Reminders that fired during an AdvanceTimeCommand, undefined otherwise. */
+  firedReminders?: FiredReminder[];
 };

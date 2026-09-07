@@ -1,14 +1,9 @@
 import { createContext, useEffect, useState } from 'react';
 import { BackendURL } from './BackendContext';
-import type { Command } from '@dnd-language/evaluation/dnd-dsl-commands';
+import type { Command, CommandResponse } from '@dnd-language/evaluation/dnd-dsl-commands';
 import type { SerializedAstNode, SerializedModel, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types';
 import { parseReferenceFromSerializedModel } from '@dnd-language/evaluation/dnd-dsl-reference';
-
-type CommandResponse = {
-  worldState: SerializedModel;
-  canUndo: boolean;
-  canRedo: boolean;
-};
+import type { FiredReminder } from '@dnd-language/evaluation/dnd-dsl-reminders';
 
 type DslContext = {
   world: string;
@@ -23,6 +18,8 @@ type DslContext = {
   redo: () => Promise<void>;
   canUndo: boolean;
   canRedo: boolean;
+  firedReminders: FiredReminder[];
+  clearFiredReminder: (id: string) => void;
 };
 
 export const DslContext = createContext<DslContext>({} as DslContext);
@@ -33,6 +30,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   const [worldState, setWorldState] = useState<SerializedModel | undefined>(undefined);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [firedReminders, setFiredReminders] = useState<FiredReminder[]>([]);
 
   const stateEndpoint = `${BackendURL}`;
 
@@ -57,6 +55,16 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     setWorldState(res.worldState);
     setCanUndo(res.canUndo);
     setCanRedo(res.canRedo);
+    if (res.firedReminders?.length) {
+      setFiredReminders(prev => {
+        const existingIds = new Set(prev.map(r => r.id));
+        return [...prev, ...res.firedReminders!.filter(r => !existingIds.has(r.id))];
+      });
+    }
+  };
+
+  const clearFiredReminder = (id: string) => {
+    setFiredReminders(prev => prev.filter(r => r.id !== id));
   };
 
   const execute = async (cmd: Command): Promise<void> => {
@@ -110,6 +118,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
       worldState, updateWorldState,
       getByReference,
       execute, undo, redo, canUndo, canRedo,
+      firedReminders, clearFiredReminder,
     }}>
       {children}
     </DslContext.Provider>

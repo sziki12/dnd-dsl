@@ -1,5 +1,5 @@
-import type { ValidationAcceptor, ValidationChecks } from 'langium';
-import type { DndDslAstType, Event, FunctionDeclaration, Location, Objective, Quest, World } from './generated/ast.js';
+import type { AstNode, ValidationAcceptor, ValidationChecks } from 'langium';
+import type { DndDslAstType, Event, FunctionDeclaration, Location, Objective, Quest, RemindStatement, World } from './generated/ast.js';
 
 type NamedNode = Event | FunctionDeclaration | Location | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
@@ -13,6 +13,7 @@ export function registerValidationChecks(services: DndDslServices) {
     const checks: ValidationChecks<DndDslAstType> = {
         World: validator.checkUniqueNames,
         Quest: validator.checkUniqueObjectiveNames,
+        RemindStatement: validator.checkRemindPlacement,
     };
     registry.register(checks, validator);
 }
@@ -31,6 +32,16 @@ export class DndDslValidator {
 
     checkUniqueObjectiveNames(quest: Quest, accept: ValidationAcceptor): void {
         this.checkUnique(quest.objectives, accept, 'Objective');
+    }
+
+    checkRemindPlacement(stmt: RemindStatement, accept: ValidationAcceptor): void {
+        let current: AstNode | undefined = stmt.$container;
+        while (current && current.$type !== 'FunctionDeclaration' && current.$type !== 'Event') {
+            current = current.$container;
+        }
+        if (!current) {
+            accept('error', `'remind' can only be used inside a function or event body.`, { node: stmt });
+        }
     }
 
     // Location.sublocations nests arbitrarily. Langium's default scope provider resolves

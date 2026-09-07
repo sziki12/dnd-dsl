@@ -71,6 +71,15 @@ export class AppController {
     return this.worldStateService.getEvents()
   }
 
+  @Get('/world/agenda')
+  getAgenda() {
+    return {
+      now: this.worldStateService.getClock(),
+      upcoming: this.worldStateService.getReminders(),
+      fired: this.worldStateService.getFiredReminders(),
+    }
+  }
+
   @Post('/world/events/:name')
   triggerEvent(@Param('name') name: string) {
     return this.commandService.execute({ type: 'TRIGGER_EVENT', eventName: name })

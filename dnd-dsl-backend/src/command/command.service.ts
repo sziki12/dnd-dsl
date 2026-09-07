@@ -4,26 +4,38 @@ import { LangiumInterpreterService, type EvalContext } from '../langium-interpre
 
 import { isVariableDeclaration } from '@dnd-language/index.js';
 import { resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
+import { resolveRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import {
+  AckReminderCommand,
+  AdvanceTimeCommand,
   AssignRuntimeVariableCommand,
   AssignVariableCommand,
   CallFunctionCommand,
   Command,
   CommandResponse,
-  SimulateDayCommand,
   TriggerEventCommand,
 } from '@dnd-language/evaluation/dnd-dsl-commands.js';
 
+/** Everything that must roll back together on undo, or be restored verbatim on redo
+ *  of a non-deterministic command. Widened beyond overlay/runtimeVars to also cover
+ *  clock/reminders once RemindStatement made those mutable from any function/event body. */
+type RuntimeStateSnapshot = {
+  overlay: Record<string, unknown>;
+  runtimeVars: Record<string, unknown>;
+  clock: number;
+  reminders: ScheduledReminder[];
+  firedReminders: FiredReminder[];
+};
+
 type HistoryEntry = {
   command: Command;
-  previousOverlay: Record<string, unknown>;
-  previousRuntimeVars: Record<string, unknown>;
-  /** Only captured for CALL_FUNCTION/TRIGGER_EVENT. Lets redo restore the exact
-   *  post-execution result instead of re-running the interpreter, which could be
+  previous: RuntimeStateSnapshot;
+  /** Only captured for CALL_FUNCTION/TRIGGER_EVENT/ADVANCE_TIME. Lets redo restore the
+   *  exact post-execution result instead of re-running the interpreter, which could be
    *  non-deterministic (e.g. a predefined random function). Every other command
    *  type is pure/deterministic, so its redo just reapplies the command instead. */
-  postOverlay?: Record<string, unknown>;
-  postRuntimeVars?: Record<string, unknown>;
+  post?: RuntimeStateSnapshot;
 };
 
 @Injectable()
@@ -39,12 +51,12 @@ export class CommandService {
   execute(cmd: Command): CommandResponse {
     if (cmd.type === 'CALL_FUNCTION') return this.executeCallFunction(cmd);
     if (cmd.type === 'TRIGGER_EVENT') return this.executeTriggerEvent(cmd);
+    if (cmd.type === 'ADVANCE_TIME') return this.executeAdvanceTime(cmd);
 
-    const previousOverlay = structuredClone(this.worldStateService.getOverlay());
-    const previousRuntimeVars = structuredClone(this.getRuntimeVariables());
+    const previous = this.snapshotRuntimeState();
     this.applyCommand(cmd);
     this.worldStateService.persistOverlay();
-    this.history.push({ command: cmd, previousOverlay, previousRuntimeVars });
+    this.history.push({ command: cmd, previous });
     this.future.splice(0);
     return this.buildResponse();
   }
@@ -53,8 +65,7 @@ export class CommandService {
     const entry = this.history.pop();
     if (entry) {
       this.future.unshift(entry);
-      this.worldStateService.restoreOverlay(structuredClone(entry.previousOverlay));
-      this.setRuntimeVariables(structuredClone(entry.previousRuntimeVars));
+      this.restoreRuntimeState(entry.previous);
       this.worldStateService.persistOverlay();
     }
     return this.buildResponse();
@@ -63,9 +74,8 @@ export class CommandService {
   redo(): CommandResponse {
     const entry = this.future.shift();
     if (entry) {
-      if (entry.postOverlay) {
-        this.worldStateService.restoreOverlay(structuredClone(entry.postOverlay));
-        this.setRuntimeVariables(structuredClone(entry.postRuntimeVars ?? {}));
+      if (entry.post) {
+        this.restoreRuntimeState(entry.post);
       } else {
         this.applyCommand(entry.command);
       }
@@ -79,18 +89,21 @@ export class CommandService {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No model loaded');
 
-    const previousOverlay = structuredClone(this.worldStateService.getOverlay());
-    const previousRuntimeVars = structuredClone(this.getRuntimeVariables());
+    const previous = this.snapshotRuntimeState();
 
     const state = this.worldStateService.getWorldState();
-    const ctx: EvalContext = { scope: { ...(state.runtimeVariables ?? {}) }, worldState: state };
+    const ctx: EvalContext = {
+      scope: { ...(state.runtimeVariables ?? {}) },
+      worldState: state,
+      clock: this.worldStateService.getClock(),
+      reminders: this.worldStateService.getReminders(),
+    };
     const result = this.interpreterService.callFunctionByName(model, cmd.functionName, cmd.args, ctx);
 
-    const postOverlay = structuredClone(this.worldStateService.getOverlay());
-    const postRuntimeVars = structuredClone(this.getRuntimeVariables());
-
-    this.history.push({ command: cmd, previousOverlay, previousRuntimeVars, postOverlay, postRuntimeVars });
+    const post = this.snapshotRuntimeState();
+    this.history.push({ command: cmd, previous, post });
     this.future.splice(0);
+    this.worldStateService.persistOverlay();
 
     return { ...this.buildResponse(), result };
   }
@@ -99,37 +112,79 @@ export class CommandService {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No model loaded');
 
-    const previousOverlay = structuredClone(this.worldStateService.getOverlay());
-    const previousRuntimeVars = structuredClone(this.getRuntimeVariables());
+    const previous = this.snapshotRuntimeState();
 
     const state = this.worldStateService.getWorldState();
     state.runtimeVariables ??= {};
 
     // Pass runtimeVariables directly so in-place mutations from VariableAssignment
     // and VariableDeclaration statements inside the event body persist.
-    const ctx: EvalContext = { scope: state.runtimeVariables, worldState: state };
+    const ctx: EvalContext = {
+      scope: state.runtimeVariables,
+      worldState: state,
+      clock: this.worldStateService.getClock(),
+      reminders: this.worldStateService.getReminders(),
+    };
     this.interpreterService.triggerEventByName(model, cmd.eventName, ctx);
 
-    const postOverlay = structuredClone(this.worldStateService.getOverlay());
-    const postRuntimeVars = structuredClone(this.getRuntimeVariables());
-
-    this.history.push({ command: cmd, previousOverlay, previousRuntimeVars, postOverlay, postRuntimeVars });
+    const post = this.snapshotRuntimeState();
+    this.history.push({ command: cmd, previous, post });
     this.future.splice(0);
+    this.worldStateService.persistOverlay();
 
     return this.buildResponse();
   }
 
+  private executeAdvanceTime(cmd: AdvanceTimeCommand): CommandResponse {
+    const model = this.worldStateService.getModel();
+    if (!model) throw new Error('No model loaded');
+
+    const previous = this.snapshotRuntimeState();
+    const justFired = this.worldStateService.advanceClock(durationToRounds(cmd.amount, cmd.unit));
+
+    const state = this.worldStateService.getWorldState();
+    state.runtimeVariables ??= {};
+    for (const reminder of justFired) {
+      if (!reminder.bodyLocator) continue;
+      const codeBlock = resolveRemindBodyLocator(model, reminder.bodyLocator);
+      if (!codeBlock) {
+        console.warn(`Reminder '${reminder.id}' effect body no longer resolves - skipping.`);
+        continue;
+      }
+      const ctx: EvalContext = {
+        scope: state.runtimeVariables,
+        worldState: state,
+        clock: this.worldStateService.getClock(),
+        reminders: this.worldStateService.getReminders(),
+      };
+      try {
+        this.interpreterService.runCodeBlock(ctx, codeBlock);
+        reminder.effectRan = true;
+      } catch (e) {
+        console.error(`Reminder '${reminder.id}' effect body threw:`, e);
+      }
+    }
+
+    const post = this.snapshotRuntimeState();
+    this.history.push({ command: cmd, previous, post });
+    this.future.splice(0);
+    this.worldStateService.persistOverlay();
+
+    return { ...this.buildResponse(), firedReminders: justFired };
+  }
+
   private applyCommand(cmd: Command): void {
     switch (cmd.type) {
-      case 'SIMULATE_DAY': this.applySimulateDay(cmd); break;
       case 'ASSIGN_VARIABLE': this.applyAssignVariable(cmd); break;
       case 'ASSIGN_RUNTIME_VARIABLE': this.applyAssignRuntimeVariable(cmd); break;
+      case 'ACK_REMINDER': this.applyAckReminder(cmd); break;
     }
   }
 
-  private applySimulateDay(cmd: SimulateDayCommand): void {
-    // TODO: implement day tick — evaluate events, tick quests, apply resource changes
-    console.log(`Simulating day ${cmd.dayNumber}`);
+  private applyAckReminder(cmd: AckReminderCommand): void {
+    if (!this.worldStateService.ackReminder(cmd.reminderId)) {
+      throw new Error(`No fired reminder with id '${cmd.reminderId}' to acknowledge`);
+    }
   }
 
   private applyAssignRuntimeVariable(cmd: AssignRuntimeVariableCommand): void {
@@ -172,6 +227,24 @@ export class CommandService {
 
   private setRuntimeVariables(vars: Record<string, unknown>): void {
     this.worldStateService.getWorldState().runtimeVariables = vars;
+  }
+
+  private snapshotRuntimeState(): RuntimeStateSnapshot {
+    return {
+      overlay: structuredClone(this.worldStateService.getOverlay()),
+      runtimeVars: structuredClone(this.getRuntimeVariables()),
+      clock: this.worldStateService.getClock(),
+      reminders: structuredClone(this.worldStateService.getReminders()),
+      firedReminders: structuredClone(this.worldStateService.getFiredReminders()),
+    };
+  }
+
+  private restoreRuntimeState(snapshot: RuntimeStateSnapshot): void {
+    this.worldStateService.restoreOverlay(structuredClone(snapshot.overlay));
+    this.setRuntimeVariables(structuredClone(snapshot.runtimeVars));
+    this.worldStateService.setClock(snapshot.clock);
+    this.worldStateService.setReminders(structuredClone(snapshot.reminders));
+    this.worldStateService.setFiredReminders(structuredClone(snapshot.firedReminders));
   }
 
   private buildResponse(): CommandResponse {

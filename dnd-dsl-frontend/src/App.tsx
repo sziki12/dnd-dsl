@@ -4,6 +4,7 @@ import { DslEditor } from './pages/DslEditor';
 import { ContextWrapper } from './contexts/ContextWrapper';
 import type { JSX, ReactNode } from 'react';
 import PageWrapper from './common/PageWrapper';
+import ReminderToast from './common/ReminderToast';
 
 //import '@xyflow/react/dist/style.css';
 
@@ -35,6 +36,7 @@ function App() {
           {createRoute({path:"/editor", element:<DslEditor />, name:"Editor Page"})}
         </Routes>
       </BrowserRouter>
+      <ReminderToast />
     </ContextWrapper>
   );
 }

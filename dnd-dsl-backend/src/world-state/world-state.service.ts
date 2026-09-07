@@ -8,6 +8,7 @@ import {
   statePathToNode,
   type StatePath,
 } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import type { FiredReminder, ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 import { predefinedFunctions, predefinedFunctionsAsMap } from '../predefined/predefined-functions.js';
 import { type StateOverlayFile } from './state-overlay.types.js';
@@ -43,15 +44,22 @@ export class WorldStateService {
   private _overlay: Record<string, unknown> = {};
   private _staleOverlayEntries: StatePath[] = [];
   private _statePath: string | undefined = undefined;
+  private _clock: number = 0;
+  private _reminders: ScheduledReminder[] = [];
+  private _firedReminders: FiredReminder[] = [];
 
   constructor(private readonly interpreterService: LangiumInterpreterService) {}
 
   async loadFromFile(dndFilePath: string, statePath?: string): Promise<any> {
     this._model = await parseModel(dndFilePath);
     this._statePath = statePath;
-    this._overlay = statePath && fs.existsSync(statePath)
-      ? (JSON.parse(fs.readFileSync(statePath, 'utf-8')) as StateOverlayFile).entries
-      : {};
+    const overlayFile = statePath && fs.existsSync(statePath)
+      ? (JSON.parse(fs.readFileSync(statePath, 'utf-8')) as StateOverlayFile)
+      : undefined;
+    this._overlay = overlayFile?.entries ?? {};
+    this._clock = overlayFile?.clock ?? 0;
+    this._reminders = overlayFile?.reminders ?? [];
+    this._firedReminders = overlayFile?.firedReminders ?? [];
     this.rebuildWorldState();
     return this._worldState;
   }
@@ -61,8 +69,67 @@ export class WorldStateService {
    *  CommandService after every mutating command. */
   persistOverlay(): void {
     if (!this._statePath) return;
-    const overlayFile: StateOverlayFile = { version: 1, entries: this._overlay };
+    const overlayFile: StateOverlayFile = {
+      version: 1,
+      entries: this._overlay,
+      clock: this._clock,
+      reminders: this._reminders,
+      firedReminders: this._firedReminders,
+    };
     fs.writeFileSync(this._statePath, JSON.stringify(overlayFile, null, 2), 'utf-8');
+  }
+
+  getClock(): number {
+    return this._clock;
+  }
+
+  getReminders(): ScheduledReminder[] {
+    return this._reminders;
+  }
+
+  getFiredReminders(): FiredReminder[] {
+    return this._firedReminders;
+  }
+
+  setClock(clock: number): void {
+    this._clock = clock;
+  }
+
+  setReminders(reminders: ScheduledReminder[]): void {
+    this._reminders = reminders;
+  }
+
+  setFiredReminders(firedReminders: FiredReminder[]): void {
+    this._firedReminders = firedReminders;
+  }
+
+  /** Advances the clock and moves every now-due reminder into firedReminders
+   *  (effectRan starts false - CommandService flips it after running the effect,
+   *  since only it has interpreter access). Returns just the newly-fired ones. */
+  advanceClock(deltaRounds: number): FiredReminder[] {
+    this._clock += deltaRounds;
+    const due = this._reminders.filter(r => r.fireAtRound <= this._clock);
+    this._reminders = this._reminders.filter(r => r.fireAtRound > this._clock);
+    const justFired: FiredReminder[] = due.map(r => ({
+      id: r.id,
+      label: r.label,
+      severity: r.severity,
+      createdAtRound: r.createdAtRound,
+      pin: r.pin,
+      bodyLocator: r.bodyLocator,
+      firedAtRound: this._clock,
+      effectRan: false,
+    }));
+    this._firedReminders.push(...justFired);
+    return justFired;
+  }
+
+  /** Removes one entry from firedReminders. Returns whether it was found. */
+  ackReminder(id: string): boolean {
+    const index = this._firedReminders.findIndex(r => r.id === id);
+    if (index < 0) return false;
+    this._firedReminders.splice(index, 1);
+    return true;
   }
 
   getModel(): Model | undefined {
@@ -70,6 +137,7 @@ export class WorldStateService {
   }
 
   getWorldState(): any {
+    this._worldState.clock = this._clock;
     return this._worldState;
   }
 
@@ -120,9 +188,13 @@ export class WorldStateService {
     this.rebuildWorldState();
   }
 
-  /** Drops all overlay entries, reverting `_worldState` to the `.dnd`-declared defaults. */
+  /** Drops all overlay entries and clock/reminder state, reverting `_worldState` to the
+   *  `.dnd`-declared defaults. */
   resetOverlay(): void {
     this._overlay = {};
+    this._clock = 0;
+    this._reminders = [];
+    this._firedReminders = [];
     this.rebuildWorldState();
   }
 

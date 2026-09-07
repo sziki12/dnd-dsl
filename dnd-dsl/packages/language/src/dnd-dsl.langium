@@ -91,11 +91,19 @@ Code:
     | EventTrigger
     | VariableDeclaration
     | ReturnStatement
+    | RemindStatement
     ;
 ConditionalBlock:
     'when' condition=BoolExpression 'do' body+=CodeBlock 'end';
 ReturnStatement:
     'return' (returnValue=(Expression))?;
+RemindStatement:
+    'remind' label=STRING 'after' delay=Duration
+    ('severity' severity=('info' | 'warning' | 'urgent'))?
+    ('show' 'on' pin=RefChain)?
+    ('do' body=CodeBlock 'end')?;
+Duration:
+    amount=Expression unit=('round' | 'rounds' | 'minute' | 'minutes' | 'hour' | 'hours' | 'day' | 'days');
 VariableAssignment:
     target=VariableRef '=' value=(Expression);
 
