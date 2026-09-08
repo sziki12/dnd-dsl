@@ -39,6 +39,7 @@ import { nodeToStatePath, statePathToNode, type StatePath } from '@dnd-language/
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
+import { applyArithmetic, applyComparison, applyLogical, negatableBool, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-ops.js';
 import { computeRemindBodyLocator, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 
 type RuntimeScope = Record<string, any>;
@@ -67,10 +68,10 @@ export class LangiumInterpreterService {
 
     evaluateExpression(ctx: EvalContext, expression: Expression): any {
         if (isIntVal(expression)) {
-            return expression.isNegative ? -expression.val : expression.val;
+            return signedInt(expression);
         }
         if (isBoolVal(expression)) {
-            return expression.isNegated ? !expression.val : expression.val;
+            return negatableBool(expression);
         }
         if (isStringVal(expression)) {
             return expression.val;
@@ -92,32 +93,26 @@ export class LangiumInterpreterService {
             return this.evaluateExpression(ctx, expression.exp);
         }
         if (isIntExpression(expression)) {
-            const l = this.evaluateExpression(ctx, expression.left);
-            const r = this.evaluateExpression(ctx, expression.right);
-            switch (expression.operator) {
-                case '+': return l + r;
-                case '-': return l - r;
-                case '*': return l * r;
-                case '/': return r !== 0 ? l / r : 0;
-            }
+            return applyArithmetic(
+                expression.operator,
+                this.evaluateExpression(ctx, expression.left),
+                this.evaluateExpression(ctx, expression.right),
+            );
         }
         if (isIntToBoolExpression(expression)) {
-            const l = this.evaluateExpression(ctx, expression.left);
-            const r = this.evaluateExpression(ctx, expression.right);
-            switch (expression.operator) {
-                case '==': return l === r;
-                case '!=': return l !== r;
-                case '<':  return l < r;
-                case '>':  return l > r;
-                case '<=': return l <= r;
-                case '>=': return l >= r;
-                case 'is': { const eq = l === r; return expression.negated ? !eq : eq; }
-            }
+            return applyComparison(
+                expression.operator,
+                this.evaluateExpression(ctx, expression.left),
+                this.evaluateExpression(ctx, expression.right),
+                expression.negated,
+            );
         }
         if (isBoolExpression(expression)) {
-            const l = this.evaluateExpression(ctx, expression.left);
-            if (expression.operator === 'and') return l && this.evaluateExpression(ctx, expression.right);
-            if (expression.operator === 'or')  return l || this.evaluateExpression(ctx, expression.right);
+            return applyLogical(
+                expression.operator,
+                this.evaluateExpression(ctx, expression.left),
+                () => this.evaluateExpression(ctx, expression.right),
+            );
         }
         if (isRefChain(expression)) {
             return this.evaluateRefChain(ctx, expression);

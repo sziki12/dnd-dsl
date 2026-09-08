@@ -9,6 +9,16 @@ import type {
     SerializedRefChain,
 } from './dnd-dsl-serialized-types.js';
 import { parseReferenceFromSerializedModel } from './dnd-dsl-reference.js';
+import {
+    applyArithmetic,
+    applyComparison,
+    applyLogical,
+    negatableBool,
+    signedInt,
+    type ArithmeticOperator,
+    type ComparisonOperator,
+    type LogicalOperator,
+} from './dnd-dsl-expression-ops.js';
 
 // This file operates entirely on the JSON-serialized model - no Langium LSP-only
 // services are touched - so it's safe to import from both the Node.js backend and the
@@ -99,14 +109,10 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
     const node = expr as SerializedExpression & { $type: string };
 
     switch (node.$type) {
-        case 'IntVal': {
-            const v = node as unknown as { isNegative?: boolean; val: number };
-            return v.isNegative ? -v.val : v.val;
-        }
-        case 'BoolVal': {
-            const v = node as unknown as { isNegated?: boolean; val: boolean };
-            return v.isNegated ? !v.val : v.val;
-        }
+        case 'IntVal':
+            return signedInt(node as unknown as { isNegative?: boolean; val: number });
+        case 'BoolVal':
+            return negatableBool(node as unknown as { isNegated?: boolean; val: boolean });
         case 'StringVal':
             return (node as unknown as { val: string }).val;
 
@@ -124,44 +130,18 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
             return evaluateSerializedExpression(model, (node as unknown as { exp: unknown }).exp);
 
         case 'IntExpression': {
-            const e = node as unknown as { left: unknown; operator: '+' | '-' | '*' | '/'; right: unknown };
-            const l = evaluateSerializedExpression(model, e.left);
-            const r = evaluateSerializedExpression(model, e.right);
-            if (typeof l !== 'number' || typeof r !== 'number') return undefined;
-            switch (e.operator) {
-                case '+': return l + r;
-                case '-': return l - r;
-                case '*': return l * r;
-                case '/': return r !== 0 ? l / r : undefined;
-            }
-            return undefined;
+            const e = node as unknown as { left: unknown; operator: ArithmeticOperator; right: unknown };
+            return applyArithmetic(e.operator, evaluateSerializedExpression(model, e.left), evaluateSerializedExpression(model, e.right));
         }
 
         case 'BoolExpression': {
-            const e = node as unknown as { left: unknown; operator: 'and' | 'or'; right: unknown };
-            const l = evaluateSerializedExpression(model, e.left);
-            if (e.operator === 'and') return Boolean(l) && Boolean(evaluateSerializedExpression(model, e.right));
-            if (e.operator === 'or') return Boolean(l) || Boolean(evaluateSerializedExpression(model, e.right));
-            return undefined;
+            const e = node as unknown as { left: unknown; operator: LogicalOperator; right: unknown };
+            return applyLogical(e.operator, evaluateSerializedExpression(model, e.left), () => evaluateSerializedExpression(model, e.right));
         }
 
         case 'IntToBoolExpression': {
-            const e = node as unknown as { left: unknown; operator: '==' | '!=' | '<' | '>' | '<=' | '>=' | 'is'; right: unknown; negated?: boolean };
-            const l = evaluateSerializedExpression(model, e.left);
-            const r = evaluateSerializedExpression(model, e.right);
-            switch (e.operator) {
-                case '==': return l === r;
-                case '!=': return l !== r;
-                case 'is': { const eq = l === r; return e.negated ? !eq : eq; }
-            }
-            if (typeof l !== 'number' || typeof r !== 'number') return undefined;
-            switch (e.operator) {
-                case '<': return l < r;
-                case '>': return l > r;
-                case '<=': return l <= r;
-                case '>=': return l >= r;
-            }
-            return undefined;
+            const e = node as unknown as { left: unknown; operator: ComparisonOperator; right: unknown; negated?: boolean };
+            return applyComparison(e.operator, evaluateSerializedExpression(model, e.left), evaluateSerializedExpression(model, e.right), e.negated);
         }
 
         case 'ObjectDeclaration':

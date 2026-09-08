@@ -1,6 +1,16 @@
 import type { SerializedEnumValueDecl, SerializedModel, SerializedNode, SerializedRefChain, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import { parseReferenceFromSerializedModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
+import {
+    applyArithmetic,
+    applyComparison,
+    applyLogical,
+    negatableBool,
+    signedInt,
+    type ArithmeticOperator,
+    type ComparisonOperator,
+    type LogicalOperator,
+} from '@dnd-language/evaluation/dnd-dsl-expression-ops.js';
 import type {
     Expression, BoolVal, IntVal, StringVal,
     IntExpression, BoolExpression, IntToBoolExpression, GroupedExpression,
@@ -44,14 +54,10 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
     if (typeof expr !== 'object') return expr as EvalResult;
 
     switch (expr.$type) {
-        case 'BoolVal': {
-            const e = expr as unknown as SerializedNode<BoolVal>;
-            return e.isNegated ? !e.val : e.val;
-        }
-        case 'IntVal': {
-            const e = expr as unknown as SerializedNode<IntVal>;
-            return e.isNegative ? -e.val : e.val;
-        }
+        case 'BoolVal':
+            return negatableBool(expr as unknown as SerializedNode<BoolVal>);
+        case 'IntVal':
+            return signedInt(expr as unknown as SerializedNode<IntVal>);
         case 'StringVal': {
             const e = expr as unknown as SerializedNode<StringVal>;
             return e.val;
@@ -66,42 +72,15 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
         }
         case 'IntExpression': {
             const e = expr as SerializedNode<IntExpression>;
-            const left = evaluateExpression(e.left, options);
-            const right = evaluateExpression(e.right, options);
-            if (typeof left !== 'number' || typeof right !== 'number') return undefined;
-            switch (e.operator) {
-                case '+': return left + right;
-                case '-': return left - right;
-                case '*': return left * right;
-                case '/': return right !== 0 ? left / right : undefined;
-            }
-            break;
+            return applyArithmetic(e.operator as ArithmeticOperator, evaluateExpression(e.left, options), evaluateExpression(e.right, options));
         }
         case 'BoolExpression': {
             const e = expr as SerializedNode<BoolExpression>;
-            const left = evaluateExpression(e.left, options);
-            const right = evaluateExpression(e.right, options);
-            if (e.operator === 'and') return Boolean(left) && Boolean(right);
-            if (e.operator === 'or') return Boolean(left) || Boolean(right);
-            break;
+            return applyLogical(e.operator as LogicalOperator, evaluateExpression(e.left, options), () => evaluateExpression(e.right, options));
         }
         case 'IntToBoolExpression': {
             const e = expr as SerializedNode<IntToBoolExpression>;
-            const left = evaluateExpression(e.left, options);
-            const right = evaluateExpression(e.right, options);
-            switch (e.operator) {
-                case '==': return left === right;
-                case '!=': return left !== right;
-                case 'is': { const eq = left === right; return e.negated ? !eq : eq; }
-            }
-            if (typeof left !== 'number' || typeof right !== 'number') return undefined;
-            switch (e.operator) {
-                case '<':  return left < right;
-                case '<=': return left <= right;
-                case '>':  return left > right;
-                case '>=': return left >= right;
-            }
-            break;
+            return applyComparison(e.operator as ComparisonOperator, evaluateExpression(e.left, options), evaluateExpression(e.right, options), e.negated);
         }
         case 'GroupedExpression': {
             const e = expr as SerializedNode<GroupedExpression>;
