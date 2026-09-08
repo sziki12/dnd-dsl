@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { isVariableDeclaration, Model } from '@dnd-language/index.js';
+import { URI } from 'langium';
+import { NodeFileSystem } from 'langium/node';
+import { type CodeBlock, createDndDslServices, isVariableDeclaration, Model } from '@dnd-language/index.js';
 import { parseModel, stringifyNode } from '@dnd-cli/main.js';
 import {
   decodeStatePath,
@@ -37,9 +39,13 @@ export type DeclaredFunctionsResponse = {
   predefinedFunctions: PredefinedFunctionSummary[];
 };
 
+/** One parse/link problem in a script, with a line number relative to the DM's text. */
+export type ScriptParseError = { message: string; line: number };
+
 @Injectable()
 export class WorldStateService {
   private _model: Model | undefined = undefined;
+  private _worldSource = '';
   private _worldState: any = {};
   private _overlay: Record<string, unknown> = {};
   private _staleOverlayEntries: StatePath[] = [];
@@ -52,6 +58,7 @@ export class WorldStateService {
 
   async loadFromFile(dndFilePath: string, statePath?: string): Promise<any> {
     this._model = await parseModel(dndFilePath);
+    this._worldSource = fs.readFileSync(dndFilePath, 'utf-8');
     this._statePath = statePath;
     const overlayFile = statePath && fs.existsSync(statePath)
       ? (JSON.parse(fs.readFileSync(statePath, 'utf-8')) as StateOverlayFile)
@@ -62,6 +69,56 @@ export class WorldStateService {
     this._firedReminders = overlayFile?.firedReminders ?? [];
     this.rebuildWorldState();
     return this._worldState;
+  }
+
+  /**
+   * Parses a DM script and links it against the loaded world. The script is its own
+   * document headed by `reference world "<name>"` (prepended here if the caller sent
+   * only bare statements); it is built alongside a fresh copy of the world document
+   * so its `location "X"` / `trigger "E"` / `call fn` / `Enum::Value` references
+   * resolve (see DndScopeComputation). Diagnostics are returned, not thrown, with
+   * line numbers relative to the DM's own text.
+   */
+  async parseScript(source: string): Promise<{ codeBlock?: CodeBlock; errors: ScriptParseError[] }> {
+    if (!this._model || !this._worldSource) {
+      return { errors: [{ message: 'No world is loaded.', line: 0 }] };
+    }
+    const worldName = this._model.World.name;
+    const hasHeader = /^\s*reference\s+world\b/.test(source);
+    const scriptSource = hasHeader ? source : `reference world "${worldName}"\n${source}`;
+    const prependedLines = hasHeader ? 0 : 1;
+
+    const { shared } = createDndDslServices(NodeFileSystem);
+    const ws = shared.workspace;
+    const worldUri = URI.parse('memory://script/world.dnd');
+    const scriptUri = URI.parse('memory://script/run.dnd');
+    const worldDoc = ws.LangiumDocumentFactory.fromString(this._worldSource, worldUri);
+    const scriptDoc = ws.LangiumDocumentFactory.fromString(scriptSource, scriptUri);
+    ws.LangiumDocuments.addDocument(worldDoc);
+    ws.LangiumDocuments.addDocument(scriptDoc);
+    await ws.DocumentBuilder.build([worldDoc, scriptDoc], { validation: true });
+
+    const errors: ScriptParseError[] = [];
+    for (const e of scriptDoc.parseResult.parserErrors) {
+      const line = ((e as { token?: { startLine?: number } }).token?.startLine ?? 1) - 1;
+      errors.push({ message: e.message, line: Math.max(0, line - prependedLines) });
+    }
+    for (const d of scriptDoc.diagnostics ?? []) {
+      if (d.severity !== 1) continue;
+      errors.push({ message: d.message, line: Math.max(0, d.range.start.line - prependedLines) });
+    }
+
+    const sw = (scriptDoc.parseResult.value as Model).World;
+    if (sw && !sw.isReference) {
+      errors.push({ message: 'A script must start with `reference world "<name>"`.', line: 0 });
+    } else if (sw?.isReference && sw.name !== worldName) {
+      errors.push({ message: `Script targets world "${sw.name}" but "${worldName}" is loaded.`, line: 0 });
+    }
+
+    await ws.LangiumDocuments.deleteDocument(worldUri);
+    await ws.LangiumDocuments.deleteDocument(scriptUri);
+
+    return { codeBlock: errors.length ? undefined : sw?.script, errors };
   }
 
   /** Writes the current overlay to the `.state.json` sidecar it was loaded with (a

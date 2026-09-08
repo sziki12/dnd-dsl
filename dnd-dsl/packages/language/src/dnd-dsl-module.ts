@@ -3,6 +3,7 @@ import { createDefaultModule, createDefaultSharedModule, type DefaultSharedModul
 import { DndDslGeneratedModule, DndDslGeneratedSharedModule } from './generated/module.js';
 import { DndDslValidator, registerValidationChecks } from './dnd-dsl-validator.js';
 import { DndScopeProvider } from './scope-provider.js';
+import { DndScopeComputation } from './scope-computation.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -29,7 +30,8 @@ export const DndDslModule: Module<DndDslServices, PartialLangiumServices & DndDs
         DndDslValidator: () => new DndDslValidator()
     },
     references: {
-        ScopeProvider: (services) => new DndScopeProvider(services)
+        ScopeProvider: (services) => new DndScopeProvider(services),
+        ScopeComputation: (services) => new DndScopeComputation(services)
     }
 };
 

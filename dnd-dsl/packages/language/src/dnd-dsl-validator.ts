@@ -74,13 +74,14 @@ export class DndDslValidator {
     }
 
     checkRemindPlacement(stmt: RemindStatement, accept: ValidationAcceptor): void {
-        let current: AstNode | undefined = stmt.$container;
-        while (current && current.$type !== 'FunctionDeclaration' && current.$type !== 'Event') {
-            current = current.$container;
+        for (let current: AstNode | undefined = stmt.$container; current; current = current.$container) {
+            // A `remind` reaching `World` can only have come up through `World.script`
+            // (a `reference world` script body) - quest/objective handlers hit their
+            // owning Quest/Objective first and are rejected.
+            if (current.$type === 'FunctionDeclaration' || current.$type === 'Event' || current.$type === 'World') return;
+            if (current.$type === 'Quest' || current.$type === 'Objective') break;
         }
-        if (!current) {
-            accept('error', `'remind' can only be used inside a function or event body.`, { node: stmt });
-        }
+        accept('error', `'remind' can only be used inside a function, event, or script body.`, { node: stmt });
     }
 
     // Location.sublocations nests arbitrarily. Langium's default scope provider resolves

@@ -51,13 +51,21 @@ export type TriggerEventCommand = {
   eventName: string;
 };
 
+/** Run a DM script (a `reference world "<name>"` block, or bare statements) against
+ *  the loaded world + overlay. Its whole effect folds into one HistoryEntry. */
+export type RunScriptCommand = {
+  type: 'RUN_SCRIPT';
+  source: string;
+};
+
 export type Command =
   | AdvanceTimeCommand
   | AckReminderCommand
   | AssignVariableCommand
   | AssignRuntimeVariableCommand
   | CallFunctionCommand
-  | TriggerEventCommand;
+  | TriggerEventCommand
+  | RunScriptCommand;
 
 export type CommandResponse = {
   worldState: any;
@@ -67,4 +75,9 @@ export type CommandResponse = {
   result?: any;
   /** Reminders that fired during an AdvanceTimeCommand, undefined otherwise. */
   firedReminders?: FiredReminder[];
+  /** Outcome of a RunScriptCommand, undefined otherwise. */
+  scriptResult?: {
+    returnValue?: unknown;
+    writes: { path: string; value: unknown }[];
+  };
 };

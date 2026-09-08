@@ -2,7 +2,6 @@ grammar DndDsl
 
 entry Model:
     (World=World)
-    //| (Script=CodeBlock)
     ;
 
 World:
@@ -13,7 +12,8 @@ World:
     | (events+=Event)+
     | (npcs+=Npc)+
     | (enums+=Enum)+
-    | (variables+=VariableDeclaration)+)*;
+    | (variables+=VariableDeclaration)+)*
+  | isReference?='reference' 'world' name=STRING script=CodeBlock;
 
 Enum:
     'enum' name=ID '{' values+=EnumValueDecl (',' values+=EnumValueDecl)* ','? '}';
@@ -101,6 +101,7 @@ CodeBlock:
     (code+=Code)+;
 Code:
     FunctionCall
+    | SetStatement
     | VariableAssignment
     | ConditionalBlock
     | EventTrigger
@@ -108,6 +109,8 @@ Code:
     | ReturnStatement
     | RemindStatement
     ;
+SetStatement:
+    'set' target=RefChain '=' value=(Expression);
 ConditionalBlock:
     'when' condition=BoolExpression 'do' body+=CodeBlock 'end';
 ReturnStatement:

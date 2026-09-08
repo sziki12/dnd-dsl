@@ -1,7 +1,9 @@
 import { AstUtils, DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream } from "langium";
 import type { AstNode, ReferenceInfo, Scope } from "langium";
 import {
+    type Enum,
     isCodeBlock,
+    isEnum,
     isEnumValueRef,
     isLocationRefItem,
     isNpcRefItem,
@@ -46,8 +48,7 @@ export class DndScopeProvider extends DefaultScopeProvider
         const container = context.container;
         if (isEnumValueRef(container) && context.property === "value")
         {
-            const world = AstUtils.getContainerOfType(container, isWorld);
-            const enumDecl = world?.enums.find(e => e.name === container.enumName);
+            const enumDecl = this.resolveEnum(container.enumName, context);
             if (!enumDecl) return EMPTY_SCOPE;
             return new MapScope(
                 stream(enumDecl.values).map(v => this.descriptions.createDescription(v, v.name))
@@ -55,6 +56,16 @@ export class DndScopeProvider extends DefaultScopeProvider
         }
 
         return super.getScope(context);
+    }
+
+    /** The enclosing World's enum by name, or - for a `reference world` script whose
+     *  own World declares no enums - the loaded world's enum from the global index. */
+    private resolveEnum(name: string, context: ReferenceInfo): Enum | undefined
+    {
+        const local = AstUtils.getContainerOfType(context.container, isWorld)?.enums.find(e => e.name === name);
+        if (local) return local;
+        const global = this.getGlobalScope("Enum", context).getElement(name)?.node;
+        return isEnum(global) ? global : undefined;
     }
 
     /**

@@ -3,7 +3,7 @@ import { WorldStateService } from '../world-state/world-state.service.js';
 import { LangiumInterpreterService, type EvalContext } from '../langium-interpreter/langium-interpreter.service.js';
 
 import { isVariableDeclaration } from '@dnd-language/index.js';
-import { resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { encodeStatePath, resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
 import { resolveRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import {
@@ -14,6 +14,7 @@ import {
   CallFunctionCommand,
   Command,
   CommandResponse,
+  RunScriptCommand,
   TriggerEventCommand,
 } from '@dnd-language/evaluation/dnd-dsl-commands.js';
 
@@ -48,10 +49,11 @@ export class CommandService {
     private readonly interpreterService: LangiumInterpreterService,
   ) {}
 
-  execute(cmd: Command): CommandResponse {
+  async execute(cmd: Command): Promise<CommandResponse> {
     if (cmd.type === 'CALL_FUNCTION') return this.executeCallFunction(cmd);
     if (cmd.type === 'TRIGGER_EVENT') return this.executeTriggerEvent(cmd);
     if (cmd.type === 'ADVANCE_TIME') return this.executeAdvanceTime(cmd);
+    if (cmd.type === 'RUN_SCRIPT') return this.executeRunScript(cmd);
 
     const previous = this.snapshotRuntimeState();
     this.applyCommand(cmd);
@@ -171,6 +173,58 @@ export class CommandService {
     this.worldStateService.persistOverlay();
 
     return { ...this.buildResponse(), firedReminders: justFired };
+  }
+
+  /** Parses + links the script against the loaded world, runs it in isolation
+   *  (scope/reminders are copies, entity writes are deferred), then commits
+   *  everything as one HistoryEntry. A parse or runtime failure commits nothing. */
+  private async executeRunScript(cmd: RunScriptCommand): Promise<CommandResponse> {
+    const model = this.worldStateService.getModel();
+    if (!model) throw new Error('No world is loaded');
+
+    const previous = this.snapshotRuntimeState();
+
+    const { codeBlock, errors } = await this.worldStateService.parseScript(cmd.source);
+    if (errors.length || !codeBlock) {
+      throw new Error(errors.map(e => `line ${e.line + 1}: ${e.message}`).join('\n') || 'Empty script');
+    }
+
+    const state = this.worldStateService.getWorldState();
+    const ctx: EvalContext = {
+      scope: { ...(state.runtimeVariables ?? {}) },
+      worldState: state,
+      clock: this.worldStateService.getClock(),
+      reminders: structuredClone(this.worldStateService.getReminders()),
+      model,
+      pendingOverlayWrites: [],
+      triggeredEvents: new Set(),
+    };
+
+    let returnValue: unknown;
+    try {
+      returnValue = this.interpreterService.runScript(ctx, codeBlock);
+    } catch (e) {
+      throw new Error(`Script failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    state.runtimeVariables = ctx.scope;
+    this.worldStateService.setReminders(ctx.reminders);
+    for (const w of ctx.pendingOverlayWrites!) {
+      this.worldStateService.setOverlayEntry(w.path, w.value);
+    }
+
+    const post = this.snapshotRuntimeState();
+    this.history.push({ command: cmd, previous, post });
+    this.future.splice(0);
+    this.worldStateService.persistOverlay();
+
+    return {
+      ...this.buildResponse(),
+      scriptResult: {
+        returnValue,
+        writes: ctx.pendingOverlayWrites!.map(w => ({ path: encodeStatePath(w.path), value: w.value })),
+      },
+    };
   }
 
   private applyCommand(cmd: Command): void {

@@ -4,6 +4,7 @@ import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
+import TerminalOutlinedIcon from '@mui/icons-material/TerminalOutlined';
 import { DslContext } from '../../contexts/DslContext';
 
 export default function ActivityBar() {
@@ -37,6 +38,14 @@ export default function ActivityBar() {
       label: 'NPCs',
       active: pathname === '/npcs',
       onClick: () => navigate('/npcs'),
+      disabled: !worldState,
+    },
+    {
+      id: 'script',
+      icon: <TerminalOutlinedIcon />,
+      label: 'Script',
+      active: pathname === '/script',
+      onClick: () => navigate('/script'),
       disabled: !worldState,
     },
     {

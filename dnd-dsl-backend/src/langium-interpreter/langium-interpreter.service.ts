@@ -31,6 +31,7 @@ import {
     RefChain,
     RemindStatement,
     ReturnStatement,
+    SetStatement,
     VariableDeclaration,
 } from '@dnd-language/index.js';
 import { Injectable } from '@nestjs/common';
@@ -50,13 +51,19 @@ type RuntimeScope = Record<string, any>;
  * service, so the reverse edge would be a real DI cycle. `worldState` is the current,
  * overlay-applied JSON world state (WorldStateService.getWorldState()), used to resolve
  * persistent (Location-owned) RefChain reads; `scope` is the local/function runtime scope;
- * `clock`/`reminders` back RemindStatement scheduling.
+ * `clock`/`reminders` back RemindStatement scheduling; `model` is the loaded live AST
+ * (used to dispatch `trigger` by name); `pendingOverlayWrites` collects entity-variable
+ * writes from `set` / assignment for the caller to flush; `triggeredEvents` guards
+ * against `trigger` recursion.
  */
 export type EvalContext = {
     scope: RuntimeScope;
     worldState: SerializedModel;
     clock: number;
     reminders: ScheduledReminder[];
+    model?: Model;
+    pendingOverlayWrites?: { path: StatePath; value: unknown }[];
+    triggeredEvents?: Set<string>;
 };
 
 class ReturnSignal {
@@ -243,6 +250,9 @@ export class LangiumInterpreterService {
             worldState: callerCtx.worldState,
             clock: callerCtx.clock,
             reminders: callerCtx.reminders,
+            model: callerCtx.model,
+            pendingOverlayWrites: callerCtx.pendingOverlayWrites,
+            triggeredEvents: callerCtx.triggeredEvents,
         };
 
         decl.params.forEach((param, i) => {
@@ -265,6 +275,13 @@ export class LangiumInterpreterService {
         return undefined;
     }
 
+    /** Runs a DM script body and returns its `return` value (or undefined). Entity
+     *  writes land in `ctx.pendingOverlayWrites` for the caller to flush. */
+    runScript(ctx: EvalContext, codeBlock: CodeBlock): unknown {
+        const result = this.runCodeBlock(ctx, codeBlock);
+        return result instanceof ReturnSignal ? result.value : undefined;
+    }
+
     runCode(ctx: EvalContext, code: Code): ReturnSignal | undefined {
         switch (code.$type) {
             case 'VariableDeclaration': {
@@ -275,8 +292,31 @@ export class LangiumInterpreterService {
             }
             case 'VariableAssignment': {
                 const decl = code.target.val.ref;
-                const name = decl?.target ?? decl?.name ?? '';
-                ctx.scope[name] = this.evaluateExpression(ctx, code.value);
+                const value = this.evaluateExpression(ctx, code.value);
+                // An assignment whose target is an entity-owned variable (a name-based
+                // StatePath resolves) is a persistent write; anything else is a
+                // local/function-scope write.
+                const path = decl ? nodeToStatePath(decl) : undefined;
+                if (path && ctx.pendingOverlayWrites) {
+                    ctx.pendingOverlayWrites.push({ path, value });
+                } else {
+                    ctx.scope[decl?.target ?? decl?.name ?? ''] = value;
+                }
+                break;
+            }
+            case 'SetStatement': {
+                const c = code as unknown as SetStatement;
+                const value = this.evaluateExpression(ctx, c.value);
+                let path: StatePath;
+                try {
+                    path = this.resolveRefChainToStatePath(c.target);
+                } catch {
+                    path = [];
+                }
+                if (path[path.length - 1]?.kind !== 'variable') {
+                    throw new Error('`set` needs an entity variable target, e.g. `set npc "X" . mood = ...`');
+                }
+                (ctx.pendingOverlayWrites ??= []).push({ path, value });
                 break;
             }
             case 'FunctionCall': {
@@ -301,7 +341,16 @@ export class LangiumInterpreterService {
                 break;
             }
             case 'EventTrigger': {
-                // TODO: dispatch event execution
+                const name = code.target.val.ref?.name;
+                if (!name || !ctx.model) break;
+                const seen = (ctx.triggeredEvents ??= new Set());
+                if (seen.has(name)) break; // re-entrancy guard
+                seen.add(name);
+                try {
+                    this.triggerEventByName(ctx.model, name, ctx);
+                } finally {
+                    seen.delete(name);
+                }
                 break;
             }
             case 'RemindStatement': {
@@ -327,8 +376,8 @@ export class LangiumInterpreterService {
     }
 
     /** Resolves a RefChain to its StatePath address rather than its value - used by
-     *  RemindStatement's `show on <chain>` pin. Mirrors evaluateRefChain's head/tail
-     *  resolution and throw conventions. */
+     *  RemindStatement's `show on <chain>` pin and by `set <chain> = <expr>`. Mirrors
+     *  evaluateRefChain's head/tail resolution and throw conventions. */
     private resolveRefChainToStatePath(chain: RefChain): StatePath {
         if (isEventRefItem(chain.first)) {
             throw new Error(`Cannot pin a reminder to a '${chain.first.$type}' reference`);

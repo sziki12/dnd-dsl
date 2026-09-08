@@ -14,12 +14,20 @@ type DslContext = {
   updateWorldState: () => Promise<void>;
   getByReference<T extends SerializedAstNode>(ref: SerializedRef | undefined): T | undefined;
   execute: (cmd: Command) => Promise<void>;
+  runScript: (source: string) => Promise<ScriptRunResult>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   canUndo: boolean;
   canRedo: boolean;
   firedReminders: FiredReminder[];
   clearFiredReminder: (id: string) => void;
+};
+
+export type ScriptRunResult = {
+  ok: boolean;
+  returnValue?: unknown;
+  writes?: { path: string; value: unknown }[];
+  error?: string;
 };
 
 export const DslContext = createContext<DslContext>({} as DslContext);
@@ -76,6 +84,21 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     applyCommandResponse(await response.json());
   };
 
+  const runScript = async (source: string): Promise<ScriptRunResult> => {
+    const response = await fetch(`${BackendURL}/command/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'RUN_SCRIPT', source }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      const msg = body?.message;
+      return { ok: false, error: typeof msg === 'string' ? msg : JSON.stringify(msg ?? body) };
+    }
+    applyCommandResponse(body);
+    return { ok: true, returnValue: body.scriptResult?.returnValue, writes: body.scriptResult?.writes };
+  };
+
   const undo = async (): Promise<void> => {
     const response = await fetch(`${BackendURL}/command/undo`, { method: 'POST' });
     applyCommandResponse(await response.json());
@@ -117,7 +140,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
       adventure, updateAdventure,
       worldState, updateWorldState,
       getByReference,
-      execute, undo, redo, canUndo, canRedo,
+      execute, runScript, undo, redo, canUndo, canRedo,
       firedReminders, clearFiredReminder,
     }}>
       {children}
