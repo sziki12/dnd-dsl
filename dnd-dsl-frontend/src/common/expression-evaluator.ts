@@ -1,5 +1,6 @@
-import type { SerializedModel, SerializedNode, SerializedRefChain, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import type { SerializedEnumValueDecl, SerializedModel, SerializedNode, SerializedRefChain, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
+import { parseReferenceFromSerializedModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
 import type {
     Expression, BoolVal, IntVal, StringVal,
     IntExpression, BoolExpression, IntToBoolExpression, GroupedExpression,
@@ -54,6 +55,14 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
         case 'StringVal': {
             const e = expr as unknown as SerializedNode<StringVal>;
             return e.val;
+        }
+        case 'EnumValueRef': {
+            // Enum reference evaluates to its value name (parallel to the backend
+            // interpreter and dnd-dsl-value-evaluator).
+            if (!options?.worldState) return undefined;
+            const ref = (expr as unknown as { value: { $ref: string } }).value;
+            const decl = parseReferenceFromSerializedModel<SerializedEnumValueDecl>(options.worldState, ref);
+            return decl?.name;
         }
         case 'IntExpression': {
             const e = expr as SerializedNode<IntExpression>;

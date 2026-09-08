@@ -1,7 +1,8 @@
-import { DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream } from "langium";
+import { AstUtils, DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream } from "langium";
 import type { AstNode, ReferenceInfo, Scope } from "langium";
 import {
     isCodeBlock,
+    isEnumValueRef,
     isLocationRefItem,
     isNpcRefItem,
     isObjectDeclaration,
@@ -10,6 +11,7 @@ import {
     isVariableDeclaration,
     isVariableRef,
     isVariableRefItem,
+    isWorld,
     type RefChain,
     VariableDeclaration,
 } from "./generated/ast.js";
@@ -36,6 +38,20 @@ export class DndScopeProvider extends DefaultScopeProvider
             }
 
             return this.getVariableScope(context.container, context);
+        }
+
+        // `EnumName::Value` - the value half is scoped to that enum's own members.
+        // EnumValueDecl nodes are only visible inside their Enum declaration by
+        // default, so without this the value never resolves at any use site.
+        const container = context.container;
+        if (isEnumValueRef(container) && context.property === "value")
+        {
+            const world = AstUtils.getContainerOfType(container, isWorld);
+            const enumDecl = world?.enums.find(e => e.name === container.enumName);
+            if (!enumDecl) return EMPTY_SCOPE;
+            return new MapScope(
+                stream(enumDecl.values).map(v => this.descriptions.createDescription(v, v.name))
+            );
         }
 
         return super.getScope(context);

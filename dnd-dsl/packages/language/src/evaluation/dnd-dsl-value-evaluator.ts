@@ -1,4 +1,5 @@
 import type {
+    SerializedEnumValueDecl,
     SerializedExpression,
     SerializedLocation,
     SerializedModel,
@@ -108,6 +109,15 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
         }
         case 'StringVal':
             return (node as unknown as { val: string }).val;
+
+        case 'EnumValueRef': {
+            // The runtime value of an enum reference is its value name - keeps `is` /
+            // `==` as plain string comparison and matches what an ASSIGN_VARIABLE
+            // overlay write stores (a bare name string).
+            const ref = (node as unknown as { value: { $ref: string } }).value;
+            const decl = parseReferenceFromSerializedModel<SerializedEnumValueDecl>(model, ref);
+            return decl?.name;
+        }
 
         case 'Expression':
         case 'GroupedExpression':

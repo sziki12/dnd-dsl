@@ -8,6 +8,7 @@ import {
     FunctionDeclaration,
     isBoolExpression,
     isBoolVal,
+    isEnumValueRef,
     isEventRefItem,
     isFunctionCall,
     isGroupedExpression,
@@ -73,6 +74,12 @@ export class LangiumInterpreterService {
         }
         if (isStringVal(expression)) {
             return expression.val;
+        }
+        if (isEnumValueRef(expression)) {
+            // Runtime value of an enum reference is its value name - keeps `is` / `==`
+            // as plain string comparison and matches the bare name string an
+            // ASSIGN_VARIABLE overlay write stores.
+            return expression.value.ref?.name ?? expression.value.$refText;
         }
         if (isObjectDeclaration(expression)) {
             return expression.variables.reduce((obj: RuntimeScope, v) => {

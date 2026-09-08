@@ -1,5 +1,5 @@
 import type { AstNode, ValidationAcceptor, ValidationChecks } from 'langium';
-import { isStringVal, type DndDslAstType, type Enum, type EnumValueDecl, type Event, type FunctionDeclaration, type Location, type Npc, type Objective, type Quest, type RemindStatement, type VariableDeclaration, type World } from './generated/ast.js';
+import { isEnumValueRef, isStringVal, type DndDslAstType, type Enum, type EnumValueDecl, type Event, type FunctionDeclaration, type IntToBoolExpression, type Location, type Npc, type Objective, type Quest, type RemindStatement, type VariableDeclaration, type World } from './generated/ast.js';
 import { unwrapExpression } from './evaluation/dnd-dsl-state-path.js';
 
 type NamedNode = Enum | EnumValueDecl | Event | FunctionDeclaration | Location | Npc | Objective | Quest;
@@ -16,6 +16,7 @@ export function registerValidationChecks(services: DndDslServices) {
         Quest: validator.checkUniqueObjectiveNames,
         Enum: validator.checkUniqueEnumValues,
         VariableDeclaration: validator.checkEnumValue,
+        IntToBoolExpression: validator.checkEnumComparison,
         RemindStatement: validator.checkRemindPlacement,
     };
     registry.register(checks, validator);
@@ -47,10 +48,28 @@ export class DndDslValidator {
         const enumDecl = decl.enumType?.ref;
         if (!enumDecl || !decl.value) return;
         const value = unwrapExpression(decl.value);
-        if (!isStringVal(value)) return;
-        const allowed = enumDecl.values.map(v => v.name);
-        if (!allowed.includes(value.val)) {
-            accept('warning', `"${value.val}" is not a value of enum ${enumDecl.name}. Allowed: ${allowed.join(', ')}.`, { node: decl, property: 'value' });
+
+        if (isEnumValueRef(value)) {
+            if (value.enumName !== enumDecl.name) {
+                accept('error', `Value of enum ${value.enumName} used where ${enumDecl.name} is expected.`, { node: decl, property: 'value' });
+            }
+            return;
+        }
+
+        if (isStringVal(value)) {
+            const allowed = enumDecl.values.map(v => v.name);
+            if (!allowed.includes(value.val)) {
+                accept('warning', `"${value.val}" is not a value of enum ${enumDecl.name}. Use ${enumDecl.name}::<value> (allowed: ${allowed.join(', ')}).`, { node: decl, property: 'value' });
+            }
+        }
+    }
+
+    checkEnumComparison(expr: IntToBoolExpression, accept: ValidationAcceptor): void {
+        const left = unwrapExpression(expr.left);
+        const right = unwrapExpression(expr.right);
+        if (!isEnumValueRef(left) || !isEnumValueRef(right)) return;
+        if (left.enumName !== right.enumName) {
+            accept('error', `Cannot compare enum ${left.enumName} with enum ${right.enumName}.`, { node: expr });
         }
     }
 

@@ -164,14 +164,21 @@ MultiplicativeExpression infers Expression:
     )*;
 PrimaryExpression infers Expression:
     {infer GroupedExpression} '(' exp=Expression ')' |
+    EnumValueRef |
     ReferenceExpression |
     ConstantExpression;
 ConstantExpression:
-    IntVal | 
-    StringVal | 
+    IntVal |
+    StringVal |
     BoolVal |
     ObjectDeclaration
     ;
+// `enumName` is a plain token (ENUM_NAME only matches an identifier immediately
+// followed by `::`), which keeps `EnumName::Value` unambiguous against a bare
+// variable reference in the same expression slot. The enum is resolved by name in
+// the scope provider and validator.
+EnumValueRef:
+    enumName=ENUM_NAME '::' value=[EnumValueDecl:ID];
 ReferenceExpression:
     FunctionCall |
     QuestExpressions |
@@ -244,6 +251,10 @@ terminal BooleanValue returns boolean:
 
 
 hidden terminal WS: /\s+/;
+// An identifier immediately followed by `::` - the qualifier of an EnumName::Value
+// reference. Declared before ID so `Foo::` lexes as ENUM_NAME while a bare `Foo`
+// stays an ID.
+terminal ENUM_NAME: /[_a-zA-Z][\w_]*(?=::)/;
 terminal ID: /[_a-zA-Z][\w_]*/;
 terminal INT returns number: /[0-9]+/;
 terminal STRING: /"(\\.|[^"\\])*"|'(\\.|[^'\\])*'/;

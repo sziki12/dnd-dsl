@@ -30,6 +30,7 @@ export type SerializedEvent          = SerializedNode<ast.Event>;
 export type SerializedNpc            = SerializedNode<ast.Npc>;
 export type SerializedEnum           = SerializedNode<ast.Enum>;
 export type SerializedEnumValueDecl  = SerializedNode<ast.EnumValueDecl>;
+export type SerializedEnumValueRef   = SerializedNode<ast.EnumValueRef>;
 export type SerializedFunctionDecl   = SerializedNode<ast.FunctionDeclaration>;
 export type SerializedVariableDecl   = SerializedNode<ast.VariableDeclaration>;
 export type SerializedExpression     = SerializedNode<ast.Expression>;
