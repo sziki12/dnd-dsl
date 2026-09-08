@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
 import { DslContext } from '../../contexts/DslContext';
 
 export default function TabStrip() {
@@ -24,6 +25,7 @@ export default function TabStrip() {
       onClick: () => fallbackLocation && navigate(`/location/${encodeURIComponent(fallbackLocation)}`),
       disabled: !fallbackLocation,
     },
+    { id: 'npcs', icon: <PersonOutlineIcon style={{ fontSize: 14 }} />, label: 'NPCs', active: pathname === '/npcs', onClick: () => navigate('/npcs'), disabled: !worldState },
     { id: 'editor', icon: <CodeOutlinedIcon style={{ fontSize: 14 }} />, label: 'Editor', active: pathname === '/editor', onClick: () => navigate('/editor'), disabled: false },
   ];
 

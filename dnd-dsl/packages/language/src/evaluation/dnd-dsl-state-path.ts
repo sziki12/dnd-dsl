@@ -3,10 +3,12 @@ import {
     isEvent,
     isFunctionDeclaration,
     isLocation,
+    isNpc,
     isObjectDeclaration,
     isObjective,
     isQuest,
     isVariableDeclaration,
+    isWorld,
     type Location,
     type Model,
     type VariableDeclaration,
@@ -29,6 +31,8 @@ export type StatePathSegment =
     | { kind: 'objective'; questName: string; name: string }
     | { kind: 'event'; name: string }
     | { kind: 'function'; name: string }
+    | { kind: 'npc'; name: string }
+    | { kind: 'world' }
     | { kind: 'variable'; target: string };
 
 export type StatePath = StatePathSegment[];
@@ -60,15 +64,21 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
 
     while (current) {
         if (isVariableDeclaration(current)) {
-            // Only variables reachable through a Location's own `.variables` array (directly,
-            // or nested inside an ObjectDeclaration) are persistent/addressable state. A
-            // CodeBlock-local `let` or a FunctionDeclaration `param` is neither — those aren't
-            // part of this plan (see Phase C.3), so bail out rather than returning a bogus path.
+            // Only variables owned by a persistent named container (Location/Npc/Quest/
+            // Objective/World, directly or nested inside an ObjectDeclaration) are
+            // addressable state. A CodeBlock-local `let` or a FunctionDeclaration `param`
+            // is not, so bail out rather than returning a bogus path.
             const container = current.$container;
-            if (!container || !(isLocation(container) || isObjectDeclaration(container))) return undefined;
+            if (!container || !(isLocation(container) || isObjectDeclaration(container)
+                || isNpc(container) || isQuest(container) || isObjective(container) || isWorld(container))) {
+                return undefined;
+            }
             segments.unshift({ kind: 'variable', target: current.target ?? current.name ?? '' });
         } else if (isLocation(current)) {
             segments.unshift({ kind: 'location', name: current.name });
+            return segments;
+        } else if (isNpc(current)) {
+            segments.unshift({ kind: 'npc', name: current.name });
             return segments;
         } else if (isObjective(current)) {
             segments.unshift({ kind: 'objective', questName: current.$container.name, name: current.name });
@@ -81,6 +91,9 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
             return segments;
         } else if (isFunctionDeclaration(current)) {
             segments.unshift({ kind: 'function', name: current.name });
+            return segments;
+        } else if (isWorld(current)) {
+            segments.unshift({ kind: 'world' });
             return segments;
         }
         // ObjectDeclaration (and anything else) contributes no segment of its own —
@@ -118,6 +131,12 @@ export function statePathToNode(model: Model, path: StatePath): AstNode | undefi
             break;
         case 'function':
             root = model.World.functions.find(f => f.name === head.name);
+            break;
+        case 'npc':
+            root = model.World.npcs.find(n => n.name === head.name);
+            break;
+        case 'world':
+            root = model.World;
             break;
         case 'variable':
             return undefined; // a 'variable' segment can never be the path head
@@ -185,5 +204,9 @@ function findLocationByName(locations: Location[], name: string): Location | und
 function getVariablesArray(node: AstNode): VariableDeclaration[] | undefined {
     if (isLocation(node)) return node.variables;
     if (isObjectDeclaration(node)) return node.variables;
+    if (isNpc(node)) return node.variables;
+    if (isQuest(node)) return node.variables;
+    if (isObjective(node)) return node.variables;
+    if (isWorld(node)) return node.variables;
     return undefined;
 }

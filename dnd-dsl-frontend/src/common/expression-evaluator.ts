@@ -80,10 +80,13 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
             const e = expr as SerializedNode<IntToBoolExpression>;
             const left = evaluateExpression(e.left, options);
             const right = evaluateExpression(e.right, options);
-            if (typeof left !== 'number' || typeof right !== 'number') return undefined;
             switch (e.operator) {
                 case '==': return left === right;
                 case '!=': return left !== right;
+                case 'is': { const eq = left === right; return e.negated ? !eq : eq; }
+            }
+            if (typeof left !== 'number' || typeof right !== 'number') return undefined;
+            switch (e.operator) {
                 case '<':  return left < right;
                 case '<=': return left <= right;
                 case '>':  return left > right;
@@ -121,16 +124,15 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
             if (!options?.worldState) return undefined;
             try {
                 const target = resolveSerializedRefChain(options.worldState, expr as unknown as SerializedRefChain);
-                if (target.kind === 'location') {
+                if (target.kind === 'location' || target.kind === 'entity') {
                     // Reuse the ObjectDeclaration case above rather than duplicating record-building.
                     return evaluateExpression({ $type: 'ObjectDeclaration', variables: target.node.variables } as any, options);
                 }
                 return evaluateExpression(target.node.value, { variableName: target.node.target, worldState: options.worldState });
             } catch {
-                // Unresolved/unsupported chain (e.g. a quest/event head - not implemented
-                // yet). This function runs eagerly during render (LocationView), so a
-                // throw here would crash the page - treat it like any other unresolvable
-                // expression instead.
+                // Unresolved/unsupported chain (e.g. an event head - not implemented yet).
+                // This function runs eagerly during render (LocationView), so a throw here
+                // would crash the page - treat it like any other unresolvable expression.
                 return undefined;
             }
         }

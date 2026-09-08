@@ -2,6 +2,8 @@ import type {
     SerializedExpression,
     SerializedLocation,
     SerializedModel,
+    SerializedNpc,
+    SerializedQuest,
     SerializedVariableDecl,
     SerializedRefChain,
 } from './dnd-dsl-serialized-types.js';
@@ -20,6 +22,7 @@ export type JsonRuntimeValue =
 
 export type RefChainTarget =
     | { kind: 'location'; node: SerializedLocation }
+    | { kind: 'entity'; node: SerializedNpc | SerializedQuest }
     | { kind: 'variable'; node: SerializedVariableDecl };
 
 /**
@@ -35,7 +38,7 @@ export type RefChainTarget =
 export function resolveSerializedRefChain(model: SerializedModel, chain: SerializedRefChain): RefChainTarget {
     const first = chain.first as { $type: string };
 
-    if (first.$type === 'QuestRefItem' || first.$type === 'EventRefItem') {
+    if (first.$type === 'EventRefItem') {
         throw new Error(`RefChain heads of kind '${first.$type}' are not supported yet`);
     }
 
@@ -46,8 +49,15 @@ export function resolveSerializedRefChain(model: SerializedModel, chain: Seriali
         return { kind: 'location', node: loc };
     }
 
+    if ((first.$type === 'QuestRefItem' || first.$type === 'NpcRefItem') && chain.rest.length === 0) {
+        const ref = (first as unknown as { val: { val: { $ref: string } } }).val.val;
+        const node = parseReferenceFromSerializedModel<SerializedNpc | SerializedQuest>(model, ref);
+        if (!node) throw new Error(`Unresolved entity ref: ${ref.$ref}`);
+        return { kind: 'entity', node };
+    }
+
     // Every remaining shape ends in a VariableRefItem - either chain.first itself (a
-    // bare or location-qualified-with-rest variable chain) or the last chain.rest item.
+    // bare or entity-qualified-with-rest variable chain) or the last chain.rest item.
     const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
     const ref = (tail as unknown as { val: { val: { $ref: string } } }).val.val;
     const decl = parseReferenceFromSerializedModel<SerializedVariableDecl>(model, ref);
@@ -126,13 +136,16 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
         }
 
         case 'IntToBoolExpression': {
-            const e = node as unknown as { left: unknown; operator: '==' | '!=' | '<' | '>' | '<=' | '>='; right: unknown };
+            const e = node as unknown as { left: unknown; operator: '==' | '!=' | '<' | '>' | '<=' | '>=' | 'is'; right: unknown; negated?: boolean };
             const l = evaluateSerializedExpression(model, e.left);
             const r = evaluateSerializedExpression(model, e.right);
-            if (typeof l !== 'number' || typeof r !== 'number') return undefined;
             switch (e.operator) {
                 case '==': return l === r;
                 case '!=': return l !== r;
+                case 'is': { const eq = l === r; return e.negated ? !eq : eq; }
+            }
+            if (typeof l !== 'number' || typeof r !== 'number') return undefined;
+            switch (e.operator) {
                 case '<': return l < r;
                 case '>': return l > r;
                 case '<=': return l <= r;
@@ -146,7 +159,7 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
 
         case 'RefChain': {
             const target = resolveSerializedRefChain(model, node as unknown as SerializedRefChain);
-            return target.kind === 'location'
+            return target.kind === 'location' || target.kind === 'entity'
                 ? buildVariablesRecord(model, target.node.variables)
                 : evaluateSerializedExpression(model, target.node.value);
         }

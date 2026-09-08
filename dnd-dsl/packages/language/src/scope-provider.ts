@@ -3,7 +3,9 @@ import type { AstNode, ReferenceInfo, Scope } from "langium";
 import {
     isCodeBlock,
     isLocationRefItem,
+    isNpcRefItem,
     isObjectDeclaration,
+    isQuestRefItem,
     isRefChain,
     isVariableDeclaration,
     isVariableRef,
@@ -58,13 +60,21 @@ export class DndScopeProvider extends DefaultScopeProvider
             // `location "High Castle" . <member>` -> that location's own variables
             members = prev.val.val.ref?.variables;
         }
+        else if (isQuestRefItem(prev))
+        {
+            members = prev.val.val.ref?.variables;
+        }
+        else if (isNpcRefItem(prev))
+        {
+            members = prev.val.val.ref?.variables;
+        }
         else if (isVariableRefItem(prev))
         {
             // `Resources . <member>` -> the variables of an `object`-valued decl
             const value = unwrapExpression(prev.val.val.ref?.value);
             if (isObjectDeclaration(value)) members = value.variables;
         }
-        // QuestRefItem / EventRefItem: synthetic members - later step.
+        // EventRefItem: no variables, no member scope.
 
         if (!members || members.length === 0) return EMPTY_SCOPE;
 

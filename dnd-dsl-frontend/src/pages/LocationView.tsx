@@ -15,6 +15,7 @@ import FloatingEdge from '../edges/FloatingEdge.js';
 import FloatingConnectionLine from '../edges/FloatingConnectionLine.js';
 import type { SerializedModel, SerializedLocation, SerializedVariableDecl, SerializedAstNode, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { findLocation } from '../common/location-tree';
+import EnumValueSelect from '../common/EnumValueSelect';
 import { layoutAsTree } from './tree-layout';
 import { computeContainRect, normalizedToPixel, pixelToNormalized, type Size } from './map-coords';
 
@@ -203,6 +204,13 @@ const LocationView = () => {
                         <span className="tok-variable">{variable.target}</span>
                         <span className="tok-operator">=</span>
                         {renderValueToken(value)}
+                        {locationData && (
+                          <EnumValueSelect
+                            variable={variable}
+                            owner={{ kind: 'location', name: locationData.name }}
+                            currentValue={value}
+                          />
+                        )}
                       </div>
                     </div>
                   )

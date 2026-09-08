@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import LocationView from './pages/LocationView';
+import NpcsView from './pages/NpcsView';
 import { DslEditor } from './pages/DslEditor';
 import { ContextWrapper } from './contexts/ContextWrapper';
 import type { JSX, ReactNode } from 'react';
@@ -33,6 +34,7 @@ function App() {
         <Routes>
           {createRoute({path:"/", element:<Home />, name:"Home Page"})}
           {createRoute({path:"/location/:locationName", element:<LocationView />, name:"Location Page"})}
+          {createRoute({path:"/npcs", element:<NpcsView />, name:"NPCs Page"})}
           {createRoute({path:"/editor", element:<DslEditor />, name:"Editor Page"})}
         </Routes>
       </BrowserRouter>

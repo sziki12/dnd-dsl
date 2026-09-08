@@ -10,7 +10,20 @@ World:
     ((locations+=Location)+
     | (functions+=FunctionDeclaration)+
     | (quests+=Quest)+
-    | (events+=Event)+)*;
+    | (events+=Event)+
+    | (npcs+=Npc)+
+    | (enums+=Enum)+
+    | (variables+=VariableDeclaration)+)*;
+
+Enum:
+    'enum' name=ID '{' values+=EnumValueDecl (',' values+=EnumValueDecl)* ','? '}';
+EnumValueDecl:
+    name=ID;
+
+Npc:
+    'npc' name=STRING
+    (Description)?
+    (variables+=VariableDeclaration)*;
 
 //Location
 Location:
@@ -33,11 +46,13 @@ Identifier:
 Quest:
     'quest' name=STRING
     (Description)?
+    (variables+=VariableDeclaration)*
     (CompleteableEvents)?
     (objectives+=Objective)+;
 Objective:
     'objective' name=STRING
     (Description)?
+    (variables+=VariableDeclaration)*
     (CompleteableEvents)?;
 QuestExpressions:
     ('quest' (QuestCompletedExpression
@@ -110,7 +125,7 @@ VariableAssignment:
 
 //General Declarations
 VariableDeclaration:
-    'let' isComputed='computed'? target=ID '=' value=(Expression);
+    'let' isComputed='computed'? target=ID (':' enumType=[Enum:ID])? '=' value=(Expression);
 ObjectDeclaration:
     'object'
     (variables+=VariableDeclaration)*
@@ -130,8 +145,9 @@ BoolExpression infers Expression:
     )*;
 ComparisonExpression infers Expression:
     exp=IntExpression (
-        {infer IntToBoolExpression.left=current} 
-        operator=('==' | '!=' | '<' | '>' | '<=' | '>=') 
+        {infer IntToBoolExpression.left=current}
+        ( operator=('==' | '!=' | '<' | '>' | '<=' | '>=')
+        | operator='is' (negated?='not')? )
         right=IntExpression
     )?;
 IntExpression infers Expression:
@@ -181,7 +197,8 @@ RefChainStart:
     VariableRefItem
     | LocationRefItem
     | QuestRefItem
-    | EventRefItem;
+    | EventRefItem
+    | NpcRefItem;
 
 VariableRefItem:
     val=VariableRef;
@@ -191,6 +208,8 @@ QuestRefItem:
     isQuest='quest' val=QuestRef;
 EventRefItem:
     isEvent='event' val=EventRef;
+NpcRefItem:
+    isNpc='npc' val=NpcRef;
 
 //val is declared, property is generated
 VariableRef:        
@@ -203,6 +222,8 @@ ObjectiveRef:
     val=[Objective:STRING];
 EventRef:
     val=[Event:STRING];
+NpcRef:
+    val=[Npc:STRING];
 FunctionRef:
     val=[FunctionDeclaration:ID];
 

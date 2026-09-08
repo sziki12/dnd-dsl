@@ -1,7 +1,8 @@
 import type { AstNode, ValidationAcceptor, ValidationChecks } from 'langium';
-import type { DndDslAstType, Event, FunctionDeclaration, Location, Objective, Quest, RemindStatement, World } from './generated/ast.js';
+import { isStringVal, type DndDslAstType, type Enum, type EnumValueDecl, type Event, type FunctionDeclaration, type Location, type Npc, type Objective, type Quest, type RemindStatement, type VariableDeclaration, type World } from './generated/ast.js';
+import { unwrapExpression } from './evaluation/dnd-dsl-state-path.js';
 
-type NamedNode = Event | FunctionDeclaration | Location | Objective | Quest;
+type NamedNode = Enum | EnumValueDecl | Event | FunctionDeclaration | Location | Npc | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
 
 /**
@@ -13,6 +14,8 @@ export function registerValidationChecks(services: DndDslServices) {
     const checks: ValidationChecks<DndDslAstType> = {
         World: validator.checkUniqueNames,
         Quest: validator.checkUniqueObjectiveNames,
+        Enum: validator.checkUniqueEnumValues,
+        VariableDeclaration: validator.checkEnumValue,
         RemindStatement: validator.checkRemindPlacement,
     };
     registry.register(checks, validator);
@@ -28,10 +31,27 @@ export class DndDslValidator {
         this.checkUnique(world.quests, accept, 'Quest');
         this.checkUnique(world.events, accept, 'Event');
         this.checkUnique(world.functions, accept, 'Function');
+        this.checkUnique(world.npcs, accept, 'Npc');
+        this.checkUnique(world.enums, accept, 'Enum');
     }
 
     checkUniqueObjectiveNames(quest: Quest, accept: ValidationAcceptor): void {
         this.checkUnique(quest.objectives, accept, 'Objective');
+    }
+
+    checkUniqueEnumValues(e: Enum, accept: ValidationAcceptor): void {
+        this.checkUnique(e.values, accept, 'enum value');
+    }
+
+    checkEnumValue(decl: VariableDeclaration, accept: ValidationAcceptor): void {
+        const enumDecl = decl.enumType?.ref;
+        if (!enumDecl || !decl.value) return;
+        const value = unwrapExpression(decl.value);
+        if (!isStringVal(value)) return;
+        const allowed = enumDecl.values.map(v => v.name);
+        if (!allowed.includes(value.val)) {
+            accept('warning', `"${value.val}" is not a value of enum ${enumDecl.name}. Allowed: ${allowed.join(', ')}.`, { node: decl, property: 'value' });
+        }
     }
 
     checkRemindPlacement(stmt: RemindStatement, accept: ValidationAcceptor): void {

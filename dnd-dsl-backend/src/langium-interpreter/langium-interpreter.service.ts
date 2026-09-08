@@ -16,11 +16,16 @@ import {
     isIntVal,
     isLocation,
     isLocationRefItem,
+    isNpc,
+    isNpcRefItem,
     isObjectDeclaration,
+    isObjective,
+    isQuest,
     isQuestRefItem,
     isRefChain,
     isStringVal,
     isVariableRefItem,
+    isWorld,
     Model,
     RefChain,
     RemindStatement,
@@ -99,6 +104,7 @@ export class LangiumInterpreterService {
                 case '>':  return l > r;
                 case '<=': return l <= r;
                 case '>=': return l >= r;
+                case 'is': { const eq = l === r; return expression.negated ? !eq : eq; }
             }
         }
         if (isBoolExpression(expression)) {
@@ -121,14 +127,26 @@ export class LangiumInterpreterService {
     }
 
     private evaluateRefChain(ctx: EvalContext, chain: RefChain): any {
-        if (isQuestRefItem(chain.first) || isEventRefItem(chain.first)) {
+        if (isEventRefItem(chain.first)) {
             throw new Error(`RefChain heads of kind '${chain.first.$type}' are not supported yet`);
         }
 
-        if (isLocationRefItem(chain.first) && chain.rest.length === 0) {
-            const loc = chain.first.val.val.ref;
-            if (!loc) throw new Error(`Unresolved location ref: ${chain.first.val.val.$refText}`);
-            return this.readPersistentValue(ctx.worldState, [{ kind: 'location', name: loc.name }]);
+        if (chain.rest.length === 0) {
+            if (isLocationRefItem(chain.first)) {
+                const loc = chain.first.val.val.ref;
+                if (!loc) throw new Error(`Unresolved location ref: ${chain.first.val.val.$refText}`);
+                return this.readPersistentValue(ctx.worldState, [{ kind: 'location', name: loc.name }]);
+            }
+            if (isQuestRefItem(chain.first)) {
+                const q = chain.first.val.val.ref;
+                if (!q) throw new Error(`Unresolved quest ref: ${chain.first.val.val.$refText}`);
+                return this.readPersistentValue(ctx.worldState, [{ kind: 'quest', name: q.name }]);
+            }
+            if (isNpcRefItem(chain.first)) {
+                const n = chain.first.val.val.ref;
+                if (!n) throw new Error(`Unresolved npc ref: ${chain.first.val.val.$refText}`);
+                return this.readPersistentValue(ctx.worldState, [{ kind: 'npc', name: n.name }]);
+            }
         }
 
         // Every remaining shape ends in a VariableRefItem - either chain.first itself
@@ -170,7 +188,9 @@ export class LangiumInterpreterService {
     private readPersistentValue(worldState: SerializedModel, path: StatePath): any {
         const node = statePathToNode(worldState as unknown as Model, path) as any;
         if (!node) return undefined; // renamed/removed since linking - soft-fail
-        if (isLocation(node) || isObjectDeclaration(node)) return buildVariablesRecord(worldState, node.variables);
+        if (isLocation(node) || isObjectDeclaration(node) || isNpc(node) || isQuest(node) || isObjective(node) || isWorld(node)) {
+            return buildVariablesRecord(worldState, node.variables as any);
+        }
         return evaluateSerializedExpression(worldState, node.value);
     }
 
@@ -308,13 +328,14 @@ export class LangiumInterpreterService {
      *  RemindStatement's `show on <chain>` pin. Mirrors evaluateRefChain's head/tail
      *  resolution and throw conventions. */
     private resolveRefChainToStatePath(chain: RefChain): StatePath {
-        if (isQuestRefItem(chain.first) || isEventRefItem(chain.first)) {
+        if (isEventRefItem(chain.first)) {
             throw new Error(`Cannot pin a reminder to a '${chain.first.$type}' reference`);
         }
-        if (isLocationRefItem(chain.first) && chain.rest.length === 0) {
-            const loc = chain.first.val.val.ref;
-            if (!loc) throw new Error(`Unresolved location ref: ${chain.first.val.val.$refText}`);
-            return nodeToStatePath(loc)!;
+        if (chain.rest.length === 0
+            && (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isNpcRefItem(chain.first))) {
+            const node = chain.first.val.val.ref;
+            if (!node) throw new Error(`Unresolved ref: ${chain.first.val.val.$refText}`);
+            return nodeToStatePath(node)!;
         }
         const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
         if (!isVariableRefItem(tail)) throw new Error(`Unsupported pin target: ${tail.$type}`);
