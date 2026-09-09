@@ -1,8 +1,11 @@
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { DslContext, type ScriptRunResult } from '../contexts/DslContext';
+import { useScriptEditor } from '../common/useScriptEditor';
 
 type HistoryItem = { source: string; result: ScriptRunResult };
+
+const HEADER_LINE = /^\s*reference\s+world\b.*$/m;
 
 /** `encodeStatePath` output -> a readable `location "X" . var` string. */
 function formatPath(encoded: string): string {
@@ -30,21 +33,23 @@ const panel = {
 } as const;
 
 export default function ScriptView() {
-  const { worldState, runScript } = useContext(DslContext);
+  const { worldState, adventure, world, runScript } = useContext(DslContext);
   const worldName = worldState?.World?.name;
   const header = useMemo(() => (worldName ? `reference world "${worldName}"\n\n` : ''), [worldName]);
 
-  const [source, setSource] = useState(header);
+  const { containerRef, getValue, setValue, ready } = useScriptEditor(adventure, world, header);
+
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ScriptRunResult | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
-  useEffect(() => { setSource(prev => (prev.trim() ? prev : header)); }, [header]);
-
-  const bodyIsEmpty = source.replace(/^\s*reference\s+world\b.*$/m, '').trim().length === 0;
-
   const run = async () => {
-    if (running || bodyIsEmpty) return;
+    if (running || !ready) return;
+    const source = getValue();
+    if (source.replace(HEADER_LINE, '').trim().length === 0) {
+      setResult({ ok: false, error: 'Write a statement below the header.' });
+      return;
+    }
     setRunning(true);
     const res = await runScript(source);
     setRunning(false);
@@ -60,31 +65,28 @@ export default function ScriptView() {
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 12, gap: 8, minWidth: 0 }}>
-          <textarea
-            value={source}
-            onChange={e => setSource(e.target.value)}
-            onKeyDown={e => { if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); void run(); } }}
-            spellCheck={false}
-            style={{
-              ...panel, flex: 1, resize: 'none', padding: 10, lineHeight: 1.5,
-              background: 'var(--bg-panel)', outline: 'none', whiteSpace: 'pre', overflow: 'auto',
+          <div
+            ref={containerRef}
+            onKeyDownCapture={e => {
+              if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); void run(); }
             }}
+            style={{ ...panel, flex: 1, minHeight: 0, overflow: 'hidden', padding: 0 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
               onClick={() => void run()}
-              disabled={running || bodyIsEmpty || !worldName}
+              disabled={running || !ready || !worldName}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 3,
-                padding: '4px 12px', fontSize: 12, cursor: running || bodyIsEmpty ? 'default' : 'pointer',
-                opacity: running || bodyIsEmpty || !worldName ? 0.5 : 1,
+                padding: '4px 12px', fontSize: 12, cursor: running || !ready ? 'default' : 'pointer',
+                opacity: running || !ready || !worldName ? 0.5 : 1,
               }}
             >
               <PlayArrowIcon style={{ fontSize: 16 }} />
               {running ? 'Running…' : 'Run'}
             </button>
-            <span style={{ color: 'var(--fg-secondary)', fontSize: 11 }}>Ctrl+Enter</span>
+            <span style={{ color: 'var(--fg-secondary)', fontSize: 11 }}>Ctrl+Enter or Ctrl+Space for suggestions</span>
           </div>
 
           {result && <ScriptOutput result={result} />}
@@ -96,7 +98,7 @@ export default function ScriptView() {
             {history.map((h, i) => (
               <button
                 key={i}
-                onClick={() => setSource(h.source)}
+                onClick={() => setValue(h.source)}
                 title={h.source}
                 style={{
                   display: 'block', width: '100%', textAlign: 'left', marginBottom: 4,
@@ -106,7 +108,7 @@ export default function ScriptView() {
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}
               >
-                {h.source.replace(/^\s*reference\s+world\b.*$/m, '').trim().split('\n')[0] || '(empty)'}
+                {h.source.replace(HEADER_LINE, '').trim().split('\n')[0] || '(empty)'}
               </button>
             ))}
           </div>
