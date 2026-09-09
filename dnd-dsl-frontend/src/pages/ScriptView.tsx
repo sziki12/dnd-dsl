@@ -86,7 +86,7 @@ export default function ScriptView() {
               <PlayArrowIcon style={{ fontSize: 16 }} />
               {running ? 'Running…' : 'Run'}
             </button>
-            <span style={{ color: 'var(--fg-secondary)', fontSize: 11 }}>Ctrl+Enter or Ctrl+Space for suggestions</span>
+            <span style={{ color: 'var(--fg-secondary)', fontSize: 11 }}>Ctrl+Enter to run script | Ctrl+Space for suggestions</span>
           </div>
 
           {result && <ScriptOutput result={result} />}

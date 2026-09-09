@@ -9,6 +9,46 @@ const SCRIPT_URI = 'file:///dnd-script.dnd';
 const WORLD_URI = 'file:///dnd-script-world.dnd';
 
 type WorldModelRef = Awaited<ReturnType<typeof createModelReference>>;
+type Disposable = { dispose(): void };
+
+type SuggestModelLike = {
+  onDidTrigger(cb: () => void): Disposable;
+  onDidSuggest(cb: (e: { completionModel?: { items?: unknown[] } }) => void): Disposable;
+  onDidCancel(cb: () => void): Disposable;
+};
+type SuggestControllerLike = {
+  model?: SuggestModelLike;
+  _model?: SuggestModelLike;
+  triggerSuggest?: () => void;
+};
+
+/**
+ * A manual Ctrl+Space (or a trigger character) that returns no items leaves Monaco's
+ * suggest model in a non-idle state with a null completion model; typing then routes
+ * to a refilter that no-ops on the null model, so the "No suggestions" widget stays
+ * stuck until a non-keyboard cancel. When the last completed request came back empty,
+ * re-trigger on the next edit so typing into that dead state recovers.
+ */
+function wireSuggestRecovery(app: EditorApp): Disposable[] {
+  const editor = app.getEditor();
+  const suggest = editor?.getContribution('editor.contrib.suggestController') as unknown as
+    | SuggestControllerLike
+    | null;
+  const model = suggest?.model ?? suggest?._model;
+  if (!editor || !suggest?.triggerSuggest || !model) return [];
+
+  // Only the *settled* empty state is stuck; an in-flight request must not re-trigger
+  // itself, so clear the flag whenever a new request starts or the session cancels.
+  let lastRequestEmpty = false;
+  return [
+    model.onDidTrigger(() => { lastRequestEmpty = false; }),
+    model.onDidCancel(() => { lastRequestEmpty = false; }),
+    model.onDidSuggest((e) => { lastRequestEmpty = (e.completionModel?.items?.length ?? 0) === 0; }),
+    editor.onDidChangeModelContent(() => {
+      if (lastRequestEmpty) suggest.triggerSuggest!();
+    }),
+  ];
+}
 
 /**
  * A Monaco editor for the script console, wired to the `dnd-dsl` language server.
@@ -20,6 +60,7 @@ export function useScriptEditor(adventure: string, world: string, header: string
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<EditorApp | null>(null);
   const worldRef = useRef<WorldModelRef | null>(null);
+  const suggestFixRef = useRef<Disposable[]>([]);
   const headerRef = useRef(header);
   headerRef.current = header;
   const fileContext = useContext(FileContext);
@@ -65,7 +106,7 @@ export function useScriptEditor(adventure: string, world: string, header: string
         },
         editorOptions: {
           quickSuggestions: false,
-          suggestOnTriggerCharacters: false,
+          suggestOnTriggerCharacters: true,
           autoClosingQuotes: 'never',
           autoClosingBrackets: 'never',
           minimap: { enabled: false },
@@ -82,6 +123,7 @@ export function useScriptEditor(adventure: string, world: string, header: string
         appRef.current = null;
         return;
       }
+      suggestFixRef.current = wireSuggestRecovery(app);
       setReady(true);
     })();
 
@@ -89,8 +131,11 @@ export function useScriptEditor(adventure: string, world: string, header: string
       cancelled = true;
       const app = appRef.current;
       const wr = worldRef.current;
+      const fixes = suggestFixRef.current;
       appRef.current = null;
       worldRef.current = null;
+      suggestFixRef.current = [];
+      fixes.forEach((d) => d.dispose());
       void (async () => {
         await app?.dispose().catch(() => {});
         wr?.dispose();
