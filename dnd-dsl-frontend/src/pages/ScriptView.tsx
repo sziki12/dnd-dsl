@@ -1,9 +1,8 @@
-import { useContext, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { DslContext, type ScriptRunResult } from '../contexts/DslContext';
+import { ScriptStateContext, type ScriptHistoryItem } from '../contexts/ScriptStateContext';
 import { useScriptEditor } from '../common/useScriptEditor';
-
-type HistoryItem = { source: string; result: ScriptRunResult };
 
 const HEADER_LINE = /^\s*reference\s+world\b.*$/m;
 
@@ -34,14 +33,36 @@ const panel = {
 
 export default function ScriptView() {
   const { worldState, adventure, world, runScript } = useContext(DslContext);
+  const scriptState = useContext(ScriptStateContext);
   const worldName = worldState?.World?.name;
   const header = useMemo(() => (worldName ? `reference world "${worldName}"\n\n` : ''), [worldName]);
 
-  const { containerRef, getValue, setValue, ready } = useScriptEditor(adventure, world, header);
+  // Restore the page state stashed on the last navigation away (same world only).
+  const restored = useMemo(() => {
+    const s = scriptState.readState();
+    return s.world === world ? s : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const persistSource = useCallback(
+    (text: string) => scriptState.writeState({ world, source: text }),
+    [scriptState, world],
+  );
+
+  const { containerRef, getValue, setValue, ready } = useScriptEditor(
+    adventure,
+    world,
+    restored?.source || header,
+    persistSource,
+  );
 
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ScriptRunResult | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [result, setResult] = useState<ScriptRunResult | null>(restored?.result ?? null);
+  const [history, setHistory] = useState<ScriptHistoryItem[]>(restored?.history ?? []);
+
+  useEffect(() => {
+    scriptState.writeState({ world, history, result });
+  }, [scriptState, world, history, result]);
 
   const run = async () => {
     if (running || !ready) return;

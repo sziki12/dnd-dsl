@@ -55,14 +55,24 @@ function wireSuggestRecovery(app: EditorApp): Disposable[] {
  * Opens the loaded world's source as a second (editor-less) model so the LSP can
  * resolve the script's `location "X"` / `trigger "E"` / `Enum::Value` references
  * against it (via DndScopeComputation). Recreated when the world switches.
+ *
+ * `initialText` seeds the editor on (re)mount - pass the persisted script so it
+ * survives navigation. `onChange` fires on every edit with the full text.
  */
-export function useScriptEditor(adventure: string, world: string, header: string) {
+export function useScriptEditor(
+  adventure: string,
+  world: string,
+  initialText: string,
+  onChange?: (text: string) => void,
+) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<EditorApp | null>(null);
   const worldRef = useRef<WorldModelRef | null>(null);
   const suggestFixRef = useRef<Disposable[]>([]);
-  const headerRef = useRef(header);
-  headerRef.current = header;
+  const initialTextRef = useRef(initialText);
+  initialTextRef.current = initialText;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
   const fileContext = useContext(FileContext);
   const [ready, setReady] = useState(false);
 
@@ -99,7 +109,7 @@ export function useScriptEditor(adventure: string, world: string, header: string
 
       const app = new EditorApp({
         codeResources: {
-          modified: { text: headerRef.current, uri: SCRIPT_URI, enforceLanguageId: 'dnd-dsl' },
+          modified: { text: initialTextRef.current, uri: SCRIPT_URI, enforceLanguageId: 'dnd-dsl' },
         },
         languageDef: {
           languageExtensionConfig: { id: 'dnd-dsl', extensions: ['.dnd'], aliases: ['DnD DSL'] },
@@ -117,11 +127,19 @@ export function useScriptEditor(adventure: string, world: string, header: string
         },
       });
       appRef.current = app;
+      // Must be registered before start() - the editor wires it during creation.
+      app.registerOnTextChangedCallback((tc) => onChangeRef.current?.(tc.modified ?? ''));
       await app.start(containerRef.current);
       if (cancelled) {
         await app.dispose().catch(() => {});
         appRef.current = null;
         return;
+      }
+      // The world header may have resolved during the async gap above; if the model
+      // was seeded empty and there is text to show now, apply it.
+      const model = app.getTextModels().modified;
+      if (model && model.getValue() === '' && initialTextRef.current) {
+        model.setValue(initialTextRef.current);
       }
       suggestFixRef.current = wireSuggestRecovery(app);
       setReady(true);

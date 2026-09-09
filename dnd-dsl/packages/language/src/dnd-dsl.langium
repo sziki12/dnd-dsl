@@ -13,7 +13,7 @@ World:
     | (npcs+=Npc)+
     | (enums+=Enum)+
     | (variables+=VariableDeclaration)+)*
-  | isReference?='reference' 'world' name=STRING script=CodeBlock;
+  | isReference?='reference' 'world' name=STRING (script=CodeBlock)?;
 
 Enum:
     'enum' name=ID '{' values+=EnumValueDecl (',' values+=EnumValueDecl)* ','? '}';
