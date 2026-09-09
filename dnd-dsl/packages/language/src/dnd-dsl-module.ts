@@ -4,6 +4,7 @@ import { DndDslGeneratedModule, DndDslGeneratedSharedModule } from './generated/
 import { DndDslValidator, registerValidationChecks } from './dnd-dsl-validator.js';
 import { DndScopeProvider } from './scope-provider.js';
 import { DndScopeComputation } from './scope-computation.js';
+import { DndCompletionProvider } from './completion-provider.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -32,6 +33,9 @@ export const DndDslModule: Module<DndDslServices, PartialLangiumServices & DndDs
     references: {
         ScopeProvider: (services) => new DndScopeProvider(services),
         ScopeComputation: (services) => new DndScopeComputation(services)
+    },
+    lsp: {
+        CompletionProvider: (services) => new DndCompletionProvider(services)
     }
 };
 
