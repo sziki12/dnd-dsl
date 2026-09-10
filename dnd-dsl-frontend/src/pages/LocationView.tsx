@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef, useEffect, useContext } from 'react';
+import { useCallback, useMemo, useState, useRef, useEffect, useContext } from 'react';
 
 import { addEdge, Background, BackgroundVariant, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Edge, type Node } from '@xyflow/react';
 import { evaluateExpression, inferKind, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
@@ -261,30 +261,66 @@ const LocationView = () => {
   );
 };
 
+// Module-level so ReactFlow doesn't see a new object every render (which would
+// remount every node/edge and drop their measured sizes).
+const NODE_TYPES = { mapNode: MapNode };
+const EDGE_TYPES = { floating: FloatingEdge };
+const NODE_ORIGIN: [number, number] = [0.5, 0];
+const PRO_OPTIONS = { hideAttribution: true };
+const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 };
+
+type NormPos = { x: number; y: number };
+
+/**
+ * Keeps only normalized-fraction entries from a saved layout file. Older saves
+ * wrote raw container pixels (values in the hundreds, sometimes negative); fed
+ * through normalizedToPixel those land thousands of pixels off-canvas, so drop
+ * them and let the node fall back to its default position.
+ */
+function sanitizeLayout(raw: Record<string, NormPos> | null | undefined): Record<string, NormPos> {
+  const out: Record<string, NormPos> = {};
+  for (const [id, p] of Object.entries(raw ?? {})) {
+    if (p && Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= -0.5 && p.x <= 1.5 && p.y >= -0.5 && p.y <= 1.5) {
+      out[id] = { x: p.x, y: p.y };
+    }
+  }
+  return out;
+}
+
 const MapFlow = ({location, mode}: { location: SerializedLocation | undefined, mode: 'map' | 'tree' }) => {
 const navigate = useNavigate();
 const containerRef = useRef<HTMLDivElement>(null);
 let { getByReference, adventure, world } = useContext(DslContext)
 const [containerSize, setContainerSize] = useState<Size>({ width: 0, height: 0 });
 const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(null);
+  // Saved layout for this location, normalized fractions, cleared on navigation.
+  const [savedLayout, setSavedLayout] = useState<Record<string, NormPos>>({});
+  // False until this location's layout fetch has settled - keeps Map mode from
+  // flashing the fallback spread before the saved positions arrive.
+  const [layoutReady, setLayoutReady] = useState(false);
+  // Live normalized positions (saved layout + any drags this session). The single
+  // source of truth Map mode projects from, so a resize / image resolving never
+  // loses a drag and never desyncs.
+  const positionsRef = useRef<Record<string, NormPos>>({});
 
   // "Usable" area - same margin the canvas has always used, whether or not an image is present.
-  const usableSize: Size = { width: Math.max(containerSize.width - 20, 100), height: Math.max(containerSize.height - 20, 100) };
-  const mapBounds: [[number, number], [number, number]] = [[0, 0], [usableSize.width, usableSize.height]];
+  const usableSize = useMemo<Size>(
+    () => ({ width: Math.max(containerSize.width - 20, 100), height: Math.max(containerSize.height - 20, 100) }),
+    [containerSize.width, containerSize.height],
+  );
+  const mapBounds = useMemo<[[number, number], [number, number]]>(
+    () => [[0, 0], [usableSize.width, usableSize.height]],
+    [usableSize.width, usableSize.height],
+  );
+  const measured = containerSize.width > 0 && containerSize.height > 0;
   // The rect every node position is normalized against: the image's letterboxed
-  // contain-rect when one resolves, otherwise the full usable canvas (today's behavior).
-  const rect = computeContainRect(usableSize, mapImage?.natural ?? null);
-  const rectRef = useRef(rect);
-
-  const nodeTypes = {
-    mapNode: MapNode,
-  };
-
-  const edgeTypes = {
-    floating: FloatingEdge,
-  };
-
-  const nodeOrigin: [number, number] = [0.5, 0];
+  // contain-rect when one resolves, otherwise the full usable canvas.
+  const naturalW = mapImage?.natural.width ?? 0;
+  const naturalH = mapImage?.natural.height ?? 0;
+  const rect = useMemo(
+    () => computeContainRect(usableSize, naturalW > 0 && naturalH > 0 ? { width: naturalW, height: naturalH } : null),
+    [usableSize, naturalW, naturalH],
+  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as Edge[]);
@@ -361,16 +397,22 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
     );
   }, [setEdges]);*/
 
-  const proOptions = { hideAttribution: true };
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
+    positionsRef.current[node.id] = pixelToNormalized(rect, node.position.x, node.position.y);
+  }, [rect]);
 
   // Track the container's rendered size (drives both mapBounds and the image contain-rect).
+  // Rounded, and only committed on a real change, so sub-pixel ResizeObserver jitter
+  // doesn't keep re-projecting the graph.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const updateSize = () => {
-      const { width, height } = container.getBoundingClientRect();
-      setContainerSize({ width, height });
+      const r = container.getBoundingClientRect();
+      const width = Math.round(r.width);
+      const height = Math.round(r.height);
+      setContainerSize(prev => (prev.width === width && prev.height === height ? prev : { width, height }));
     };
 
     updateSize();
@@ -385,7 +427,10 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
   // background) on any failure - a location without a Maps.json entry is the
   // normal case today, not an error state the user should see.
   useEffect(() => {
-    if (!location) { setMapImage(null); return; }
+    // Clear immediately so a location without a map does not inherit the previous
+    // location's letterbox rect while its 404 is in flight.
+    setMapImage(null);
+    if (!location) return;
     let cancelled = false;
     let objectUrl: string | null = null;
 
@@ -411,45 +456,53 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
     };
   }, [location?.name, adventure]);
 
-  // Whenever the map rect changes (window resize, or an image resolving/swapping),
-  // re-project every node's pixel position through the old->new rect so it stays
-  // visually anchored to the same normalized point instead of jumping.
+  // Load this location's saved Map layout once per location (normalized fractions;
+  // legacy pixel entries are dropped). Also resets the live positions.
   useEffect(() => {
-    const oldRect = rectRef.current;
-    const changed = oldRect.x !== rect.x || oldRect.y !== rect.y || oldRect.width !== rect.width || oldRect.height !== rect.height;
-    if (changed && oldRect.width > 0 && oldRect.height > 0) {
-      setNodes(nds => nds.map(n => {
-        const norm = pixelToNormalized(oldRect, n.position.x, n.position.y);
-        return { ...n, position: normalizedToPixel(rect, norm.x, norm.y) };
-      }));
-    }
-    rectRef.current = rect;
-  }, [rect.x, rect.y, rect.width, rect.height]);
+    positionsRef.current = {};
+    setSavedLayout({});
+    setLayoutReady(false);
+    if (!location) return;
+    let cancelled = false;
+    fetch(`${BackendURL}/file/layout/load?adventure=${adventure}&world=${world}&location=${encodeURIComponent(location.name)}`)
+      .then(r => r.json())
+      .then((saved: Record<string, NormPos>) => {
+        if (cancelled) return;
+        const clean = sanitizeLayout(saved);
+        positionsRef.current = { ...clean };
+        setSavedLayout(clean);
+      })
+      .catch(() => { /* no saved layout - nodes use their default positions */ })
+      .finally(() => { if (!cancelled) setLayoutReady(true); });
+    return () => { cancelled = true; };
+  }, [location?.name, adventure, world]);
 
+  // Build the graph and project every node to pixels. Re-runs whenever the source,
+  // the view mode, or the rect changes - projecting fresh from normalized positions
+  // each time (no lossy round-trip), so a late container measurement or an image
+  // resolving simply re-lays-out correctly. Waits for a real container measurement.
   useEffect(() => {
-    if (typeof location == "undefined") return;
+    if (typeof location == "undefined" || !measured) return;
+    // Map mode needs the saved layout resolved first; tree mode never reads it.
+    if (mode === 'map' && !layoutReady) return;
 
     const graph = buildGraphFromLocation(location, getByReference) || buildDefaultGraph();
     setEdges(graph.edges);
 
-    if (mode === 'tree') {
-      const treeNodes = layoutAsTree(graph.nodes, location.name);
-      setNodes(treeNodes.map(n => ({ ...n, position: normalizedToPixel(rect, n.position.x, n.position.y) })));
-      return;
-    }
-
-    fetch(`${BackendURL}/file/layout/load?adventure=${adventure}&world=${world}&location=${encodeURIComponent(location.name)}`)
-      .then(r => r.json())
-      .then((saved: Record<string, { x: number; y: number }>) => {
-        setNodes(graph.nodes.map(node => {
-          // Saved positions (and buildGraphFromLocation's {x:0,y:0} default) are
-          // both normalized fractions - always project through the current rect.
-          const norm = saved[node.id] ?? node.position;
-          return { ...node, position: normalizedToPixel(rect, norm.x, norm.y) };
+    // Tree mode: absolute hierarchy from layoutAsTree, which also strips parentId
+    // (Map mode's parent-relative positioning must not carry into this layout).
+    const source = mode === 'tree'
+      ? layoutAsTree(graph.nodes, location.name)
+      : graph.nodes.map(node => ({
+          ...node,
+          position: positionsRef.current[node.id] ?? savedLayout[node.id] ?? (node.position as NormPos),
         }));
-      })
-      .catch(() => setNodes(graph.nodes.map(node => ({ ...node, position: normalizedToPixel(rect, node.position.x, node.position.y) }))));
-  }, [location?.name, mode]);
+
+    setNodes(source.map(node => {
+      const p = node.position as NormPos;
+      return { ...node, position: normalizedToPixel(rect, p.x, p.y) };
+    }));
+  }, [location?.name, mode, measured, layoutReady, savedLayout, rect.x, rect.y, rect.width, rect.height]);
 
   useEffect(() => {
     if (typeof location == "undefined" || mode !== 'map') return;
@@ -457,17 +510,17 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.key !== 's') return;
       e.preventDefault();
-      const positions = Object.fromEntries(nodes.map(n => [n.id, pixelToNormalized(rect, n.position.x, n.position.y)]));
+      // positionsRef is kept current by onNodeDragStop.
       fetch(`${BackendURL}/file/layout/save?adventure=${adventure}&world=${world}&location=${encodeURIComponent(location!.name)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(positions),
+        body: JSON.stringify(positionsRef.current),
       });
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [nodes, location?.name, adventure, world, mode, rect]);
+  }, [location?.name, adventure, world, mode]);
 
   return (
     <div ref={containerRef} className="w-full h-full overflow-hidden" style={{ background: 'var(--bg-editor)', position: 'relative' }}>
@@ -482,7 +535,7 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
           }}
         />
       )}
-      {mapBounds[1][0] > 0 &&
+      {measured &&
       (
         <ReactFlow
           // Nodes and Edges
@@ -493,17 +546,18 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeDoubleClick={onNodeDoubleClick}
-          nodeOrigin={nodeOrigin}
+          onNodeDragStop={onNodeDragStop}
+          nodeOrigin={NODE_ORIGIN}
           // Types and Options
-          proOptions={proOptions}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
+          proOptions={PRO_OPTIONS}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
           connectionLineComponent={FloatingConnectionLine}
           // Manually controlled bounds and zoom
           translateExtent={mapBounds}
           nodeExtent={mapBounds}
           // Camera defaults (No fitView)
-          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          defaultViewport={DEFAULT_VIEWPORT}
           minZoom={1}
           maxZoom={1}
           // Locking
