@@ -160,6 +160,11 @@ export class WorldStateService {
     this._firedReminders = firedReminders;
   }
 
+  /** Appends reminders that fired outside a clock tick (a `remind` with no `after`). */
+  addFiredReminders(fired: FiredReminder[]): void {
+    this._firedReminders.push(...fired);
+  }
+
   /** Advances the clock and moves every now-due reminder into firedReminders
    *  (effectRan starts false - CommandService flips it after running the effect,
    *  since only it has interpreter access). Returns just the newly-fired ones. */

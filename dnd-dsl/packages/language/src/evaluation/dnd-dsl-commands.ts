@@ -73,7 +73,9 @@ export type CommandResponse = {
   canRedo: boolean;
   /** Return value produced by a CallFunctionCommand, undefined otherwise. */
   result?: any;
-  /** Reminders that fired during an AdvanceTimeCommand, undefined otherwise. */
+  /** Reminders that fired while running this command: due queue entries from an
+   *  AdvanceTimeCommand, plus any `remind` with no `after` clause (which fires the
+   *  instant it runs) from any command. Undefined when none fired. */
   firedReminders?: FiredReminder[];
   /** Outcome of a RunScriptCommand, undefined otherwise. */
   scriptResult?: {

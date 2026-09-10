@@ -29,6 +29,8 @@ type RuntimeStateSnapshot = {
   firedReminders: FiredReminder[];
 };
 
+const nonEmpty = (fired: FiredReminder[]): FiredReminder[] | undefined => (fired.length ? fired : undefined);
+
 type HistoryEntry = {
   command: Command;
   previous: RuntimeStateSnapshot;
@@ -99,15 +101,17 @@ export class CommandService {
       worldState: state,
       clock: this.worldStateService.getClock(),
       reminders: this.worldStateService.getReminders(),
+      firedReminders: [],
     };
     const result = this.interpreterService.callFunctionByName(model, cmd.functionName, cmd.args, ctx);
+    this.worldStateService.addFiredReminders(ctx.firedReminders!);
 
     const post = this.snapshotRuntimeState();
     this.history.push({ command: cmd, previous, post });
     this.future.splice(0);
     this.worldStateService.persistOverlay();
 
-    return { ...this.buildResponse(), result };
+    return { ...this.buildResponse(), result, firedReminders: nonEmpty(ctx.firedReminders!) };
   }
 
   private executeTriggerEvent(cmd: TriggerEventCommand): CommandResponse {
@@ -126,15 +130,17 @@ export class CommandService {
       worldState: state,
       clock: this.worldStateService.getClock(),
       reminders: this.worldStateService.getReminders(),
+      firedReminders: [],
     };
     this.interpreterService.triggerEventByName(model, cmd.eventName, ctx);
+    this.worldStateService.addFiredReminders(ctx.firedReminders!);
 
     const post = this.snapshotRuntimeState();
     this.history.push({ command: cmd, previous, post });
     this.future.splice(0);
     this.worldStateService.persistOverlay();
 
-    return this.buildResponse();
+    return { ...this.buildResponse(), firedReminders: nonEmpty(ctx.firedReminders!) };
   }
 
   private executeAdvanceTime(cmd: AdvanceTimeCommand): CommandResponse {
@@ -146,6 +152,7 @@ export class CommandService {
 
     const state = this.worldStateService.getWorldState();
     state.runtimeVariables ??= {};
+    const firedFromBodies: FiredReminder[] = [];
     for (const reminder of justFired) {
       if (!reminder.bodyLocator) continue;
       const codeBlock = resolveRemindBodyLocator(model, reminder.bodyLocator);
@@ -158,6 +165,7 @@ export class CommandService {
         worldState: state,
         clock: this.worldStateService.getClock(),
         reminders: this.worldStateService.getReminders(),
+        firedReminders: firedFromBodies,
       };
       try {
         this.interpreterService.runCodeBlock(ctx, codeBlock);
@@ -166,13 +174,14 @@ export class CommandService {
         console.error(`Reminder '${reminder.id}' effect body threw:`, e);
       }
     }
+    this.worldStateService.addFiredReminders(firedFromBodies);
 
     const post = this.snapshotRuntimeState();
     this.history.push({ command: cmd, previous, post });
     this.future.splice(0);
     this.worldStateService.persistOverlay();
 
-    return { ...this.buildResponse(), firedReminders: justFired };
+    return { ...this.buildResponse(), firedReminders: [...justFired, ...firedFromBodies] };
   }
 
   /** Parses + links the script against the loaded world, runs it in isolation
@@ -198,6 +207,7 @@ export class CommandService {
       model,
       pendingOverlayWrites: [],
       triggeredEvents: new Set(),
+      firedReminders: [],
     };
 
     let returnValue: unknown;
@@ -209,6 +219,7 @@ export class CommandService {
 
     state.runtimeVariables = ctx.scope;
     this.worldStateService.setReminders(ctx.reminders);
+    this.worldStateService.addFiredReminders(ctx.firedReminders!);
     for (const w of ctx.pendingOverlayWrites!) {
       this.worldStateService.setOverlayEntry(w.path, w.value);
     }
@@ -220,6 +231,7 @@ export class CommandService {
 
     return {
       ...this.buildResponse(),
+      firedReminders: nonEmpty(ctx.firedReminders!),
       scriptResult: {
         returnValue,
         writes: ctx.pendingOverlayWrites!.map(w => ({ path: encodeStatePath(w.path), value: w.value })),

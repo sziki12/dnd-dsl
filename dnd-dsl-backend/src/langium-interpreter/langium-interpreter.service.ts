@@ -41,7 +41,7 @@ import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-languag
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
 import { applyArithmetic, applyComparison, applyLogical, negatableBool, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-ops.js';
-import { computeRemindBodyLocator, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
+import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 
 type RuntimeScope = Record<string, any>;
 
@@ -54,7 +54,8 @@ type RuntimeScope = Record<string, any>;
  * `clock`/`reminders` back RemindStatement scheduling; `model` is the loaded live AST
  * (used to dispatch `trigger` by name); `pendingOverlayWrites` collects entity-variable
  * writes from `set` / assignment for the caller to flush; `triggeredEvents` guards
- * against `trigger` recursion.
+ * against `trigger` recursion; `firedReminders` collects `remind` statements with no
+ * `after` clause, which fire the instant they run rather than entering the time queue.
  */
 export type EvalContext = {
     scope: RuntimeScope;
@@ -64,6 +65,7 @@ export type EvalContext = {
     model?: Model;
     pendingOverlayWrites?: { path: StatePath; value: unknown }[];
     triggeredEvents?: Set<string>;
+    firedReminders?: FiredReminder[];
 };
 
 class ReturnSignal {
@@ -253,6 +255,7 @@ export class LangiumInterpreterService {
             model: callerCtx.model,
             pendingOverlayWrites: callerCtx.pendingOverlayWrites,
             triggeredEvents: callerCtx.triggeredEvents,
+            firedReminders: callerCtx.firedReminders,
         };
 
         decl.params.forEach((param, i) => {
@@ -332,11 +335,9 @@ export class LangiumInterpreterService {
             case 'ConditionalBlock': {
                 const c = code as unknown as ConditionalBlock;
                 const condition = this.evaluateExpression(ctx, c.condition);
-                if (condition) {
-                    for (const block of c.body) {
-                        const result = this.runCodeBlock(ctx, block);
-                        if (result instanceof ReturnSignal) return result;
-                    }
+                for (const block of condition ? c.body : c.otherwise) {
+                    const result = this.runCodeBlock(ctx, block);
+                    if (result instanceof ReturnSignal) return result;
                 }
                 break;
             }
@@ -355,10 +356,31 @@ export class LangiumInterpreterService {
             }
             case 'RemindStatement': {
                 const c = code as unknown as RemindStatement;
+                const pin = c.pin ? this.resolveRefChainToStatePath(c.pin) : undefined;
+
+                // No `after`: fire the instant this statement runs - record it and run
+                // any effect body in this same context. It never enters the time queue.
+                if (!c.delay) {
+                    const fired: FiredReminder = {
+                        id: randomUUID(),
+                        label: c.label,
+                        severity: c.severity ?? 'info',
+                        createdAtRound: ctx.clock,
+                        firedAtRound: ctx.clock,
+                        pin,
+                        effectRan: false,
+                    };
+                    ctx.firedReminders?.push(fired);
+                    if (c.body) {
+                        this.runCodeBlock(ctx, c.body);
+                        fired.effectRan = true;
+                    }
+                    break;
+                }
+
                 const amount = this.evaluateExpression(ctx, c.delay.amount);
                 if (typeof amount !== 'number') throw new Error(`Duration amount must evaluate to a number`);
                 const delayRounds = durationToRounds(amount, c.delay.unit);
-                const pin = c.pin ? this.resolveRefChainToStatePath(c.pin) : undefined;
                 const bodyLocator = c.body ? computeRemindBodyLocator(c) : undefined;
                 ctx.reminders.push({
                     id: randomUUID(),

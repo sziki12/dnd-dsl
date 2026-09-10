@@ -31,17 +31,18 @@ export type FiredReminder = Omit<ScheduledReminder, 'fireAtRound'> & {
 };
 
 /** Depth-first list of every RemindStatement reachable from codeBlock, recursing into
- *  ConditionalBlock.body - the same traversal LangiumInterpreterService.runCodeBlock
- *  already performs. Order is stable as long as the source isn't edited before the
- *  matched statement, which is what makes computeRemindBodyLocator/resolveRemindBodyLocator
- *  a symmetric pair. */
+ *  both branches of a ConditionalBlock - the same traversal
+ *  LangiumInterpreterService.runCodeBlock already performs. Order is stable as long as
+ *  the source isn't edited before the matched statement, which is what makes
+ *  computeRemindBodyLocator/resolveRemindBodyLocator a symmetric pair. */
 export function collectRemindStatements(codeBlock: CodeBlock): RemindStatement[] {
     const result: RemindStatement[] = [];
     for (const code of codeBlock.code) {
         if (code.$type === 'RemindStatement') {
             result.push(code as RemindStatement);
         } else if (code.$type === 'ConditionalBlock') {
-            for (const block of (code as ConditionalBlock).body) {
+            const c = code as ConditionalBlock;
+            for (const block of [...c.body, ...c.otherwise]) {
                 result.push(...collectRemindStatements(block));
             }
         }

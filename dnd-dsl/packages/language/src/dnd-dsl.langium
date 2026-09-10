@@ -112,11 +112,11 @@ Code:
 SetStatement:
     'set' target=RefChain '=' value=(Expression);
 ConditionalBlock:
-    'when' condition=BoolExpression 'do' body+=CodeBlock 'end';
+    'when' condition=BoolExpression 'do' body+=CodeBlock ('otherwise' 'do' otherwise+=CodeBlock)? 'end';
 ReturnStatement:
     'return' (returnValue=(Expression))?;
 RemindStatement:
-    'remind' label=STRING 'after' delay=Duration
+    'remind' label=STRING ('after' delay=Duration)?
     ('severity' severity=('info' | 'warning' | 'urgent'))?
     ('show' 'on' pin=RefChain)?
     ('do' body=CodeBlock 'end')?;
