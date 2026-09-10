@@ -28,6 +28,7 @@ import {
     isVariableRefItem,
     isWorld,
     Model,
+    PrintStatement,
     RefChain,
     RemindStatement,
     ReturnStatement,
@@ -55,7 +56,8 @@ type RuntimeScope = Record<string, any>;
  * (used to dispatch `trigger` by name); `pendingOverlayWrites` collects entity-variable
  * writes from `set` / assignment for the caller to flush; `triggeredEvents` guards
  * against `trigger` recursion; `firedReminders` collects `remind` statements with no
- * `after` clause, which fire the instant they run rather than entering the time queue.
+ * `after` clause, which fire the instant they run rather than entering the time queue;
+ * `printed` collects the values of `print` statements for the caller to surface.
  */
 export type EvalContext = {
     scope: RuntimeScope;
@@ -66,6 +68,7 @@ export type EvalContext = {
     pendingOverlayWrites?: { path: StatePath; value: unknown }[];
     triggeredEvents?: Set<string>;
     firedReminders?: FiredReminder[];
+    printed?: unknown[];
 };
 
 class ReturnSignal {
@@ -256,6 +259,7 @@ export class LangiumInterpreterService {
             pendingOverlayWrites: callerCtx.pendingOverlayWrites,
             triggeredEvents: callerCtx.triggeredEvents,
             firedReminders: callerCtx.firedReminders,
+            printed: callerCtx.printed,
         };
 
         decl.params.forEach((param, i) => {
@@ -331,6 +335,13 @@ export class LangiumInterpreterService {
                 const c = code as unknown as ReturnStatement;
                 const value = c.returnValue ? this.evaluateExpression(ctx, c.returnValue) : undefined;
                 return new ReturnSignal(value);
+            }
+            case 'PrintStatement': {
+                const c = code as unknown as PrintStatement;
+                const value = this.evaluateExpression(ctx, c.value);
+                console.log('[script print]', value);
+                ctx.printed?.push(value);
+                break;
             }
             case 'ConditionalBlock': {
                 const c = code as unknown as ConditionalBlock;

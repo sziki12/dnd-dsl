@@ -80,6 +80,8 @@ export type CommandResponse = {
   /** Outcome of a RunScriptCommand, undefined otherwise. */
   scriptResult?: {
     returnValue?: unknown;
+    /** Values of `print` statements, in execution order. */
+    printedValue: unknown[];
     writes: { path: string; value: unknown }[];
   };
 };

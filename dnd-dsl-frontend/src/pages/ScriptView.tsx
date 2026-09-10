@@ -147,16 +147,25 @@ function ScriptOutput({ result }: { result: ScriptRunResult }) {
       </pre>
     );
   }
+  const printed = result.printedValue ?? [];
+  const hasReturn = result.returnValue !== undefined;
+  const hasWrites = !!result.writes?.length;
   return (
     <div style={{ ...panel, padding: 10, maxHeight: 180, overflow: 'auto' }}>
-      {result.returnValue !== undefined && (
-        <div style={{ marginBottom: result.writes?.length ? 8 : 0 }}>
+      {printed.map((v, i) => (
+        <div key={`print-${i}`}>
+          <span style={{ color: 'var(--fg-secondary)' }}>print </span>
+          <span className="tok-number">{JSON.stringify(v)}</span>
+        </div>
+      ))}
+      {hasReturn && (
+        <div style={{ marginTop: printed.length ? 8 : 0, marginBottom: hasWrites ? 8 : 0 }}>
           <span style={{ color: 'var(--fg-secondary)' }}>returned </span>
           <span className="tok-number">{JSON.stringify(result.returnValue)}</span>
         </div>
       )}
-      {result.writes?.length
-        ? result.writes.map((w, i) => (
+      {hasWrites
+        ? result.writes!.map((w, i) => (
             <div key={i}>
               <span style={{ color: 'var(--fg-secondary)' }}>set </span>
               <span className="tok-variable">{formatPath(w.path)}</span>
@@ -164,7 +173,9 @@ function ScriptOutput({ result }: { result: ScriptRunResult }) {
               <span className="tok-number">{JSON.stringify(w.value)}</span>
             </div>
           ))
-        : result.returnValue === undefined && <span style={{ color: 'var(--fg-secondary)' }}>ok, no changes</span>}
+        : !hasReturn && printed.length === 0 && (
+            <span style={{ color: 'var(--fg-secondary)' }}>ok, no changes</span>
+          )}
     </div>
   );
 }

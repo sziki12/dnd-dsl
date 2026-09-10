@@ -26,6 +26,7 @@ type DslContext = {
 export type ScriptRunResult = {
   ok: boolean;
   returnValue?: unknown;
+  printedValue?: unknown[];
   writes?: { path: string; value: unknown }[];
   error?: string;
 };
@@ -96,7 +97,12 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
       return { ok: false, error: typeof msg === 'string' ? msg : JSON.stringify(msg ?? body) };
     }
     applyCommandResponse(body);
-    return { ok: true, returnValue: body.scriptResult?.returnValue, writes: body.scriptResult?.writes };
+    return {
+      ok: true,
+      returnValue: body.scriptResult?.returnValue,
+      printedValue: body.scriptResult?.printedValue,
+      writes: body.scriptResult?.writes,
+    };
   };
 
   const undo = async (): Promise<void> => {

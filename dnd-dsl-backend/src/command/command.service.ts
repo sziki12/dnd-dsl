@@ -208,6 +208,7 @@ export class CommandService {
       pendingOverlayWrites: [],
       triggeredEvents: new Set(),
       firedReminders: [],
+      printed: [],
     };
 
     let returnValue: unknown;
@@ -234,6 +235,7 @@ export class CommandService {
       firedReminders: nonEmpty(ctx.firedReminders!),
       scriptResult: {
         returnValue,
+        printedValue: ctx.printed!,
         writes: ctx.pendingOverlayWrites!.map(w => ({ path: encodeStatePath(w.path), value: w.value })),
       },
     };

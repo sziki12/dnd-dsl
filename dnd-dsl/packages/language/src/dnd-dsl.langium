@@ -108,6 +108,7 @@ Code:
     | VariableDeclaration
     | ReturnStatement
     | RemindStatement
+    | PrintStatement
     ;
 SetStatement:
     'set' target=RefChain '=' value=(Expression);
@@ -124,6 +125,8 @@ Duration:
     amount=Expression unit=('round' | 'rounds' | 'minute' | 'minutes' | 'hour' | 'hours' | 'day' | 'days');
 VariableAssignment:
     target=VariableRef '=' value=(Expression);
+PrintStatement:
+    'print' value=(Expression);
 
 
 //General Declarations
