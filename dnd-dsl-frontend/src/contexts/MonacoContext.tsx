@@ -82,6 +82,7 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         if (!content) return;
 
         await fileContext?.saveFile({identifier: {adventure: dlsContext.adventure, world:dlsContext.world}, content: content})
+        await dlsContext.reloadWorld();
     };
 
     useEffect(()=>{

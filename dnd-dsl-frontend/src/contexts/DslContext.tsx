@@ -12,6 +12,7 @@ type DslContext = {
   updateAdventure: (newAdventure: string) => Promise<void>;
   worldState: SerializedModel | undefined;
   updateWorldState: () => Promise<void>;
+  reloadWorld: () => Promise<{ ok: boolean; errors?: string[] }>;
   getByReference<T extends SerializedAstNode>(ref: SerializedRef | undefined): T | undefined;
   execute: (cmd: Command) => Promise<void>;
   runScript: (source: string) => Promise<ScriptRunResult>;
@@ -43,11 +44,27 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
 
   const stateEndpoint = `${BackendURL}`;
 
-  const parseWorldState = async () => {
+  const parseWorldState = async (): Promise<{ ok: boolean; errors?: string[] }> => {
     const endpoint = `${stateEndpoint}/parse?adventure=${adventure}&world=${world}`;
     console.log(`endpoint: ${endpoint}`);
-    await fetch(endpoint, { method: 'POST' });
+    const response = await fetch(endpoint, { method: 'POST' });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const errors = Array.isArray(body?.errors) ? (body.errors as string[]) : ['Parse failed'];
+      console.warn('World reparse failed', errors);
+      return { ok: false, errors };
+    }
     console.log('World File Parsed');
+    return { ok: true };
+  };
+
+  // Re-read the world file into the backend and refresh the served state. Used after
+  // an edit in the /editor page so changes to the .dnd source become live. A parse
+  // failure leaves the last good state in place and returns the errors.
+  const reloadWorld = async (): Promise<{ ok: boolean; errors?: string[] }> => {
+    const result = await parseWorldState();
+    if (result.ok) await updateWorldState();
+    return result;
   };
 
   const updateWorldState = async () => {
@@ -137,14 +154,14 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!world || !adventure) return;
-    parseWorldState().then(updateWorldState);
+    reloadWorld();
   }, [world, adventure]);
 
   return (
     <DslContext.Provider value={{
       world, updateWorld,
       adventure, updateAdventure,
-      worldState, updateWorldState,
+      worldState, updateWorldState, reloadWorld,
       getByReference,
       execute, runScript, undo, redo, canUndo, canRedo,
       firedReminders, clearFiredReminder,
