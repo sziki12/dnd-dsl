@@ -23,6 +23,7 @@ export class DndScopeProvider extends DefaultScopeProvider
 {
     override getScope(context: ReferenceInfo): Scope
     {
+        // variableRef is the node type that can be a reference to a variable
         if (isVariableRef(context.container))
         {
             const item = context.container.$container;
@@ -30,15 +31,15 @@ export class DndScopeProvider extends DefaultScopeProvider
             // `A . b . c` - a reference sitting in RefChain.rest is a MEMBER access:
             // scope it to the members of the segment to its left, never the global
             // variable pool.
-            if (
-                isVariableRefItem(item) &&
+            if (isVariableRefItem(item) &&
                 isRefChain(item.$container) &&
-                item.$containerProperty === "rest"
-            )
+                item.$containerProperty === "rest")
             {
                 return this.getMemberScope(item.$container, item.$containerIndex ?? 0);
             }
 
+            // `let x = <expr>` - the variable's own value expression is scoped to the
+            // variables declared in the same block, plus the global variable pool.
             return this.getVariableScope(context.container, context);
         }
 
@@ -97,9 +98,17 @@ export class DndScopeProvider extends DefaultScopeProvider
         }
         else if (isVariableRefItem(prev))
         {
-            // `Resources . <member>` -> the variables of an `object`-valued decl
+            // `Resources . <member>` -> the variables of an `object`-valued decl, OR
+            // `named_npc . <member>` where named_npc's own value is a bare entity
+            // reference (`let named_npc = npc "First NPC"`) -> that entity's own
+            // variables. Only a literal, zero-segment head is resolvable this way -
+            // the entity has to be known at link time, not chosen at runtime.
             const value = unwrapExpression(prev.val.val.ref?.value);
-            if (isObjectDeclaration(value)) members = value.variables;
+            if (isObjectDeclaration(value)) {
+                members = value.variables;
+            } else if (isRefChain(value)) {
+                members = this.resolveEntityAliasMembers(value);
+            }
         }
         // EventRefItem: no variables, no member scope.
 
@@ -108,6 +117,22 @@ export class DndScopeProvider extends DefaultScopeProvider
         return new MapScope(
             stream(members).map(d => this.descriptions.createDescription(d, d.target ?? d.name ?? ""))
         );
+    }
+
+    /** `chain` is a variable's own value expression. If it's a bare `location "X"` /
+     *  `quest "X"` / `npc "X"` reference (no further `.` segments), returns that
+     *  entity's own `.variables` - lets an alias like `let x = npc "First NPC"`
+     *  offer real member completion/linking through `x`, same as through the entity
+     *  directly. A chain with rest segments (`npc "X" . Resources`) isn't a bare
+     *  entity reference, so it's out of scope here. */
+    private resolveEntityAliasMembers(chain: RefChain): VariableDeclaration[] | undefined
+    {
+        if (chain.rest.length > 0) return undefined;
+        if (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isNpcRefItem(chain.first))
+        {
+            return chain.first.val.val.ref?.variables;
+        }
+        return undefined;
     }
 
     private getVariableScope(node: AstNode, context: ReferenceInfo): Scope
