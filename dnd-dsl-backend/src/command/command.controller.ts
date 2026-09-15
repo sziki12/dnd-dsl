@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Headers, Post } from '@nestjs/common';
 import { CommandService } from './command.service.js';
 import type { Command, CommandResponse } from '@dnd-language/evaluation/dnd-dsl-commands.js';
 
@@ -11,14 +11,16 @@ export class CommandController {
     return this.runOrThrow400(() => this.commandService.execute(cmd));
   }
 
+  // The client-generated id identifying which page is asking - CommandService checks
+  // it against StateSyncGateway's current controller before allowing the rewind.
   @Post('undo')
-  undo(): Promise<CommandResponse> {
-    return this.runOrThrow400(async () => this.commandService.undo());
+  undo(@Headers('x-client-id') clientId: string): Promise<CommandResponse> {
+    return this.runOrThrow400(async () => this.commandService.undo(clientId));
   }
 
   @Post('redo')
-  redo(): Promise<CommandResponse> {
-    return this.runOrThrow400(async () => this.commandService.redo());
+  redo(@Headers('x-client-id') clientId: string): Promise<CommandResponse> {
+    return this.runOrThrow400(async () => this.commandService.redo(clientId));
   }
 
   // CommandService throws plain Errors for client-fixable problems (unresolved

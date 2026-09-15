@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { WorldStateService } from '../world-state/world-state.service.js';
 import { LangiumInterpreterService, type EvalContext } from '../langium-interpreter/langium-interpreter.service.js';
+import { StateSyncGateway } from '../state-sync/state-sync.gateway.js';
 
 import { isVariableDeclaration } from '@dnd-language/index.js';
 import { encodeStatePath, resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
@@ -49,9 +50,16 @@ export class CommandService {
   constructor(
     private readonly worldStateService: WorldStateService,
     private readonly interpreterService: LangiumInterpreterService,
+    private readonly stateSyncGateway: StateSyncGateway,
   ) {}
 
   async execute(cmd: Command): Promise<CommandResponse> {
+    const response = await this.dispatch(cmd);
+    this.stateSyncGateway.broadcastState(response);
+    return response;
+  }
+
+  private async dispatch(cmd: Command): Promise<CommandResponse> {
     if (cmd.type === 'CALL_FUNCTION') return this.executeCallFunction(cmd);
     if (cmd.type === 'TRIGGER_EVENT') return this.executeTriggerEvent(cmd);
     if (cmd.type === 'ADVANCE_TIME') return this.executeAdvanceTime(cmd);
@@ -65,17 +73,22 @@ export class CommandService {
     return this.buildResponse();
   }
 
-  undo(): CommandResponse {
+  // Only the page StateSyncGateway currently considers "in control" may rewind the shared history.
+  undo(clientId: string): CommandResponse {
+    this.assertController(clientId);
     const entry = this.history.pop();
     if (entry) {
       this.future.unshift(entry);
       this.restoreRuntimeState(entry.previous);
       this.worldStateService.persistOverlay();
     }
-    return this.buildResponse();
+    const response = this.buildResponse();
+    this.stateSyncGateway.broadcastState(response);
+    return response;
   }
 
-  redo(): CommandResponse {
+  redo(clientId: string): CommandResponse {
+    this.assertController(clientId);
     const entry = this.future.shift();
     if (entry) {
       if (entry.post) {
@@ -86,7 +99,21 @@ export class CommandService {
       this.worldStateService.persistOverlay();
       this.history.push(entry);
     }
-    return this.buildResponse();
+    const response = this.buildResponse();
+    this.stateSyncGateway.broadcastState(response);
+    return response;
+  }
+
+  private assertController(clientId: string): void {
+    if (!this.stateSyncGateway.isController(clientId)) {
+      throw new Error('Only the page currently in control may undo/redo.');
+    }
+  }
+
+  /** Pushes the current state to every connected page with no change of its own -
+   *  used after a POST /parse reparse, which doesn't go through execute(). */
+  notifyWorldReloaded(): void {
+    this.stateSyncGateway.broadcastState(this.buildResponse());
   }
 
   private executeCallFunction(cmd: CallFunctionCommand): CommandResponse {

@@ -4,10 +4,13 @@ import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import AccessTimeOutlinedIcon from '@mui/icons-material/AccessTimeOutlined';
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
+import LockOpenOutlinedIcon from '@mui/icons-material/LockOpenOutlined';
 import { DslContext } from '../../contexts/DslContext';
 import { BackendURL } from '../../contexts/BackendContext';
 import { formatClock } from '@dnd-language/evaluation/dnd-dsl-clock';
 import type { FiredReminder, ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders';
+import { getDisplayName, setDisplayName } from '../useStateSync';
 
 const itemStyle: React.CSSProperties = {
   padding: '0 10px',
@@ -26,10 +29,12 @@ type Agenda = {
 const severityColor = { info: 'var(--accent)', warning: 'var(--warn)', urgent: 'var(--error)' } as const;
 
 export default function StatusBar() {
-  const { adventure, world, worldState, canUndo, canRedo, undo, redo, execute } = useContext(DslContext);
+  const { adventure, world, worldState, canUndo, canRedo, undo, redo, execute, isController, controllerName, claimControl } = useContext(DslContext);
   const { locationName } = useParams();
   const [agendaOpen, setAgendaOpen] = useState(false);
   const [agenda, setAgenda] = useState<Agenda | null>(null);
+  const [controlOpen, setControlOpen] = useState(false);
+  const [nameInput, setNameInput] = useState(getDisplayName());
 
   const loaded = worldState !== undefined;
   const clock = loaded ? formatClock((worldState as any).clock ?? 0) : formatClock(0);
@@ -54,6 +59,8 @@ export default function StatusBar() {
     refreshAgenda();
   };
 
+  const saveDisplayName = () => setDisplayName(nameInput);
+
   return (
     <div className="shell-statusbar" style={{ position: 'relative' }}>
       <div style={itemStyle}>
@@ -61,20 +68,28 @@ export default function StatusBar() {
         {locationName && ` · ${locationName}`}
       </div>
       <button
-        style={{ ...itemStyle, background: 'transparent', border: 0, color: 'inherit', cursor: canUndo ? 'pointer' : 'default', opacity: canUndo ? 1 : 0.5 }}
-        disabled={!canUndo}
+        style={{ ...itemStyle, background: 'transparent', border: 0, color: 'inherit', cursor: (canUndo && isController) ? 'pointer' : 'default', opacity: (canUndo && isController) ? 1 : 0.5 }}
+        disabled={!canUndo || !isController}
         onClick={undo}
-        title="Undo"
+        title={isController ? 'Undo' : `Only ${controllerName ?? 'the controlling page'} can undo`}
       >
         <UndoIcon style={{ fontSize: 14 }} />
       </button>
       <button
-        style={{ ...itemStyle, background: 'transparent', border: 0, color: 'inherit', cursor: canRedo ? 'pointer' : 'default', opacity: canRedo ? 1 : 0.5 }}
-        disabled={!canRedo}
+        style={{ ...itemStyle, background: 'transparent', border: 0, color: 'inherit', cursor: (canRedo && isController) ? 'pointer' : 'default', opacity: (canRedo && isController) ? 1 : 0.5 }}
+        disabled={!canRedo || !isController}
         onClick={redo}
-        title="Redo"
+        title={isController ? 'Redo' : `Only ${controllerName ?? 'the controlling page'} can redo`}
       >
         <RedoIcon style={{ fontSize: 14 }} />
+      </button>
+      <button
+        style={{ ...itemStyle, background: 'transparent', border: 0, color: isController ? 'var(--ok)' : 'inherit', cursor: 'pointer' }}
+        onClick={() => setControlOpen(o => !o)}
+        title="Who can undo/redo across your open pages"
+      >
+        {isController ? <LockOpenOutlinedIcon style={{ fontSize: 14 }} /> : <LockOutlinedIcon style={{ fontSize: 14 }} />}
+        {isController ? 'You have control' : `Controlled by ${controllerName ?? 'nobody'}`}
       </button>
 
       <button
@@ -148,6 +163,36 @@ export default function StatusBar() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {controlOpen && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: 90, marginBottom: 4,
+          width: 220, background: 'var(--bg-panel)', border: '1px solid var(--bd-soft)', borderRadius: 4,
+          padding: 8, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={{ color: 'var(--fg-secondary)' }}>
+            {isController ? 'You control Undo/Redo across your open pages.' : `${controllerName ?? 'Nobody'} controls Undo/Redo.`}
+          </div>
+          {!isController && (
+            <button
+              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 3, padding: '4px 8px', cursor: 'pointer' }}
+              onClick={() => { claimControl(); setControlOpen(false); }}
+            >
+              Take control
+            </button>
+          )}
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, color: 'var(--fg-secondary)' }}>
+            Your name (shown to other pages)
+            <input
+              value={nameInput}
+              onChange={e => setNameInput(e.target.value)}
+              onBlur={saveDisplayName}
+              onKeyDown={e => { if (e.key === 'Enter') { saveDisplayName(); setControlOpen(false); } }}
+              style={{ background: 'var(--bg-editor)', border: '1px solid var(--bd-soft)', borderRadius: 3, color: 'inherit', padding: '3px 6px', fontFamily: 'var(--font-mono)' }}
+            />
+          </label>
         </div>
       )}
     </div>

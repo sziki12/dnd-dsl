@@ -13,6 +13,7 @@ import { ImageService } from './image/image.service.js';
 import { WorldStateService } from './world-state/world-state.service.js';
 import { CommandController } from './command/command.controller.js';
 import { CommandService } from './command/command.service.js';
+import { StateSyncGateway } from './state-sync/state-sync.gateway.js';
 
 @Module({
   imports: [],
@@ -28,6 +29,7 @@ import { CommandService } from './command/command.service.js';
     ImageService,
     WorldStateService,
     CommandService,
+    StateSyncGateway,
   ],
 })
 export class AppModule {}

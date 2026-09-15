@@ -35,6 +35,7 @@ export class AppController {
         this.fileService.getDnDFilePath(adventure, world),
         this.fileService.getStateFilePath(adventure, world),
       )
+      this.commandService.notifyWorldReloaded()
       return 'Model generated successfully'
     } catch (e) {
       if (e instanceof DndDslParseError) {

@@ -4,6 +4,7 @@ import type { Command, CommandResponse } from '@dnd-language/evaluation/dnd-dsl-
 import type { SerializedAstNode, SerializedModel, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types';
 import { parseReferenceFromSerializedModel } from '@dnd-language/evaluation/dnd-dsl-reference';
 import type { FiredReminder } from '@dnd-language/evaluation/dnd-dsl-reminders';
+import { useStateSync } from '../common/useStateSync';
 
 type DslContext = {
   world: string;
@@ -22,6 +23,11 @@ type DslContext = {
   canRedo: boolean;
   firedReminders: FiredReminder[];
   clearFiredReminder: (id: string) => void;
+  /** Whether THIS page currently holds control of the shared undo/redo history. 
+   *  Other connected pages can still execute commands regardless of this. */
+  isController: boolean;
+  controllerName: string | null;
+  claimControl: () => void;
 };
 
 export type ScriptRunResult = {
@@ -93,6 +99,10 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     setFiredReminders(prev => prev.filter(r => r.id !== id));
   };
 
+  // Live sync across every open page/tab/device: applyCommandResponse handles a broadcast from another page exactly like
+  // one from this page's own request; reloadWorld catches up on anything missed while this page was disconnected.
+  const { isController, controllerName, claimControl, clientId } = useStateSync(applyCommandResponse, reloadWorld);
+
   const execute = async (cmd: Command): Promise<void> => {
     const response = await fetch(`${BackendURL}/command/execute`, {
       method: 'POST',
@@ -123,12 +133,12 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   };
 
   const undo = async (): Promise<void> => {
-    const response = await fetch(`${BackendURL}/command/undo`, { method: 'POST' });
+    const response = await fetch(`${BackendURL}/command/undo`, { method: 'POST', headers: { 'X-Client-Id': clientId } });
     applyCommandResponse(await response.json());
   };
 
   const redo = async (): Promise<void> => {
-    const response = await fetch(`${BackendURL}/command/redo`, { method: 'POST' });
+    const response = await fetch(`${BackendURL}/command/redo`, { method: 'POST', headers: { 'X-Client-Id': clientId } });
     applyCommandResponse(await response.json());
   };
 
@@ -141,16 +151,17 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     return parseReferenceFromSerializedModel<T>(worldState, ref);
   };
 
-  // Ctrl+Z / Ctrl+Y — bubble phase so Monaco (capture phase) handles its own undo first
+  // Ctrl+Z / Ctrl+Y — bubble phase so Monaco (capture phase) handles its own undo first.
+  // A no-op while another page holds control.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!e.ctrlKey) return;
+      if (!e.ctrlKey || !isController) return;
       if (e.key === 'z') { e.preventDefault(); undo(); }
       if (e.key === 'y') { e.preventDefault(); redo(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo]);
+  }, [canUndo, canRedo, isController]);
 
   useEffect(() => {
     if (!world || !adventure) return;
@@ -165,6 +176,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
       getByReference,
       execute, runScript, undo, redo, canUndo, canRedo,
       firedReminders, clearFiredReminder,
+      isController, controllerName, claimControl,
     }}>
       {children}
     </DslContext.Provider>
