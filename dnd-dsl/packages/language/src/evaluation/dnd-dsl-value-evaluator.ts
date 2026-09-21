@@ -29,6 +29,7 @@ export type JsonRuntimeValue =
     | boolean
     | string
     | undefined
+    | JsonRuntimeValue[]
     | { [key: string]: JsonRuntimeValue };
 
 export type RefChainTarget =
@@ -106,9 +107,17 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
     if (expr === undefined || expr === null) return undefined;
     if (typeof expr !== 'object') return expr as JsonRuntimeValue;
 
+    // A raw JSON value with no `$type` (an array or record an overlay write stored) is
+    // already a value, not a node. Cloned so nothing downstream can alias - and mutate -
+    // the served world state.
+    if (!('$type' in expr)) return structuredClone(expr) as JsonRuntimeValue;
+
     const node = expr as SerializedExpression & { $type: string };
 
     switch (node.$type) {
+        case 'ListLiteral':
+            return (node as unknown as { elements: unknown[] }).elements.map(e => evaluateSerializedExpression(model, e));
+
         case 'IntVal':
             return signedInt(node as unknown as { isNegative?: boolean; val: number });
         case 'BoolVal':

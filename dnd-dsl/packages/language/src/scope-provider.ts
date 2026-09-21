@@ -1,10 +1,11 @@
 import { AstUtils, DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream } from "langium";
-import type { AstNode, ReferenceInfo, Scope } from "langium";
+import type { AstNode, AstNodeDescription, ReferenceInfo, Scope } from "langium";
 import {
     type Enum,
     isCodeBlock,
     isEnum,
     isEnumValueRef,
+    isForStatement,
     isLocationRefItem,
     isNpcRefItem,
     isObjectDeclaration,
@@ -15,9 +16,17 @@ import {
     isVariableRefItem,
     isWorld,
     type RefChain,
-    VariableDeclaration,
+    type VariableDeclaration,
 } from "./generated/ast.js";
 import { unwrapExpression } from "./evaluation/dnd-dsl-state-path.js";
+
+/** CollectionRef.field values whose elements are real named entities with their own
+ *  `.variables` - these are what a for-loop variable's dynamic member scope (below)
+ *  is granted for. Other fields (events/functions/enums - name only; values/exits/
+ *  variables - plain records) bind the loop variable to an already-evaluated value at
+ *  runtime instead, so `.member` on them is correctly a real linking error, not a
+ *  permissive one. Kept in sync with LangiumInterpreterService.resolveCollection. */
+const ENTITY_COLLECTION_FIELDS = new Set(['npcs', 'locations', 'quests', 'objectives', 'sublocations']);
 
 export class DndScopeProvider extends DefaultScopeProvider
 {
@@ -98,12 +107,27 @@ export class DndScopeProvider extends DefaultScopeProvider
         }
         else if (isVariableRefItem(prev))
         {
+            const decl = prev.val.val.ref;
+
+            // `for x in world . npcs do x . <member>` - x has no static shape, it's
+            // bound to a different concrete npc each iteration, so there is nothing to
+            // enumerate here. Return a permissive scope instead of EMPTY_SCOPE: any
+            // name resolves successfully (to a placeholder never dereferenced for its
+            // own identity), so the reference links and there is no permanent
+            // "could not resolve reference" error on correct code. The interpreter
+            // resolves the real value dynamically at runtime, off the raw $refText,
+            // not off this placeholder - see LangiumInterpreterService.evaluateRefChain.
+            if (decl && (this.isEntityLoopVariable(decl) || this.isListLoopVariable(decl)))
+            {
+                return this.dynamicMemberScope(chain);
+            }
+
             // `Resources . <member>` -> the variables of an `object`-valued decl, OR
             // `named_npc . <member>` where named_npc's own value is a bare entity
             // reference (`let named_npc = npc "First NPC"`) -> that entity's own
             // variables. Only a literal, zero-segment head is resolvable this way -
             // the entity has to be known at link time, not chosen at runtime.
-            const value = unwrapExpression(prev.val.val.ref?.value);
+            const value = unwrapExpression(decl?.value);
             if (isObjectDeclaration(value)) {
                 members = value.variables;
             } else if (isRefChain(value)) {
@@ -133,6 +157,53 @@ export class DndScopeProvider extends DefaultScopeProvider
             return chain.first.val.val.ref?.variables;
         }
         return undefined;
+    }
+
+    /** True for a `for x in <collection> do ... end` loop variable whose collection is
+     *  one of entities-with-variables (see ENTITY_COLLECTION_FIELDS) - the only case
+     *  `.member` through a loop variable is meaningful. A loop variable bound to a
+     *  name-only or record collection (events/functions/enums/values/exits/variables)
+     *  correctly falls through to EMPTY_SCOPE below - it structurally has no members. */
+    private isEntityLoopVariable(decl: VariableDeclaration): boolean
+    {
+        const owner = decl.$container;
+        return isForStatement(owner) && owner.loopVar === decl
+            && !!owner.collection && ENTITY_COLLECTION_FIELDS.has(owner.collection.field);
+    }
+
+    /** True for a `for x in <list variable> do ... end` loop variable. The elements
+     *  are plain values, possibly `object` records whose fields can't be known at link
+     *  time, so `.member` gets the same permissive scope - except over an enum list
+     *  (`Disposition[]`), whose elements are enum names with no members at all. */
+    private isListLoopVariable(decl: VariableDeclaration): boolean
+    {
+        const owner = decl.$container;
+        if (!isForStatement(owner) || owner.loopVar !== decl || !owner.source) return false;
+        const source = owner.source;
+        const tail = source.rest.length > 0 ? source.rest[source.rest.length - 1] : source.first;
+        const listDecl = isVariableRefItem(tail) ? tail.val.val.ref : undefined;
+        return !(listDecl?.isList && listDecl.enumType);
+    }
+
+    /** Any name resolves successfully, to a placeholder description that carries no
+     *  real information beyond the requested name - only ever used to avoid a linking
+     *  error, never dereferenced by identity. getAllElements stays empty deliberately:
+     *  completion for a loop variable's members isn't offered yet (fast-follow). */
+    private dynamicMemberScope(chain: RefChain): Scope
+    {
+        const documentUri = AstUtils.getDocument(chain).uri;
+        const describe = (name: string): AstNodeDescription => ({
+            node: { $type: 'DynamicMember' } as unknown as AstNode,
+            name,
+            type: 'DynamicMember',
+            documentUri,
+            path: '',
+        });
+        return {
+            getElement: describe,
+            getElements: (name: string) => stream([describe(name)]),
+            getAllElements: () => stream([]),
+        };
     }
 
     private getVariableScope(node: AstNode, context: ReferenceInfo): Scope

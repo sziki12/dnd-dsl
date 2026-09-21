@@ -151,7 +151,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     return parseReferenceFromSerializedModel<T>(worldState, ref);
   };
 
-  // Ctrl+Z / Ctrl+Y — bubble phase so Monaco (capture phase) handles its own undo first.
+  // Ctrl+Z / Ctrl+Y - bubble phase so Monaco (capture phase) handles its own undo first.
   // A no-op while another page holds control.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

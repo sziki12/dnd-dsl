@@ -3,7 +3,7 @@ import { WorldStateService } from '../world-state/world-state.service.js';
 import { LangiumInterpreterService, type EvalContext } from '../langium-interpreter/langium-interpreter.service.js';
 import { StateSyncGateway } from '../state-sync/state-sync.gateway.js';
 
-import { isVariableDeclaration } from '@dnd-language/index.js';
+import { isVariableDeclaration, type Model } from '@dnd-language/index.js';
 import { encodeStatePath, resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
 import { resolveRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
@@ -123,15 +123,10 @@ export class CommandService {
     const previous = this.snapshotRuntimeState();
 
     const state = this.worldStateService.getWorldState();
-    const ctx: EvalContext = {
-      scope: { ...(state.runtimeVariables ?? {}) },
-      worldState: state,
-      clock: this.worldStateService.getClock(),
-      reminders: this.worldStateService.getReminders(),
-      firedReminders: [],
-    };
+    const ctx = this.newEvalContext(model, { ...(state.runtimeVariables ?? {}) });
     const result = this.interpreterService.callFunctionByName(model, cmd.functionName, cmd.args, ctx);
     this.worldStateService.addFiredReminders(ctx.firedReminders!);
+    this.flushPendingWrites(ctx);
 
     const post = this.snapshotRuntimeState();
     this.history.push({ command: cmd, previous, post });
@@ -152,15 +147,11 @@ export class CommandService {
 
     // Pass runtimeVariables directly so in-place mutations from VariableAssignment
     // and VariableDeclaration statements inside the event body persist.
-    const ctx: EvalContext = {
-      scope: state.runtimeVariables,
-      worldState: state,
-      clock: this.worldStateService.getClock(),
-      reminders: this.worldStateService.getReminders(),
-      firedReminders: [],
-    };
+    // The event itself counts as already running, so a self-`trigger` is guarded too.
+    const ctx = this.newEvalContext(model, state.runtimeVariables, { triggeredEvents: new Set([cmd.eventName]) });
     this.interpreterService.triggerEventByName(model, cmd.eventName, ctx);
     this.worldStateService.addFiredReminders(ctx.firedReminders!);
+    this.flushPendingWrites(ctx);
 
     const post = this.snapshotRuntimeState();
     this.history.push({ command: cmd, previous, post });
@@ -187,15 +178,10 @@ export class CommandService {
         console.warn(`Reminder '${reminder.id}' effect body no longer resolves - skipping.`);
         continue;
       }
-      const ctx: EvalContext = {
-        scope: state.runtimeVariables,
-        worldState: state,
-        clock: this.worldStateService.getClock(),
-        reminders: this.worldStateService.getReminders(),
-        firedReminders: firedFromBodies,
-      };
+      const ctx = this.newEvalContext(model, state.runtimeVariables, { firedReminders: firedFromBodies });
       try {
         this.interpreterService.runCodeBlock(ctx, codeBlock);
+        this.flushPendingWrites(ctx);
         reminder.effectRan = true;
       } catch (e) {
         console.error(`Reminder '${reminder.id}' effect body threw:`, e);
@@ -226,17 +212,10 @@ export class CommandService {
     }
 
     const state = this.worldStateService.getWorldState();
-    const ctx: EvalContext = {
-      scope: { ...(state.runtimeVariables ?? {}) },
-      worldState: state,
-      clock: this.worldStateService.getClock(),
+    const ctx = this.newEvalContext(model, { ...(state.runtimeVariables ?? {}) }, {
       reminders: structuredClone(this.worldStateService.getReminders()),
-      model,
-      pendingOverlayWrites: [],
-      triggeredEvents: new Set(),
-      firedReminders: [],
       printed: [],
-    };
+    });
 
     let returnValue: unknown;
     try {
@@ -248,9 +227,7 @@ export class CommandService {
     state.runtimeVariables = ctx.scope;
     this.worldStateService.setReminders(ctx.reminders);
     this.worldStateService.addFiredReminders(ctx.firedReminders!);
-    for (const w of ctx.pendingOverlayWrites!) {
-      this.worldStateService.setOverlayEntry(w.path, w.value);
-    }
+    this.flushPendingWrites(ctx);
 
     const post = this.snapshotRuntimeState();
     this.history.push({ command: cmd, previous, post });
@@ -266,6 +243,29 @@ export class CommandService {
         writes: ctx.pendingOverlayWrites!.map(w => ({ path: encodeStatePath(w.path), value: w.value })),
       },
     };
+  }
+
+  /** The one place the interpreter context is built, so every command path gets the same
+   *  capabilities: `trigger` needs `model`, and entity writes need
+   *  `pendingOverlayWrites` plus a flush */
+  private newEvalContext(model: Model, scope: Record<string, unknown>, extras: Partial<EvalContext> = {}): EvalContext {
+    return {
+      scope,
+      worldState: this.worldStateService.getWorldState(),
+      clock: this.worldStateService.getClock(),
+      reminders: this.worldStateService.getReminders(),
+      model,
+      pendingOverlayWrites: [],
+      triggeredEvents: new Set(),
+      firedReminders: [],
+      ...extras,
+    };
+  }
+
+  private flushPendingWrites(ctx: EvalContext): void {
+    for (const w of ctx.pendingOverlayWrites ?? []) {
+      this.worldStateService.setOverlayEntry(w.path, w.value);
+    }
   }
 
   private applyCommand(cmd: Command): void {

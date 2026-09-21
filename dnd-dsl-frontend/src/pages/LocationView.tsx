@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState, useRef, useEffect, useContext } from 'react';
 
 import { addEdge, Background, BackgroundVariant, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Edge, type Node } from '@xyflow/react';
-import { evaluateExpression, inferKind, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
+import { evaluateExpression, inferKind, isObjectResult, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
+import { renderValueToken } from '../common/ValueToken';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
@@ -36,7 +37,7 @@ const LocationView = () => {
     const result = evaluateExpression(variable.value, { variableName: variable.target, worldState })
     const updates: Record<string, EvalResult | null> = { [storeKey]: result ?? null }
 
-    if (result !== null && typeof result === 'object') {
+    if (isObjectResult(result)) {
       const obj = result as SerialisedObjectDeclaration
       for (const propDecl of obj.computedPropertyDecls) {
         const propKey = `${storeKey}.${propDecl.target ?? ''}`
@@ -46,15 +47,6 @@ const LocationView = () => {
     }
 
     setComputedValues(prev => ({ ...prev, ...updates }))
-  }
-
-  const renderValueToken = (value: EvalResult | null | undefined) => {
-    if (value === null || value === undefined) return <span className="tok-comment italic">?</span>
-    const kind = inferKind(value)
-    if (kind === 'string') return <span className="tok-string">"{value as string}"</span>
-    if (kind === 'int') return <span className="tok-number">{value as number}</span>
-    if (kind === 'bool') return <span className="tok-keyword">{String(value)}</span>
-    return <span className="tok-operator">{String(value)}</span>
   }
 
   const renderObjectProps = (obj: SerialisedObjectDeclaration, parentKey: string) => (
@@ -135,9 +127,7 @@ const LocationView = () => {
 
                     // Evaluate eagerly to get object structure for preview (safe - ObjectDeclaration has no side effects)
                     const preview = evaluateExpression(variable.value, { variableName: variable.target, worldState })
-                    const previewObj = preview !== null && typeof preview === 'object'
-                      ? preview as SerialisedObjectDeclaration
-                      : undefined
+                    const previewObj = isObjectResult(preview) ? preview : undefined
 
                     return (
                       <div
@@ -170,7 +160,7 @@ const LocationView = () => {
                   }
 
                   const value = evaluateExpression(variable.value, { variableName: variable.target, worldState })
-                  if (typeof value === 'object') {
+                  if (isObjectResult(value)) {
                     const obj = value as SerialisedObjectDeclaration
                     return (
                       <div

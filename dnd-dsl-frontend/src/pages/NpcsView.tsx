@@ -1,17 +1,9 @@
 import { useContext } from 'react';
 import { DslContext } from '../contexts/DslContext';
-import { evaluateExpression, inferKind, type EvalResult } from '../common/expression-evaluator';
+import { evaluateExpression, inferKind } from '../common/expression-evaluator';
+import { renderValueToken } from '../common/ValueToken';
 import EnumValueSelect from '../common/EnumValueSelect';
 import type { SerializedNpc, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
-
-function renderValueToken(value: EvalResult | null | undefined) {
-  if (value === null || value === undefined) return <span className="tok-comment italic">?</span>;
-  const kind = inferKind(value);
-  if (kind === 'string') return <span className="tok-string">"{value as string}"</span>;
-  if (kind === 'int') return <span className="tok-number">{value as number}</span>;
-  if (kind === 'bool') return <span className="tok-keyword">{String(value)}</span>;
-  return <span className="tok-operator">{String(value)}</span>;
-}
 
 export default function NpcsView() {
   const { worldState } = useContext(DslContext);

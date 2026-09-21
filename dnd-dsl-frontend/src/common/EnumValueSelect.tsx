@@ -15,7 +15,8 @@ export default function EnumValueSelect({ variable, owner, currentValue }: {
 }) {
   const { getByReference, execute } = useContext(DslContext);
 
-  if (!variable.enumType) return null;
+  // A list of enum values (`Disposition[]`) has no single value to pick.
+  if (!variable.enumType || variable.isList) return null;
   const enumDecl = getByReference<SerializedEnum>(variable.enumType);
   if (!enumDecl) return null;
 

@@ -1,13 +1,18 @@
 import { randomUUID } from 'crypto';
+import type { AstNode } from 'langium';
 import {
     Code,
     CodeBlock,
+    CollectionRef,
     ConditionalBlock,
+    EnumValueDecl,
     Expression,
+    ForStatement,
     FunctionCall,
     FunctionDeclaration,
     isBoolExpression,
     isBoolVal,
+    isEnumRefItem,
     isEnumValueRef,
     isEventRefItem,
     isFunctionCall,
@@ -15,6 +20,7 @@ import {
     isIntExpression,
     isIntToBoolExpression,
     isIntVal,
+    isListLiteral,
     isLocation,
     isLocationRefItem,
     isNpc,
@@ -27,9 +33,12 @@ import {
     isStringVal,
     isVariableRefItem,
     isWorld,
+    isWorldRefItem,
+    LocationExit,
     Model,
     PrintStatement,
     RefChain,
+    RefChainStart,
     RemindStatement,
     ReturnStatement,
     SetStatement,
@@ -37,7 +46,8 @@ import {
 } from '@dnd-language/index.js';
 import { Injectable } from '@nestjs/common';
 import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
-import { nodeToStatePath, statePathToNode, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { encodeStatePath, nodeToStatePath, statePathToNode, unwrapExpression, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefined-signatures.js';
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
@@ -75,6 +85,25 @@ class ReturnSignal {
     constructor(public readonly value: any) {}
 }
 
+/**
+ * What a `for x in <collection> do ... end` loop variable is bound to for one
+ * ENTITY-collection element (npc/location/quest/objective/sublocation - anything with
+ * its own `.variables`). Deliberately just a StatePath, not a live AST node reference:
+ * the element is a real, normally-positioned node, so `nodeToStatePath` on it already
+ * produces the correct persistent address - no new addressing scheme needed, and no
+ * circular AST reference ends up in `ctx.scope`/`ctx.printed` (which would break
+ * `print x` - the frontend JSON.stringifies printed values). `x.member`'s member name
+ * is read from the reference's raw `$refText`, never `.ref` - see
+ * DndScopeProvider.getMemberScope's loop-variable branch, which links `.member` to a
+ * permissive placeholder that carries no real information beyond letting the
+ * reference resolve at all.
+ */
+type LoopEntityHandle = { readonly __loopEntity: true; readonly path: StatePath };
+
+function isLoopEntityHandle(value: unknown): value is LoopEntityHandle {
+    return typeof value === 'object' && value !== null && (value as { __loopEntity?: unknown }).__loopEntity === true;
+}
+
 @Injectable()
 export class LangiumInterpreterService {
 
@@ -93,6 +122,9 @@ export class LangiumInterpreterService {
             // as plain string comparison and matches the bare name string an
             // ASSIGN_VARIABLE overlay write stores.
             return expression.value.ref?.name ?? expression.value.$refText;
+        }
+        if (isListLiteral(expression)) {
+            return expression.elements.map(element => this.evaluateExpression(ctx, element));
         }
         if (isObjectDeclaration(expression)) {
             return expression.variables.reduce((obj: RuntimeScope, v) => {
@@ -176,7 +208,7 @@ export class LangiumInterpreterService {
         if (!decl) throw new Error(`Unresolved variable ref in chain: ${tail.val.val.$refText}`);
 
         const path = nodeToStatePath(decl);
-        if (path) return this.readPersistentValue(ctx.worldState, path);
+        if (path) return this.readPath(ctx, path);
 
         // Local/function-scoped - nodeToStatePath only returns a path for a
         // Location-rooted declaration, so chain.first can't be a LocationRefItem here;
@@ -187,13 +219,43 @@ export class LangiumInterpreterService {
         }
         const headDecl = chain.first.val.val.ref;
         if (!headDecl) throw new Error(`Unresolved variable ref: ${chain.first.val.val.$refText}`);
-        let current: any = ctx.scope[headDecl.target ?? headDecl.name ?? ''];
+        const headValue = ctx.scope[headDecl.target ?? headDecl.name ?? ''];
+
+        // A for-loop-bound entity (see LoopEntityHandle) - read through its real
+        // persistent StatePath, not by walking ctx.scope as a plain object. Only one
+        // level of member access is supported (chain.rest[0]) - a loop variable's
+        // member access links to a permissive placeholder (see the scope provider),
+        // so a second dot (`x.a.b`) fails to link before this code ever runs.
+        if (isLoopEntityHandle(headValue)) {
+            if (chain.rest.length === 0) return this.readPath(ctx, headValue.path);
+            const tailName = chain.rest[0].val.val.$refText;
+            return this.readPath(ctx, [...headValue.path, { kind: 'variable', target: tailName }]);
+        }
+
+        let current: any = headValue;
         for (const item of chain.rest) {
             const d = item.val.val.ref;
             if (!d) throw new Error(`Unresolved variable ref in chain: ${item.val.val.$refText}`);
-            current = current?.[d.target ?? d.name ?? ''];
+            const name = (d.$type as string) === 'DynamicMember' ? item.val.val.$refText : (d.target ?? d.name ?? '');
+            current = current?.[name];
         }
         return current;
+    }
+
+    /** A persistent read that sees this run's own not-yet-flushed writes: the newest
+     *  pending write to exactly this path wins, else the served state is read. Without
+     *  it a second `append` on a persistent list would start from the old value and
+     *  lose the first. Only an exact path is matched - a parent record read after a
+     *  write to one of its members still reflects the served state. */
+    private readPath(ctx: EvalContext, path: StatePath): any {
+        const pending = ctx.pendingOverlayWrites;
+        if (pending?.length) {
+            const key = encodeStatePath(path);
+            for (let i = pending.length - 1; i >= 0; i--) {
+                if (encodeStatePath(pending[i].path) === key) return structuredClone(pending[i].value);
+            }
+        }
+        return this.readPersistentValue(ctx.worldState, path);
     }
 
     /** Reads the current (overlay-applied) value a persistent StatePath addresses, from
@@ -316,7 +378,7 @@ export class LangiumInterpreterService {
                 const value = this.evaluateExpression(ctx, c.value);
                 let path: StatePath;
                 try {
-                    path = this.resolveRefChainToStatePath(c.target);
+                    path = this.resolveRefChainToStatePath(ctx, c.target);
                 } catch {
                     path = [];
                 }
@@ -328,7 +390,8 @@ export class LangiumInterpreterService {
             }
             case 'FunctionCall': {
                 const c = code as unknown as FunctionCall;
-                this.executeFunctionCall(ctx, c);
+                const result = this.executeFunctionCall(ctx, c);
+                this.writeBackIfRequested(ctx, c, result);
                 break;
             }
             case 'ReturnStatement': {
@@ -365,9 +428,22 @@ export class LangiumInterpreterService {
                 }
                 break;
             }
+            case 'ForStatement': {
+                const c = code as unknown as ForStatement;
+                const loopVarName = c.loopVar.name ?? '';
+                const values = c.collection ? this.resolveCollection(ctx, c.collection) : this.resolveListSource(ctx, c.source!);
+                for (const value of values) {
+                    ctx.scope[loopVarName] = value;
+                    for (const block of c.body) {
+                        const result = this.runCodeBlock(ctx, block);
+                        if (result instanceof ReturnSignal) return result;
+                    }
+                }
+                break;
+            }
             case 'RemindStatement': {
                 const c = code as unknown as RemindStatement;
-                const pin = c.pin ? this.resolveRefChainToStatePath(c.pin) : undefined;
+                const pin = c.pin ? this.resolveRefChainToStatePath(ctx, c.pin) : undefined;
 
                 // No `after`: fire the instant this statement runs - record it and run
                 // any effect body in this same context. It never enters the time queue.
@@ -411,7 +487,7 @@ export class LangiumInterpreterService {
     /** Resolves a RefChain to its StatePath address rather than its value - used by
      *  RemindStatement's `show on <chain>` pin and by `set <chain> = <expr>`. Mirrors
      *  evaluateRefChain's head/tail resolution and throw conventions. */
-    private resolveRefChainToStatePath(chain: RefChain): StatePath {
+    private resolveRefChainToStatePath(ctx: EvalContext, chain: RefChain): StatePath {
         if (isEventRefItem(chain.first)) {
             throw new Error(`Cannot pin a reminder to a '${chain.first.$type}' reference`);
         }
@@ -421,6 +497,18 @@ export class LangiumInterpreterService {
             if (!node) throw new Error(`Unresolved ref: ${chain.first.val.val.$refText}`);
             return nodeToStatePath(node)!;
         }
+
+        // A for-loop-bound entity - same shortcut evaluateRefChain's fallback uses.
+        if (isVariableRefItem(chain.first)) {
+            const headDecl = chain.first.val.val.ref;
+            const headValue = headDecl ? ctx.scope[headDecl.target ?? headDecl.name ?? ''] : undefined;
+            if (isLoopEntityHandle(headValue)) {
+                if (chain.rest.length === 0) return headValue.path;
+                const tailName = chain.rest[0].val.val.$refText;
+                return [...headValue.path, { kind: 'variable', target: tailName }];
+            }
+        }
+
         const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
         if (!isVariableRefItem(tail)) throw new Error(`Unsupported pin target: ${tail.$type}`);
         const decl = tail.val.val.ref;
@@ -428,5 +516,107 @@ export class LangiumInterpreterService {
         const path = nodeToStatePath(decl);
         if (!path) throw new Error(`Cannot pin a reminder to a local/non-persistent variable`);
         return path;
+    }
+
+    /** `for x in <variable holding a list>` - iterates a snapshot of the list, so a
+     *  write-back to the same variable inside the body doesn't change what is iterated. */
+    private resolveListSource(ctx: EvalContext, source: RefChain): unknown[] {
+        const value = this.evaluateRefChain(ctx, source);
+        if (!Array.isArray(value)) {
+            throw new Error(`'for ... in' needs a list, but ${source.$cstNode?.text ?? 'the source'} is not one`);
+        }
+        return [...value];
+    }
+
+    /** A statement-position call of a predefined function flagged `writesBack` (see
+     *  PREDEFINED_SIGNATURES) also stores its result into its first argument, so
+     *  `call predefined append with inventory, "sword"` reads as a mutation while the
+     *  function itself stays pure. The validator guarantees the first argument is a
+     *  variable. In expression position nothing is written - only this statement case
+     *  of runCode calls this. */
+    private writeBackIfRequested(ctx: EvalContext, call: FunctionCall, result: unknown): void {
+        if (!call.predefined || !getPredefinedSignature(call.predefinedTarget ?? '')?.writesBack) return;
+        const target = unwrapExpression(call.params[0]);
+        if (!isRefChain(target)) throw new Error(`'${call.predefinedTarget}' needs a variable as its first argument`);
+        this.writeValue(ctx, target, result);
+    }
+
+    /** Stores `value` into the variable a chain names: a bare local variable lands in
+     *  the scope, an entity- or world-owned one (or a loop entity's member) becomes a
+     *  pending overlay write for the caller to flush. */
+    private writeValue(ctx: EvalContext, chain: RefChain, value: unknown): void {
+        if (chain.rest.length === 0 && isVariableRefItem(chain.first)) {
+            const ref = chain.first.val.val;
+            const decl = ref.ref;
+            const path = decl ? nodeToStatePath(decl) : undefined;
+            if (path) {
+                (ctx.pendingOverlayWrites ??= []).push({ path, value });
+            } else {
+                ctx.scope[decl?.target ?? decl?.name ?? ref.$refText] = value;
+            }
+            return;
+        }
+        const path = this.resolveRefChainToStatePath(ctx, chain);
+        if (path[path.length - 1]?.kind !== 'variable') {
+            throw new Error('Cannot store into a target that is not a variable');
+        }
+        (ctx.pendingOverlayWrites ??= []).push({ path, value });
+    }
+
+    /** Resolves a `for`'s collection *source* to the values the loop variable takes on,
+     *  one iteration each. `DndDslValidator.checkCollectionField` already rejects an
+     *  unknown field at parse time, so `field` here is trusted to be legal for `head`'s
+     *  resolved type - this only decides, per field, what an element becomes. */
+    private resolveCollection(ctx: EvalContext, collection: CollectionRef): unknown[] {
+        const head = this.resolveCollectionHead(ctx, collection.head);
+        if (!head) throw new Error(`Unresolved collection head: ${collection.head.$type}`);
+        const items = (head as unknown as Record<string, unknown>)[collection.field];
+        if (!Array.isArray(items)) {
+            throw new Error(`'${collection.field}' is not a collection on ${head.$type}`);
+        }
+
+        switch (collection.field) {
+            // Entities with their own `.variables` - bind a live handle so `x.member`
+            // reads/writes persist through the entity's real StatePath.
+            case 'npcs': case 'locations': case 'quests': case 'objectives': case 'sublocations':
+                return (items as AstNode[])
+                    .map(node => this.makeEntityHandle(node))
+                    .filter((handle): handle is LoopEntityHandle => handle !== undefined);
+            // Named, but no `.variables` of their own - bind the name only.
+            case 'events': case 'functions': case 'enums':
+                return (items as { name: string }[]).map(node => node.name);
+            // EnumValueDecl - same runtime representation as an EnumValueRef elsewhere
+            // in the interpreter (a bare name string), not an entity.
+            case 'values':
+                return (items as EnumValueDecl[]).map(v => v.name);
+            // LocationExit - not StatePath-addressable, so a small plain record instead
+            // of a live handle; `target` resolves the exit's own cross-reference.
+            case 'exits':
+                return (items as LocationExit[]).map(exit => ({ name: exit.name, target: exit.exit?.ref?.name }));
+            // The VariableDeclarations themselves - bind each one's current value.
+            case 'variables':
+                return (items as VariableDeclaration[]).map(v => v.value ? this.evaluateExpression(ctx, v.value) : undefined);
+            default:
+                throw new Error(`Unsupported collection field: ${collection.field}`);
+        }
+    }
+
+    /** Resolves a CollectionRef's head to the concrete node its field is read off.
+     *  Location/Quest/Npc reuse their existing cross-reference; World has none (only
+     *  one per document); Enum's is a direct [Enum:ID] reference (see the grammar
+     *  comment on EnumRefItem) resolved by Langium's own default scoping. */
+    private resolveCollectionHead(ctx: EvalContext, start: RefChainStart): AstNode | undefined {
+        if (isLocationRefItem(start)) return start.val.val.ref;
+        if (isQuestRefItem(start)) return start.val.val.ref;
+        if (isNpcRefItem(start)) return start.val.val.ref;
+        if (isWorldRefItem(start)) return ctx.model?.World;
+        if (isEnumRefItem(start)) return start.val.ref;
+        return undefined;
+    }
+
+    private makeEntityHandle(node: AstNode): LoopEntityHandle | undefined {
+        const path = nodeToStatePath(node);
+        if (!path) return undefined;
+        return { __loopEntity: true, path };
     }
 }

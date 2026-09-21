@@ -25,9 +25,15 @@ export type SerialisedObjectDeclaration = {
     computedPropertyDecls: SerializedVariableDecl[],
 };
 
-export type EvalResult = number | boolean | string | SerialisedObjectDeclaration;
+export type EvalResult = number | boolean | string | SerialisedObjectDeclaration | Array<EvalResult | undefined>;
 
-export type InferredKind = 'int' | 'string' | 'bool' | 'object' | 'unknown';
+export type InferredKind = 'int' | 'string' | 'bool' | 'object' | 'list' | 'unknown';
+
+/** An object result is a SerialisedObjectDeclaration - an array is also `typeof 'object'`,
+ *  so every place that reads `staticProperties` must go through this guard. */
+export function isObjectResult(value: unknown): value is SerialisedObjectDeclaration {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 /** SerializedVariableDecl has no `kind` field - infer a display kind from the runtime-evaluated value. */
 export function inferKind(value: EvalResult | null | undefined): InferredKind {
@@ -35,7 +41,7 @@ export function inferKind(value: EvalResult | null | undefined): InferredKind {
         case 'number': return 'int';
         case 'string': return 'string';
         case 'boolean': return 'bool';
-        case 'object': return value === null ? 'unknown' : 'object';
+        case 'object': return value === null ? 'unknown' : Array.isArray(value) ? 'list' : 'object';
         default: return 'unknown';
     }
 }
@@ -53,7 +59,15 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
     // without this check, every overlaid leaf would silently evaluate to `undefined`.
     if (typeof expr !== 'object') return expr as EvalResult;
 
+    // An overlay write can also store a whole list, again with no $type. Raw records stay
+    // unsupported here (they have no SerialisedObjectDeclaration shape to render).
+    if (!('$type' in expr)) return Array.isArray(expr) ? (structuredClone(expr) as EvalResult) : undefined;
+
     switch (expr.$type) {
+        case 'ListLiteral': {
+            const e = expr as unknown as { elements: SerializedNode<Expression>[] };
+            return e.elements.map(element => evaluateExpression(element, options));
+        }
         case 'BoolVal':
             return negatableBool(expr as unknown as SerializedNode<BoolVal>);
         case 'IntVal':

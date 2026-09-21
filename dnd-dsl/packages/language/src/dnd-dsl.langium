@@ -109,6 +109,7 @@ Code:
     | ReturnStatement
     | RemindStatement
     | PrintStatement
+    | ForStatement
     ;
 SetStatement:
     'set' target=RefChain '=' value=(Expression);
@@ -127,11 +128,19 @@ VariableAssignment:
     target=VariableRef '=' value=(Expression);
 PrintStatement:
     'print' value=(Expression);
+ForStatement:
+    'for' loopVar=LoopVariable 'in' (collection=CollectionRef | source=RefChain) 'do' body+=CodeBlock 'end';
+LoopVariable infers VariableDeclaration:
+    name=ID;
+
+CollectionRef:
+    head=RefChainStart '.' field=('locations' | 'npcs' | 'quests' | 'events' | 'functions'
+        | 'enums' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values');
 
 
 //General Declarations
 VariableDeclaration:
-    'let' isComputed='computed'? target=ID (':' enumType=[Enum:ID])? '=' value=(Expression);
+    'let' isComputed='computed'? target=ID (':' enumType=[Enum:ID] (isList?='[' ']')?)? '=' value=(Expression);
 ObjectDeclaration:
     'object'
     (variables+=VariableDeclaration)*
@@ -177,8 +186,11 @@ ConstantExpression:
     IntVal |
     StringVal |
     BoolVal |
-    ObjectDeclaration
+    ObjectDeclaration |
+    ListLiteral
     ;
+ListLiteral:
+    '[' (elements+=Expression (',' elements+=Expression)* ','?)? ']';
 // `enumName` is a plain token (ENUM_NAME only matches an identifier immediately
 // followed by `::`), which keeps `EnumName::Value` unambiguous against a bare
 // variable reference in the same expression slot. The enum is resolved by name in
@@ -211,7 +223,9 @@ RefChainStart:
     | LocationRefItem
     | QuestRefItem
     | EventRefItem
-    | NpcRefItem;
+    | NpcRefItem
+    | WorldRefItem
+    | EnumRefItem;
 
 VariableRefItem:
     val=VariableRef;
@@ -223,6 +237,13 @@ EventRefItem:
     isEvent='event' val=EventRef;
 NpcRefItem:
     isNpc='npc' val=NpcRef;
+// Only one World per document, so a bare keyword is enough - no cross-reference to
+// resolve. Exists so `world . npcs` etc. can be written as a CollectionRef head.
+WorldRefItem:
+    isWorld='world';
+// A single-level cross-reference
+EnumRefItem:
+    isEnum='enum' val=[Enum:ID];
 
 //val is declared, property is generated
 VariableRef:        

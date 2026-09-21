@@ -6,6 +6,8 @@
  * plain values here so the arithmetic / comparison / logical rules live in one place.
  */
 
+import { valuesEqual } from './dnd-dsl-list-ops.js';
+
 export type ArithmeticOperator = '+' | '-' | '*' | '/';
 export type ComparisonOperator = '==' | '!=' | '<' | '>' | '<=' | '>=' | 'is';
 export type LogicalOperator = 'and' | 'or';
@@ -23,14 +25,15 @@ export function applyArithmetic(operator: ArithmeticOperator, left: unknown, rig
 }
 
 /**
- * `== != is` compare any operands by identity (`is` also honours a `negated` flag).
- * `< > <= >=` require two numbers, otherwise undefined.
+ * `== != is` compare any operands by identity, except lists which compare item by item
+ * (`is` also honours a `negated` flag). `< > <= >=` require two numbers, otherwise
+ * undefined.
  */
 export function applyComparison(operator: ComparisonOperator, left: unknown, right: unknown, negated = false): boolean | undefined {
     switch (operator) {
-        case '==': return left === right;
-        case '!=': return left !== right;
-        case 'is': return negated ? left !== right : left === right;
+        case '==': return valuesEqual(left, right);
+        case '!=': return !valuesEqual(left, right);
+        case 'is': return negated ? !valuesEqual(left, right) : valuesEqual(left, right);
     }
     if (typeof left !== 'number' || typeof right !== 'number') return undefined;
     switch (operator) {

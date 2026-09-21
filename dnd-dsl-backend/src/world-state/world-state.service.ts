@@ -26,6 +26,8 @@ export type PredefinedFunctionSummary = {
   name: string;
   params: string[];
   description?: string;
+  /** A statement-position call also stores its result into its first argument. */
+  writesBack?: boolean;
   code: (...args: any[]) => any;
 };
 

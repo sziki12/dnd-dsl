@@ -5,12 +5,16 @@ import type { LangiumServices } from "langium/lsp";
 import { CompletionItemKind, CompletionList } from "vscode-languageserver";
 import type { CancellationToken, CompletionItem, CompletionParams } from "vscode-languageserver";
 import { isRefChain, isVariableRef, type RefChain } from "./generated/ast.js";
+import { PREDEFINED_SIGNATURES } from "./evaluation/dnd-dsl-predefined-signatures.js";
 
 /**
  * The DSL keywords that introduce a `[Type:STRING]` entity reference, mapped to the
  * cross-reference target type. `event triggered "X"` and `event "X"` both land on Event.
  */
 const ENTITY_SLOT = /(?:^|[^\w"])(location|npc|quest|trigger|event)[ \t]+(?:triggered[ \t]+)?("?)([^"\n]*)$/;
+/** The name slot of `call predefined <name>` - a plain ID, not a cross-reference, so the
+ *  base provider offers nothing there. */
+const PREDEFINED_SLOT = /\bcall[ \t]+predefined[ \t]+(\w*)$/;
 const ENTITY_TYPE: Record<string, string> = {
     location: "Location",
     npc: "Npc",
@@ -65,7 +69,35 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return CompletionList.create(this.deduplicateItems(names), true);
         }
 
+        const predefined = this.predefinedCompletions(document, params);
+        if (predefined.length > 0) {
+            return CompletionList.create(predefined, true);
+        }
+
         return super.getCompletion(document, params, cancelToken);
+    }
+
+    private predefinedCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
+        const td = document.textDocument;
+        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+        const match = PREDEFINED_SLOT.exec(line);
+        if (!match) return [];
+
+        const partial = match[1];
+        const range = { start: { line: params.position.line, character: params.position.character - partial.length }, end: params.position };
+        const items: CompletionItem[] = [];
+        for (const sig of PREDEFINED_SIGNATURES) {
+            if (partial && !this.fuzzyMatcher.match(partial, sig.name)) continue;
+            items.push({
+                label: sig.name,
+                kind: CompletionItemKind.Function,
+                detail: `${sig.name}(${sig.params.join(', ')})`,
+                documentation: sig.description,
+                sortText: "0",
+                textEdit: { range, newText: sig.name },
+            });
+        }
+        return items;
     }
 
     private memberCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] {

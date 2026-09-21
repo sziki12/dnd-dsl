@@ -34,6 +34,7 @@ export type SerializedEnumValueRef   = SerializedNode<ast.EnumValueRef>;
 export type SerializedFunctionDecl   = SerializedNode<ast.FunctionDeclaration>;
 export type SerializedVariableDecl   = SerializedNode<ast.VariableDeclaration>;
 export type SerializedExpression     = SerializedNode<ast.Expression>;
+export type SerializedListLiteral    = SerializedNode<ast.ListLiteral>;
 export type SerializedCodeBlock      = SerializedNode<ast.CodeBlock>;
 export type SerializedRefChain          = SerializedNode<ast.RefChain>;
 export type SerializedVariableRefItem   = SerializedNode<ast.VariableRefItem>;
