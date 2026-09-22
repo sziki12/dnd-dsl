@@ -57,16 +57,14 @@ import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } 
 type RuntimeScope = Record<string, any>;
 
 /**
- * Threaded explicitly through every interpreter entry point rather than injected -
- * WorldStateService already has a (currently unused) constructor dependency on this
- * service, so the reverse edge would be a real DI cycle. `worldState` is the current,
- * overlay-applied JSON world state (WorldStateService.getWorldState()), used to resolve
- * persistent (Location-owned) RefChain reads; `scope` is the local/function runtime scope;
- * `clock`/`reminders` back RemindStatement scheduling; `model` is the loaded live AST
- * (used to dispatch `trigger` by name); `pendingOverlayWrites` collects entity-variable
- * writes from `set` / assignment for the caller to flush; `triggeredEvents` guards
- * against `trigger` recursion; `firedReminders` collects `remind` statements with no
- * `after` clause, which fire the instant they run rather than entering the time queue;
+ * `worldState` is the current, overlay-applied JSON world state (WorldStateService.getWorldState()), used to resolve persistent RefChain-s
+ * `scope` is the local/function runtime scope
+ * `clock`/`reminders` back RemindStatement scheduling 
+ * `model` is the loaded live AST
+ * `pendingOverlayWrites` collects entity-variable
+ *  writes from `set` / assignment for the caller to flush
+ * `triggeredEvents` guards against `trigger` recursion
+ * `firedReminders` collects `remind` statements with no `after` clause, which fire the instant they run rather than entering the time queue
  * `printed` collects the values of `print` statements for the caller to surface.
  */
 export type EvalContext = {

@@ -19,9 +19,7 @@ import {
   TriggerEventCommand,
 } from '@dnd-language/evaluation/dnd-dsl-commands.js';
 
-/** Everything that must roll back together on undo, or be restored verbatim on redo
- *  of a non-deterministic command. Widened beyond overlay/runtimeVars to also cover
- *  clock/reminders once RemindStatement made those mutable from any function/event body. */
+/** Represents the state of the world at a specific point in time. */
 type RuntimeStateSnapshot = {
   overlay: Record<string, unknown>;
   runtimeVars: Record<string, unknown>;
@@ -32,13 +30,16 @@ type RuntimeStateSnapshot = {
 
 const nonEmpty = (fired: FiredReminder[]): FiredReminder[] | undefined => (fired.length ? fired : undefined);
 
+/** Represents a single command execution in the history, including the state before and after execution. */
 type HistoryEntry = {
   command: Command;
   previous: RuntimeStateSnapshot;
-  /** Only captured for CALL_FUNCTION/TRIGGER_EVENT/ADVANCE_TIME. Lets redo restore the
+  /** 
+   *  Only captured for CALL_FUNCTION/TRIGGER_EVENT/ADVANCE_TIME. Lets redo restore the
    *  exact post-execution result instead of re-running the interpreter, which could be
-   *  non-deterministic (e.g. a predefined random function). Every other command
-   *  type is pure/deterministic, so its redo just reapplies the command instead. */
+   *  non-deterministic (predefined random function). Every other command
+   *  type is deterministic, so its redo just reapplies the command instead. 
+   **/
   post?: RuntimeStateSnapshot;
 };
 
@@ -110,8 +111,10 @@ export class CommandService {
     }
   }
 
-  /** Pushes the current state to every connected page with no change of its own -
-   *  used after a POST /parse reparse, which doesn't go through execute(). */
+  /** 
+   *  Pushes the current state to every connected page with no change of its own.
+   *  Used after a POST /parse reparse, which doesn't go through execute(). 
+   **/
   notifyWorldReloaded(): void {
     this.stateSyncGateway.broadcastState(this.buildResponse());
   }
@@ -197,9 +200,11 @@ export class CommandService {
     return { ...this.buildResponse(), firedReminders: [...justFired, ...firedFromBodies] };
   }
 
-  /** Parses + links the script against the loaded world, runs it in isolation
+  /** 
+   *  Parses + links the script against the loaded world, runs it in isolation
    *  (scope/reminders are copies, entity writes are deferred), then commits
-   *  everything as one HistoryEntry. A parse or runtime failure commits nothing. */
+   *  everything as one HistoryEntry. A parse or runtime failure commits nothing. 
+   **/
   private async executeRunScript(cmd: RunScriptCommand): Promise<CommandResponse> {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No world is loaded');
@@ -245,9 +250,10 @@ export class CommandService {
     };
   }
 
-  /** The one place the interpreter context is built, so every command path gets the same
-   *  capabilities: `trigger` needs `model`, and entity writes need
-   *  `pendingOverlayWrites` plus a flush */
+  /** 
+   *  The one place the interpreter context is built, so every command path gets the same
+   *  capabilities: `trigger` needs `model`, and entity writes need `pendingOverlayWrites` plus a flush 
+   **/
   private newEvalContext(model: Model, scope: Record<string, unknown>, extras: Partial<EvalContext> = {}): EvalContext {
     return {
       scope,
@@ -288,15 +294,10 @@ export class CommandService {
     state.runtimeVariables[cmd.variableName] = cmd.newValue;
   }
 
-  /** The client explicitly asked to assign to a specific path, so — unlike the state
-   *  overlay's own load-time merge, which treats an unresolved path as recoverable —
-   *  an unresolved or computed target here is a real error the client needs to see.
-   *
-   *  If the leaf variable itself doesn't exist yet, that's not an error as long as its
-   *  parent container does (a real Location/Quest/etc, or an already-declared `object`
-   *  block) — ASSIGN_VARIABLE creates it in that case. WorldStateService.setOverlayEntry
-   *  does the actual creation (see spliceOverlayValue), since that logic also has to run
-   *  on every rebuild (undo/redo/restart), not just here. */
+  /**    
+   *  If the leaf variable itself doesn't exist yet, that's not an error as long as its parent container does.
+   *  ASSIGN_VARIABLE creates it in that case using WorldStateService.setOverlayEntry()
+   **/
   private applyAssignVariable(cmd: AssignVariableCommand): void {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No model loaded');

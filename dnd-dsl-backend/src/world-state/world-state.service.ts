@@ -74,12 +74,10 @@ export class WorldStateService {
   }
 
   /**
-   * Parses a DM script and links it against the loaded world. The script is its own
-   * document headed by `reference world "<name>"` (prepended here if the caller sent
-   * only bare statements); it is built alongside a fresh copy of the world document
-   * so its `location "X"` / `trigger "E"` / `call fn` / `Enum::Value` references
-   * resolve (see DndScopeComputation). Diagnostics are returned, not thrown, with
-   * line numbers relative to the DM's own text.
+   * Parses a script and links it against the loaded world. 
+   * The script is its own document headed by `reference world "<name>"`. 
+   * Diagnostics are returned, not thrown, with line numbers relative to the source text.
+   * If a script doesnt have a headed it is likely called from an event.
    */
   async parseScript(source: string): Promise<{ codeBlock?: CodeBlock; errors: ScriptParseError[] }> {
     if (!this._model || !this._worldSource) {
@@ -88,7 +86,7 @@ export class WorldStateService {
     const worldName = this._model.World.name;
     const hasHeader = /^\s*reference\s+world\b/.test(source);
     const scriptSource = hasHeader ? source : `reference world "${worldName}"\n${source}`;
-    const prependedLines = hasHeader ? 0 : 1;
+    const addedLines = hasHeader ? 0 : 1;
 
     const { shared } = createDndDslServices(NodeFileSystem);
     const ws = shared.workspace;
@@ -102,30 +100,31 @@ export class WorldStateService {
 
     const errors: ScriptParseError[] = [];
     for (const e of scriptDoc.parseResult.parserErrors) {
-      const line = ((e as { token?: { startLine?: number } }).token?.startLine ?? 1) - 1;
-      errors.push({ message: e.message, line: Math.max(0, line - prependedLines) });
+      const line = (e.token?.startLine ?? 1) - 1;
+      errors.push({ message: e.message, line: Math.max(0, line - addedLines) });
     }
     for (const d of scriptDoc.diagnostics ?? []) {
       if (d.severity !== 1) continue;
-      errors.push({ message: d.message, line: Math.max(0, d.range.start.line - prependedLines) });
+      errors.push({ message: d.message, line: Math.max(0, d.range.start.line - addedLines) });
     }
 
-    const sw = (scriptDoc.parseResult.value as Model).World;
-    if (sw && !sw.isReference) {
+    const scriptWorld = (scriptDoc.parseResult.value as Model).World;
+    if (scriptWorld && !scriptWorld.isReference) {
       errors.push({ message: 'A script must start with `reference world "<name>"`.', line: 0 });
-    } else if (sw?.isReference && sw.name !== worldName) {
-      errors.push({ message: `Script targets world "${sw.name}" but "${worldName}" is loaded.`, line: 0 });
+    } else if (scriptWorld?.isReference && scriptWorld.name !== worldName) {
+      errors.push({ message: `Script targets world "${scriptWorld.name}" but "${worldName}" is loaded.`, line: 0 });
     }
 
     await ws.LangiumDocuments.deleteDocument(worldUri);
     await ws.LangiumDocuments.deleteDocument(scriptUri);
 
-    return { codeBlock: errors.length ? undefined : sw?.script, errors };
+    return { codeBlock: errors.length ? undefined : scriptWorld?.script, errors };
   }
 
-  /** Writes the current overlay to the `.state.json` sidecar it was loaded with (a
-   *  no-op if it wasn't loaded from a file path, e.g. in a unit test). Called by
-   *  CommandService after every mutating command. */
+  /** 
+   * Writes the current overlay to the `.state.json` file it was loaded with. 
+   * Called by CommandService after every mutating command. 
+   */
   persistOverlay(): void {
     if (!this._statePath) return;
     const overlayFile: StateOverlayFile = {

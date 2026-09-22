@@ -11,8 +11,8 @@ export class CommandController {
     return this.runOrThrow400(() => this.commandService.execute(cmd));
   }
 
-  // The client-generated id identifying which page is asking - CommandService checks
-  // it against StateSyncGateway's current controller before allowing the rewind.
+  // The client-generated id identifying which page is asking.
+  // CommandService checks it against StateSyncGateway's current controller before allowing the rewind.
   @Post('undo')
   undo(@Headers('x-client-id') clientId: string): Promise<CommandResponse> {
     return this.runOrThrow400(async () => this.commandService.undo(clientId));
@@ -23,10 +23,7 @@ export class CommandController {
     return this.runOrThrow400(async () => this.commandService.redo(clientId));
   }
 
-  // CommandService throws plain Errors for client-fixable problems (unresolved
-  // StatePath, a script parse/runtime failure, no model loaded yet, ...).
-  // Without this, Nest's default filter flattens them into an opaque
-  // "Internal server error" 500 and the real reason only shows up server-side.
+  // CommandService throws plain Errors for client-fixable problems.
   private async runOrThrow400<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
