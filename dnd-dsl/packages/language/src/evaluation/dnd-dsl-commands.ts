@@ -67,12 +67,13 @@ export type Command =
   | TriggerEventCommand
   | RunScriptCommand;
 
-/** One observable effect of a RunScriptCommand, in the order it executed: a `print`
- *  or a persistent write. Lets a caller render script output interleaved by
- *  execution order instead of grouped by kind. */
+/** One observable effect of running a command's code, in the order it executed: a
+ *  `print`, a persistent write, or a nested `trigger`. Lets a caller render output
+ *  interleaved by execution order instead of grouped by kind. */
 export type ScriptEvent =
   | { kind: 'print'; value: unknown }
-  | { kind: 'write'; path: string; value: unknown };
+  | { kind: 'write'; path: string; value: unknown }
+  | { kind: 'trigger'; eventName: string };
 
 export type CommandResponse = {
   worldState: any;
@@ -84,10 +85,12 @@ export type CommandResponse = {
    *  AdvanceTimeCommand, plus any `remind` with no `after` clause (which fires the
    *  instant it runs) from any command. Undefined when none fired. */
   firedReminders?: FiredReminder[];
+  /** print/write/trigger effects from running this command's code, in the order
+   *  they executed. Populated by CALL_FUNCTION, TRIGGER_EVENT, ADVANCE_TIME
+   *  (reminder bodies) and RUN_SCRIPT alike. */
+  events?: ScriptEvent[];
   /** Outcome of a RunScriptCommand, undefined otherwise. */
   scriptResult?: {
     returnValue?: unknown;
-    /** print and write effects, in the order they executed. */
-    events: ScriptEvent[];
   };
 };

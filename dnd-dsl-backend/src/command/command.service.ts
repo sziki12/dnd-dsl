@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { WorldStateService } from '../world-state/world-state.service.js';
-import { LangiumInterpreterService, type EvalContext } from '../langium-interpreter/langium-interpreter.service.js';
+import { LangiumInterpreterService, type EvalContext, type InterpreterEvent } from '../langium-interpreter/langium-interpreter.service.js';
 import { StateSyncGateway } from '../state-sync/state-sync.gateway.js';
 
 import { isVariableDeclaration, type Model } from '@dnd-language/index.js';
@@ -16,6 +16,7 @@ import {
   Command,
   CommandResponse,
   RunScriptCommand,
+  ScriptEvent,
   TriggerEventCommand,
 } from '@dnd-language/evaluation/dnd-dsl-commands.js';
 
@@ -28,7 +29,7 @@ type RuntimeStateSnapshot = {
   firedReminders: FiredReminder[];
 };
 
-const nonEmpty = (fired: FiredReminder[]): FiredReminder[] | undefined => (fired.length ? fired : undefined);
+const nonEmpty = <T,>(arr: T[]): T[] | undefined => (arr.length ? arr : undefined);
 
 /** Represents a single command execution in the history, including the state before and after execution. */
 type HistoryEntry = {
@@ -136,7 +137,7 @@ export class CommandService {
     this.future.splice(0);
     this.worldStateService.persistOverlay();
 
-    return { ...this.buildResponse(), result, firedReminders: nonEmpty(ctx.firedReminders!) };
+    return { ...this.buildResponse(), result, firedReminders: nonEmpty(ctx.firedReminders!), events: this.encodeEvents(ctx.events!) };
   }
 
   private executeTriggerEvent(cmd: TriggerEventCommand): CommandResponse {
@@ -161,7 +162,7 @@ export class CommandService {
     this.future.splice(0);
     this.worldStateService.persistOverlay();
 
-    return { ...this.buildResponse(), firedReminders: nonEmpty(ctx.firedReminders!) };
+    return { ...this.buildResponse(), firedReminders: nonEmpty(ctx.firedReminders!), events: this.encodeEvents(ctx.events!) };
   }
 
   private executeAdvanceTime(cmd: AdvanceTimeCommand): CommandResponse {
@@ -174,6 +175,7 @@ export class CommandService {
     const state = this.worldStateService.getWorldState();
     state.runtimeVariables ??= {};
     const firedFromBodies: FiredReminder[] = [];
+    const allEvents: InterpreterEvent[] = [];
     for (const reminder of justFired) {
       if (!reminder.bodyLocator) continue;
       const codeBlock = resolveRemindBodyLocator(model, reminder.bodyLocator);
@@ -181,7 +183,7 @@ export class CommandService {
         console.warn(`Reminder '${reminder.id}' effect body no longer resolves - skipping.`);
         continue;
       }
-      const ctx = this.newEvalContext(model, state.runtimeVariables, { firedReminders: firedFromBodies });
+      const ctx = this.newEvalContext(model, state.runtimeVariables, { firedReminders: firedFromBodies, events: allEvents });
       try {
         this.interpreterService.runCodeBlock(ctx, codeBlock);
         this.flushPendingWrites(ctx);
@@ -197,7 +199,7 @@ export class CommandService {
     this.future.splice(0);
     this.worldStateService.persistOverlay();
 
-    return { ...this.buildResponse(), firedReminders: [...justFired, ...firedFromBodies] };
+    return { ...this.buildResponse(), firedReminders: [...justFired, ...firedFromBodies], events: this.encodeEvents(allEvents) };
   }
 
   /** 
@@ -219,7 +221,6 @@ export class CommandService {
     const state = this.worldStateService.getWorldState();
     const ctx = this.newEvalContext(model, { ...(state.runtimeVariables ?? {}) }, {
       reminders: structuredClone(this.worldStateService.getReminders()),
-      events: [],
     });
 
     let returnValue: unknown;
@@ -242,10 +243,8 @@ export class CommandService {
     return {
       ...this.buildResponse(),
       firedReminders: nonEmpty(ctx.firedReminders!),
-      scriptResult: {
-        returnValue,
-        events: ctx.events!.map(e => e.kind === 'write' ? { ...e, path: encodeStatePath(e.path) } : e),
-      },
+      events: this.encodeEvents(ctx.events!),
+      scriptResult: { returnValue },
     };
   }
 
@@ -263,6 +262,7 @@ export class CommandService {
       pendingOverlayWrites: [],
       triggeredEvents: new Set(),
       firedReminders: [],
+      events: [],
       ...extras,
     };
   }
@@ -271,6 +271,12 @@ export class CommandService {
     for (const w of ctx.pendingOverlayWrites ?? []) {
       this.worldStateService.setOverlayEntry(w.path, w.value);
     }
+  }
+
+  /** Encodes an interpreter-side event log (StatePath writes) into the wire shape
+   *  (string paths) every command response shares, or undefined when nothing ran. */
+  private encodeEvents(events: InterpreterEvent[]): ScriptEvent[] | undefined {
+    return nonEmpty(events)?.map(e => e.kind === 'write' ? { ...e, path: encodeStatePath(e.path) } : e);
   }
 
   private applyCommand(cmd: Command): void {

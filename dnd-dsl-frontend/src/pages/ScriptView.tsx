@@ -3,6 +3,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { DslContext, type ScriptRunResult } from '../contexts/DslContext';
 import { ScriptStateContext, type ScriptHistoryItem } from '../contexts/ScriptStateContext';
 import { useScriptEditor } from '../common/useScriptEditor';
+import type { ScriptEvent } from '@dnd-language/evaluation/dnd-dsl-commands';
 
 const HEADER_LINE = /^\s*reference\s+world\b.*$/m;
 
@@ -20,6 +21,19 @@ function formatPath(encoded: string): string {
   } catch {
     return encoded;
   }
+}
+
+/** "2 print · 1 write · 1 trigger" - a one-line count of a run's events, for the
+ *  history sidebar. Empty string when there's nothing to summarize. */
+function summarizeEvents(events?: ScriptEvent[]): string {
+  if (!events?.length) return '';
+  const counts = { print: 0, write: 0, trigger: 0 };
+  for (const e of events) counts[e.kind]++;
+  const plural = (n: number, label: string) => `${n} ${label}${n === 1 ? '' : 's'}`;
+  return (['print', 'write', 'trigger'] as const)
+    .filter(kind => counts[kind] > 0)
+    .map(kind => plural(counts[kind], kind))
+    .join(' · ');
 }
 
 const panel = {
@@ -116,22 +130,29 @@ export default function ScriptView() {
         {history.length > 0 && (
           <div style={{ width: 220, borderLeft: '1px solid var(--bd-divider)', overflow: 'auto', padding: 8 }}>
             <div style={{ color: 'var(--fg-secondary)', fontSize: 11, marginBottom: 6 }}>History</div>
-            {history.map((h, i) => (
-              <button
-                key={i}
-                onClick={() => setValue(h.source)}
-                title={h.source}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left', marginBottom: 4,
-                  background: 'transparent', border: '1px solid var(--bd-soft)', borderRadius: 3,
-                  color: h.result.ok ? 'var(--fg-primary)' : 'var(--error)',
-                  fontFamily: 'var(--font-mono)', fontSize: 11, padding: '4px 6px', cursor: 'pointer',
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}
-              >
-                {h.source.replace(HEADER_LINE, '').trim().split('\n')[0] || '(empty)'}
-              </button>
-            ))}
+            {history.map((h, i) => {
+              const summary = h.result.ok ? summarizeEvents(h.result.events) : '';
+              return (
+                <button
+                  key={i}
+                  onClick={() => setValue(h.source)}
+                  title={h.source}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', marginBottom: 4,
+                    background: 'transparent', border: '1px solid var(--bd-soft)', borderRadius: 3,
+                    color: h.result.ok ? 'var(--fg-primary)' : 'var(--error)',
+                    fontFamily: 'var(--font-mono)', fontSize: 11, padding: '4px 6px', cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {h.source.replace(HEADER_LINE, '').trim().split('\n')[0] || '(empty)'}
+                  </div>
+                  {summary && (
+                    <div style={{ color: 'var(--fg-secondary)', fontSize: 10, marginTop: 2 }}>{summary}</div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -151,21 +172,32 @@ function ScriptOutput({ result }: { result: ScriptRunResult }) {
   const hasReturn = result.returnValue !== undefined;
   return (
     <div style={{ ...panel, padding: 10, maxHeight: 180, overflow: 'auto' }}>
-      {events.map((e, i) =>
-        e.kind === 'print' ? (
-          <div key={i}>
-            <span style={{ color: 'var(--fg-secondary)' }}>print </span>
-            <span className="tok-number">{JSON.stringify(e.value)}</span>
-          </div>
-        ) : (
+      {events.map((e, i) => {
+        if (e.kind === 'print') {
+          return (
+            <div key={i}>
+              <span style={{ color: 'var(--fg-secondary)' }}>print </span>
+              <span className="tok-number">{JSON.stringify(e.value)}</span>
+            </div>
+          );
+        }
+        if (e.kind === 'trigger') {
+          return (
+            <div key={i}>
+              <span className="tok-variable">{e.eventName}</span>
+              <span style={{ color: 'var(--fg-secondary)' }}> event triggered</span>
+            </div>
+          );
+        }
+        return (
           <div key={i}>
             <span style={{ color: 'var(--fg-secondary)' }}>set </span>
             <span className="tok-variable">{formatPath(e.path)}</span>
             <span style={{ color: 'var(--fg-secondary)' }}> = </span>
             <span className="tok-number">{JSON.stringify(e.value)}</span>
           </div>
-        ),
-      )}
+        );
+      })}
       {hasReturn && (
         <div style={{ marginTop: events.length ? 8 : 0 }}>
           <span style={{ color: 'var(--fg-secondary)' }}>returned </span>

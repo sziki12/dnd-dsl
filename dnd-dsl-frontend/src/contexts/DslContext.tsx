@@ -127,7 +127,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     return {
       ok: true,
       returnValue: body.scriptResult?.returnValue,
-      events: body.scriptResult?.events,
+      events: body.events,
     };
   };
 

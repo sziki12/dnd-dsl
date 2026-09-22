@@ -61,7 +61,8 @@ type RuntimeScope = Record<string, any>;
  **/
 export type InterpreterEvent =
     | { kind: 'print'; value: unknown }
-    | { kind: 'write'; path: StatePath; value: unknown };
+    | { kind: 'write'; path: StatePath; value: unknown }
+    | { kind: 'trigger'; eventName: string };
 
 /**
  * `worldState` is the current, overlay-applied JSON world state (WorldStateService.getWorldState()), used to resolve persistent RefChain-s
@@ -426,6 +427,7 @@ export class LangiumInterpreterService {
                 const seen = (ctx.triggeredEvents ??= new Set());
                 if (seen.has(name)) break; // re-entrancy guard
                 seen.add(name);
+                ctx.events?.push({ kind: 'trigger', eventName: name });
                 try {
                     this.triggerEventByName(ctx.model, name, ctx);
                 } finally {
