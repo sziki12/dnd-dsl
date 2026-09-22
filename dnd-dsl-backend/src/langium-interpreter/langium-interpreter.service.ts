@@ -56,16 +56,23 @@ import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } 
 
 type RuntimeScope = Record<string, any>;
 
+/** 
+ * A `print` or a persistent write, recorded in `EvalContext.events` in the order it ran
+ **/
+export type InterpreterEvent =
+    | { kind: 'print'; value: unknown }
+    | { kind: 'write'; path: StatePath; value: unknown };
+
 /**
  * `worldState` is the current, overlay-applied JSON world state (WorldStateService.getWorldState()), used to resolve persistent RefChain-s
  * `scope` is the local/function runtime scope
- * `clock`/`reminders` back RemindStatement scheduling 
+ * `clock`/`reminders` back RemindStatement scheduling
  * `model` is the loaded live AST
  * `pendingOverlayWrites` collects entity-variable
  *  writes from `set` / assignment for the caller to flush
  * `triggeredEvents` guards against `trigger` recursion
  * `firedReminders` collects `remind` statements with no `after` clause, which fire the instant they run rather than entering the time queue
- * `printed` collects the values of `print` statements for the caller to surface.
+ * `events` collects `print`s and writes, in execution order, for the caller to surface.
  */
 export type EvalContext = {
     scope: RuntimeScope;
@@ -76,7 +83,7 @@ export type EvalContext = {
     pendingOverlayWrites?: { path: StatePath; value: unknown }[];
     triggeredEvents?: Set<string>;
     firedReminders?: FiredReminder[];
-    printed?: unknown[];
+    events?: InterpreterEvent[];
 };
 
 class ReturnSignal {
@@ -89,7 +96,7 @@ class ReturnSignal {
  * its own `.variables`). Deliberately just a StatePath, not a live AST node reference:
  * the element is a real, normally-positioned node, so `nodeToStatePath` on it already
  * produces the correct persistent address - no new addressing scheme needed, and no
- * circular AST reference ends up in `ctx.scope`/`ctx.printed` (which would break
+ * circular AST reference ends up in `ctx.scope`/`ctx.events` (which would break
  * `print x` - the frontend JSON.stringifies printed values). `x.member`'s member name
  * is read from the reference's raw `$refText`, never `.ref` - see
  * DndScopeProvider.getMemberScope's loop-variable branch, which links `.member` to a
@@ -319,7 +326,7 @@ export class LangiumInterpreterService {
             pendingOverlayWrites: callerCtx.pendingOverlayWrites,
             triggeredEvents: callerCtx.triggeredEvents,
             firedReminders: callerCtx.firedReminders,
-            printed: callerCtx.printed,
+            events: callerCtx.events,
         };
 
         decl.params.forEach((param, i) => {
@@ -365,7 +372,7 @@ export class LangiumInterpreterService {
                 // local/function-scope write.
                 const path = decl ? nodeToStatePath(decl) : undefined;
                 if (path && ctx.pendingOverlayWrites) {
-                    ctx.pendingOverlayWrites.push({ path, value });
+                    this.pushWrite(ctx, path, value);
                 } else {
                     ctx.scope[decl?.target ?? decl?.name ?? ''] = value;
                 }
@@ -383,7 +390,7 @@ export class LangiumInterpreterService {
                 if (path[path.length - 1]?.kind !== 'variable') {
                     throw new Error('`set` needs an entity variable target, e.g. `set npc "X" . mood = ...`');
                 }
-                (ctx.pendingOverlayWrites ??= []).push({ path, value });
+                this.pushWrite(ctx, path, value);
                 break;
             }
             case 'FunctionCall': {
@@ -401,7 +408,7 @@ export class LangiumInterpreterService {
                 const c = code as unknown as PrintStatement;
                 const value = this.evaluateExpression(ctx, c.value);
                 console.log('[script print]', value);
-                ctx.printed?.push(value);
+                ctx.events?.push({ kind: 'print', value });
                 break;
             }
             case 'ConditionalBlock': {
@@ -539,6 +546,14 @@ export class LangiumInterpreterService {
         this.writeValue(ctx, target, result);
     }
 
+    /** Records a persistent write: queues it for the caller to flush to the overlay,
+     *  and logs it in `ctx.events` at the position it actually ran, so print output
+     *  and writes can be rendered interleaved instead of grouped by kind. */
+    private pushWrite(ctx: EvalContext, path: StatePath, value: unknown): void {
+        (ctx.pendingOverlayWrites ??= []).push({ path, value });
+        ctx.events?.push({ kind: 'write', path, value });
+    }
+
     /** Stores `value` into the variable a chain names: a bare local variable lands in
      *  the scope, an entity- or world-owned one (or a loop entity's member) becomes a
      *  pending overlay write for the caller to flush. */
@@ -548,7 +563,7 @@ export class LangiumInterpreterService {
             const decl = ref.ref;
             const path = decl ? nodeToStatePath(decl) : undefined;
             if (path) {
-                (ctx.pendingOverlayWrites ??= []).push({ path, value });
+                this.pushWrite(ctx, path, value);
             } else {
                 ctx.scope[decl?.target ?? decl?.name ?? ref.$refText] = value;
             }
@@ -558,7 +573,7 @@ export class LangiumInterpreterService {
         if (path[path.length - 1]?.kind !== 'variable') {
             throw new Error('Cannot store into a target that is not a variable');
         }
-        (ctx.pendingOverlayWrites ??= []).push({ path, value });
+        this.pushWrite(ctx, path, value);
     }
 
     /** Resolves a `for`'s collection *source* to the values the loop variable takes on,

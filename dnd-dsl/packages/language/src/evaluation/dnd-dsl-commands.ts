@@ -67,6 +67,13 @@ export type Command =
   | TriggerEventCommand
   | RunScriptCommand;
 
+/** One observable effect of a RunScriptCommand, in the order it executed: a `print`
+ *  or a persistent write. Lets a caller render script output interleaved by
+ *  execution order instead of grouped by kind. */
+export type ScriptEvent =
+  | { kind: 'print'; value: unknown }
+  | { kind: 'write'; path: string; value: unknown };
+
 export type CommandResponse = {
   worldState: any;
   canUndo: boolean;
@@ -80,8 +87,7 @@ export type CommandResponse = {
   /** Outcome of a RunScriptCommand, undefined otherwise. */
   scriptResult?: {
     returnValue?: unknown;
-    /** Values of `print` statements, in execution order. */
-    printedValue: unknown[];
-    writes: { path: string; value: unknown }[];
+    /** print and write effects, in the order they executed. */
+    events: ScriptEvent[];
   };
 };

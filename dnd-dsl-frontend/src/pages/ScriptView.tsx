@@ -147,35 +147,34 @@ function ScriptOutput({ result }: { result: ScriptRunResult }) {
       </pre>
     );
   }
-  const printed = result.printedValue ?? [];
+  const events = result.events ?? [];
   const hasReturn = result.returnValue !== undefined;
-  const hasWrites = !!result.writes?.length;
   return (
     <div style={{ ...panel, padding: 10, maxHeight: 180, overflow: 'auto' }}>
-      {printed.map((v, i) => (
-        <div key={`print-${i}`}>
-          <span style={{ color: 'var(--fg-secondary)' }}>print </span>
-          <span className="tok-number">{JSON.stringify(v)}</span>
-        </div>
-      ))}
+      {events.map((e, i) =>
+        e.kind === 'print' ? (
+          <div key={i}>
+            <span style={{ color: 'var(--fg-secondary)' }}>print </span>
+            <span className="tok-number">{JSON.stringify(e.value)}</span>
+          </div>
+        ) : (
+          <div key={i}>
+            <span style={{ color: 'var(--fg-secondary)' }}>set </span>
+            <span className="tok-variable">{formatPath(e.path)}</span>
+            <span style={{ color: 'var(--fg-secondary)' }}> = </span>
+            <span className="tok-number">{JSON.stringify(e.value)}</span>
+          </div>
+        ),
+      )}
       {hasReturn && (
-        <div style={{ marginTop: printed.length ? 8 : 0, marginBottom: hasWrites ? 8 : 0 }}>
+        <div style={{ marginTop: events.length ? 8 : 0 }}>
           <span style={{ color: 'var(--fg-secondary)' }}>returned </span>
           <span className="tok-number">{JSON.stringify(result.returnValue)}</span>
         </div>
       )}
-      {hasWrites
-        ? result.writes!.map((w, i) => (
-            <div key={i}>
-              <span style={{ color: 'var(--fg-secondary)' }}>set </span>
-              <span className="tok-variable">{formatPath(w.path)}</span>
-              <span style={{ color: 'var(--fg-secondary)' }}> = </span>
-              <span className="tok-number">{JSON.stringify(w.value)}</span>
-            </div>
-          ))
-        : !hasReturn && printed.length === 0 && (
-            <span style={{ color: 'var(--fg-secondary)' }}>ok, no changes</span>
-          )}
+      {!hasReturn && events.length === 0 && (
+        <span style={{ color: 'var(--fg-secondary)' }}>ok, no changes</span>
+      )}
     </div>
   );
 }

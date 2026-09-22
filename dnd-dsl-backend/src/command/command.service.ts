@@ -219,7 +219,7 @@ export class CommandService {
     const state = this.worldStateService.getWorldState();
     const ctx = this.newEvalContext(model, { ...(state.runtimeVariables ?? {}) }, {
       reminders: structuredClone(this.worldStateService.getReminders()),
-      printed: [],
+      events: [],
     });
 
     let returnValue: unknown;
@@ -244,8 +244,7 @@ export class CommandService {
       firedReminders: nonEmpty(ctx.firedReminders!),
       scriptResult: {
         returnValue,
-        printedValue: ctx.printed!,
-        writes: ctx.pendingOverlayWrites!.map(w => ({ path: encodeStatePath(w.path), value: w.value })),
+        events: ctx.events!.map(e => e.kind === 'write' ? { ...e, path: encodeStatePath(e.path) } : e),
       },
     };
   }

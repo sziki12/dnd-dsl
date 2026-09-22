@@ -1,6 +1,6 @@
 import { createContext, useEffect, useState } from 'react';
 import { BackendURL } from './BackendContext';
-import type { Command, CommandResponse } from '@dnd-language/evaluation/dnd-dsl-commands';
+import type { Command, CommandResponse, ScriptEvent } from '@dnd-language/evaluation/dnd-dsl-commands';
 import type { SerializedAstNode, SerializedModel, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types';
 import { parseReferenceFromSerializedModel } from '@dnd-language/evaluation/dnd-dsl-reference';
 import type { FiredReminder } from '@dnd-language/evaluation/dnd-dsl-reminders';
@@ -33,8 +33,8 @@ type DslContext = {
 export type ScriptRunResult = {
   ok: boolean;
   returnValue?: unknown;
-  printedValue?: unknown[];
-  writes?: { path: string; value: unknown }[];
+  /** print and write effects, in the order they executed. */
+  events?: ScriptEvent[];
   error?: string;
 };
 
@@ -127,8 +127,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     return {
       ok: true,
       returnValue: body.scriptResult?.returnValue,
-      printedValue: body.scriptResult?.printedValue,
-      writes: body.scriptResult?.writes,
+      events: body.scriptResult?.events,
     };
   };
 
