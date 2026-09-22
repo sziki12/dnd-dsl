@@ -60,9 +60,9 @@ type RuntimeScope = Record<string, any>;
  * A `print` or a persistent write, recorded in `EvalContext.events` in the order it ran
  **/
 export type InterpreterEvent =
-    | { kind: 'print'; value: unknown }
-    | { kind: 'write'; path: StatePath; value: unknown }
-    | { kind: 'trigger'; eventName: string };
+    | { kind: 'print'; value: unknown; depth: number }
+    | { kind: 'write'; path: StatePath; value: unknown; depth: number }
+    | { kind: 'trigger'; eventName: string; depth: number };
 
 /**
  * `worldState` is the current, overlay-applied JSON world state (WorldStateService.getWorldState()), used to resolve persistent RefChain-s
@@ -409,7 +409,7 @@ export class LangiumInterpreterService {
                 const c = code as unknown as PrintStatement;
                 const value = this.evaluateExpression(ctx, c.value);
                 console.log('[script print]', value);
-                ctx.events?.push({ kind: 'print', value });
+                ctx.events?.push({ kind: 'print', value, depth: ctx.triggeredEvents?.size ?? 0 });
                 break;
             }
             case 'ConditionalBlock': {
@@ -427,7 +427,10 @@ export class LangiumInterpreterService {
                 const seen = (ctx.triggeredEvents ??= new Set());
                 if (seen.has(name)) break; // re-entrancy guard
                 seen.add(name);
-                ctx.events?.push({ kind: 'trigger', eventName: name });
+                // depth = seen.size (post-add): the level this trigger's own cascade
+                // runs at, so print/write events pushed inside its body (still inside
+                // this try, before `seen.delete`) get the same depth as siblings.
+                ctx.events?.push({ kind: 'trigger', eventName: name, depth: seen.size });
                 try {
                     this.triggerEventByName(ctx.model, name, ctx);
                 } finally {
@@ -553,7 +556,7 @@ export class LangiumInterpreterService {
      *  and writes can be rendered interleaved instead of grouped by kind. */
     private pushWrite(ctx: EvalContext, path: StatePath, value: unknown): void {
         (ctx.pendingOverlayWrites ??= []).push({ path, value });
-        ctx.events?.push({ kind: 'write', path, value });
+        ctx.events?.push({ kind: 'write', path, value, depth: ctx.triggeredEvents?.size ?? 0 });
     }
 
     /** Stores `value` into the variable a chain names: a bare local variable lands in

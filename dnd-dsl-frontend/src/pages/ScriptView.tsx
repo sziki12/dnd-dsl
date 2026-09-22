@@ -3,6 +3,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { DslContext, type ScriptRunResult } from '../contexts/DslContext';
 import { ScriptStateContext, type ScriptHistoryItem } from '../contexts/ScriptStateContext';
 import { useScriptEditor } from '../common/useScriptEditor';
+import { useResizablePane } from '../common/useResizablePane';
 import type { ScriptEvent } from '@dnd-language/evaluation/dnd-dsl-commands';
 
 const HEADER_LINE = /^\s*reference\s+world\b.*$/m;
@@ -45,6 +46,26 @@ const panel = {
   fontSize: 12,
 } as const;
 
+/** A draggable divider - `axis: 'row'` for a horizontal split (drag up/down),
+ *  `'col'` for a vertical one (drag left/right). */
+function ResizeHandle({ axis, onMouseDown }: { axis: 'row' | 'col'; onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      style={{
+        flexShrink: 0,
+        cursor: axis === 'row' ? 'ns-resize' : 'ew-resize',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...(axis === 'row' ? { height: 8, width: '100%' } : { width: 8, height: '100%' }),
+      }}
+    >
+      <div style={{ background: 'var(--bd-divider)', ...(axis === 'row' ? { width: '100%', height: 1 } : { height: '100%', width: 1 }) }} />
+    </div>
+  );
+}
+
 export default function ScriptView() {
   const { worldState, adventure, world, runScript } = useContext(DslContext);
   const scriptState = useContext(ScriptStateContext);
@@ -73,6 +94,12 @@ export default function ScriptView() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ScriptRunResult | null>(restored?.result ?? null);
   const [history, setHistory] = useState<ScriptHistoryItem[]>(restored?.history ?? []);
+
+  // Dragged sizes persist across visits (localStorage) - the handle sits on the
+  // output panel's top edge and the history sidebar's left edge, so both grow
+  // toward 'up'/'left'.
+  const [outputHeight, onOutputHandleDown] = useResizablePane('dnd-dsl-script-output-h', 180, { min: 80, max: 600, direction: 'up' });
+  const [historyWidth, onHistoryHandleDown] = useResizablePane('dnd-dsl-script-history-w', 220, { min: 140, max: 480, direction: 'left' });
 
   useEffect(() => {
     scriptState.writeState({ world, history, result });
@@ -105,7 +132,7 @@ export default function ScriptView() {
             onKeyDownCapture={e => {
               if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); void run(); }
             }}
-            style={{ ...panel, flex: 1, minHeight: 0, overflow: 'hidden', padding: 0 }}
+            style={{ ...panel, flex: 1, minHeight: 80, overflow: 'hidden', padding: 0 }}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
@@ -124,11 +151,19 @@ export default function ScriptView() {
             <span style={{ color: 'var(--fg-secondary)', fontSize: 11 }}>Ctrl+Enter to run script | Ctrl+Space for suggestions</span>
           </div>
 
-          {result && <ScriptOutput result={result} />}
+          {result && (
+            <>
+              <ResizeHandle axis="row" onMouseDown={onOutputHandleDown} />
+              <ScriptOutput result={result} height={outputHeight} />
+            </>
+          )}
         </div>
 
         {history.length > 0 && (
-          <div style={{ width: 220, borderLeft: '1px solid var(--bd-divider)', overflow: 'auto', padding: 8 }}>
+          <ResizeHandle axis="col" onMouseDown={onHistoryHandleDown} />
+        )}
+        {history.length > 0 && (
+          <div style={{ width: historyWidth, flexShrink: 0, overflow: 'auto', padding: 8 }}>
             <div style={{ color: 'var(--fg-secondary)', fontSize: 11, marginBottom: 6 }}>History</div>
             {history.map((h, i) => {
               const summary = h.result.ok ? summarizeEvents(h.result.events) : '';
@@ -160,10 +195,76 @@ export default function ScriptView() {
   );
 }
 
-function ScriptOutput({ result }: { result: ScriptRunResult }) {
+type EventNode = ScriptEvent & { children?: EventNode[] };
+
+/** Rebuilds the flat, depth-tagged `events` list into a tree, so a `trigger`'s own
+ *  cascade (writes/prints, and any triggers it fires in turn) nests under it instead
+ *  of reading as a flat list with no link back to what caused it. See `ScriptEvent`'s
+ *  doc comment (`dnd-dsl-commands.ts`) for how `depth` encodes this unambiguously. */
+function buildEventTree(events: ScriptEvent[]): EventNode[] {
+  const root: EventNode[] = [];
+  const openTriggers: EventNode[] = []; // openTriggers[d] = the open trigger node at depth d+1
+  for (const e of events) {
+    const node: EventNode = e.kind === 'trigger' ? { ...e, children: [] } : { ...e };
+    const targetDepth = e.kind === 'trigger' ? e.depth - 1 : e.depth;
+    openTriggers.length = Math.max(0, targetDepth);
+    const parent = openTriggers.length === 0 ? root : openTriggers[openTriggers.length - 1].children!;
+    parent.push(node);
+    if (e.kind === 'trigger') openTriggers.push(node);
+  }
+  return root;
+}
+
+/** One row of script output. A `trigger` row is a disclosure toggle over its own
+ *  cascade, expanded by default. */
+function EventRow({ node }: { node: EventNode }) {
+  const [expanded, setExpanded] = useState(true);
+
+  if (node.kind === 'print') {
+    return (
+      <div>
+        <span style={{ color: 'var(--fg-secondary)' }}>print </span>
+        <span className="tok-number">{JSON.stringify(node.value)}</span>
+      </div>
+    );
+  }
+  if (node.kind === 'write') {
+    return (
+      <div>
+        <span style={{ color: 'var(--fg-secondary)' }}>set </span>
+        <span className="tok-variable">{formatPath(node.path)}</span>
+        <span style={{ color: 'var(--fg-secondary)' }}> = </span>
+        <span className="tok-number">{JSON.stringify(node.value)}</span>
+      </div>
+    );
+  }
+
+  const hasChildren = !!node.children?.length;
+  return (
+    <div>
+      <div
+        onClick={() => hasChildren && setExpanded(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: hasChildren ? 'pointer' : 'default' }}
+      >
+        <span style={{ color: 'var(--fg-secondary)', fontSize: 10, width: 10, display: 'inline-block' }}>
+          {hasChildren ? (expanded ? '▾' : '▸') : ''}
+        </span>
+        <span className="tok-variable">{node.eventName}</span>
+        <span style={{ color: 'var(--fg-secondary)' }}> event triggered</span>
+      </div>
+      {hasChildren && expanded && (
+        <div style={{ marginLeft: 14, paddingLeft: 8, borderLeft: '1px solid var(--bd-soft)' }}>
+          {node.children!.map((child, i) => <EventRow key={i} node={child} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScriptOutput({ result, height }: { result: ScriptRunResult; height: number }) {
   if (!result.ok) {
     return (
-      <pre style={{ ...panel, margin: 0, padding: 10, color: 'var(--error)', whiteSpace: 'pre-wrap', maxHeight: 180, overflow: 'auto' }}>
+      <pre style={{ ...panel, margin: 0, padding: 10, color: 'var(--error)', whiteSpace: 'pre-wrap', height, overflow: 'auto' }}>
         {result.error}
       </pre>
     );
@@ -171,33 +272,8 @@ function ScriptOutput({ result }: { result: ScriptRunResult }) {
   const events = result.events ?? [];
   const hasReturn = result.returnValue !== undefined;
   return (
-    <div style={{ ...panel, padding: 10, maxHeight: 180, overflow: 'auto' }}>
-      {events.map((e, i) => {
-        if (e.kind === 'print') {
-          return (
-            <div key={i}>
-              <span style={{ color: 'var(--fg-secondary)' }}>print </span>
-              <span className="tok-number">{JSON.stringify(e.value)}</span>
-            </div>
-          );
-        }
-        if (e.kind === 'trigger') {
-          return (
-            <div key={i}>
-              <span className="tok-variable">{e.eventName}</span>
-              <span style={{ color: 'var(--fg-secondary)' }}> event triggered</span>
-            </div>
-          );
-        }
-        return (
-          <div key={i}>
-            <span style={{ color: 'var(--fg-secondary)' }}>set </span>
-            <span className="tok-variable">{formatPath(e.path)}</span>
-            <span style={{ color: 'var(--fg-secondary)' }}> = </span>
-            <span className="tok-number">{JSON.stringify(e.value)}</span>
-          </div>
-        );
-      })}
+    <div style={{ ...panel, padding: 10, height, overflow: 'auto' }}>
+      {buildEventTree(events).map((node, i) => <EventRow key={i} node={node} />)}
       {hasReturn && (
         <div style={{ marginTop: events.length ? 8 : 0 }}>
           <span style={{ color: 'var(--fg-secondary)' }}>returned </span>

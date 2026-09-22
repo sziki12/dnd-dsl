@@ -69,11 +69,19 @@ export type Command =
 
 /** One observable effect of running a command's code, in the order it executed: a
  *  `print`, a persistent write, or a nested `trigger`. Lets a caller render output
- *  interleaved by execution order instead of grouped by kind. */
+ *  interleaved by execution order instead of grouped by kind.
+ *
+ *  `depth` is how many trigger bodies are currently running
+ *  0 outside any trigger,
+ *  1 inside a top-level `trigger`'s body,
+ *  2 inside a trigger fired from within that
+ *  body, etc.
+ *  A trigger event's own `depth` is the level it *opens*, so an event
+ *  belongs inside the most recent preceding trigger whose depth is one less. */
 export type ScriptEvent =
-  | { kind: 'print'; value: unknown }
-  | { kind: 'write'; path: string; value: unknown }
-  | { kind: 'trigger'; eventName: string };
+  | { kind: 'print'; value: unknown; depth: number }
+  | { kind: 'write'; path: string; value: unknown; depth: number }
+  | { kind: 'trigger'; eventName: string; depth: number };
 
 export type CommandResponse = {
   worldState: any;
