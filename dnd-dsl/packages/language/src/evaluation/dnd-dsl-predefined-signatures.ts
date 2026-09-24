@@ -1,10 +1,11 @@
 /**
- * Metadata for every predefined function (`call predefined <name> with ...`): names,
- * parameters, descriptions and whether a statement-position call writes its result back.
- * Implementations stay where they run - the list functions in dnd-dsl-list-ops.ts, the
- * rest in the backend - but the signatures live here so the language server can
- * validate arity and unknown names and offer completion.
- *
+ * Metadata for every predefined function (`call predefined <name> with ...`): 
+ * - names,
+ * - parameters, 
+ * - descriptions 
+ * - and whether a statement-position call writes its result back.
+ * The signatures live here so the language server can validate arity and unknown names and offer completion.
+ * The implem,entation of the functions themselves is in `dnd-dsl-list-ops.ts`.
  * A parameter name ending in `?` is optional.
  */
 
