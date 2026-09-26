@@ -20,12 +20,9 @@ import {
 } from "./generated/ast.js";
 import { unwrapExpression } from "./evaluation/dnd-dsl-state-path.js";
 
-/** CollectionRef.field values whose elements are real named entities with their own
- *  `.variables` - these are what a for-loop variable's dynamic member scope (below)
- *  is granted for. Other fields (events/functions/enums - name only; values/exits/
- *  variables - plain records) bind the loop variable to an already-evaluated value at
- *  runtime instead, so `.member` on them is correctly a real linking error, not a
- *  permissive one. Kept in sync with LangiumInterpreterService.resolveCollection. */
+/** 
+ * CollectionRef.field values whose elements are real named entities with their own `.variables` 
+ **/
 const ENTITY_COLLECTION_FIELDS = new Set(['npcs', 'locations', 'quests', 'objectives', 'sublocations']);
 
 export class DndScopeProvider extends DefaultScopeProvider
@@ -38,8 +35,7 @@ export class DndScopeProvider extends DefaultScopeProvider
             const item = context.container.$container;
 
             // `A . b . c` - a reference sitting in RefChain.rest is a MEMBER access:
-            // scope it to the members of the segment to its left, never the global
-            // variable pool.
+            // scope it to the members of the segment to its left, never the global variable pool.
             if (isVariableRefItem(item) &&
                 isRefChain(item.$container) &&
                 item.$containerProperty === "rest")
@@ -68,8 +64,10 @@ export class DndScopeProvider extends DefaultScopeProvider
         return super.getScope(context);
     }
 
-    /** The enclosing World's enum by name, or - for a `reference world` script whose
-     *  own World declares no enums - the loaded world's enum from the global index. */
+    /** 
+     * The enclosing World's enum by name, or - for a `reference world` script whose
+     *  own World declares no enums - the loaded world's enum from the global index. 
+     **/
     private resolveEnum(name: string, context: ReferenceInfo): Enum | undefined
     {
         const local = AstUtils.getContainerOfType(context.container, isWorld)?.enums.find(e => e.name === name);

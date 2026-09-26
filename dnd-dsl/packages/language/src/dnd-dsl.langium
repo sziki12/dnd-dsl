@@ -12,7 +12,8 @@ World:
     | (events+=Event)+
     | (npcs+=Npc)+
     | (enums+=Enum)+
-    | (variables+=VariableDeclaration)+)*
+    | (variables+=VariableDeclaration)+
+    | (onBlocks+=OnBlock)+)*
   | isReference?='reference' 'world' name=STRING (script=CodeBlock)?;
 
 Enum:
@@ -23,7 +24,8 @@ EnumValueDecl:
 Npc:
     'npc' name=STRING
     (Description)?
-    (variables+=VariableDeclaration)*;
+    (variables+=VariableDeclaration)*
+    (onBlocks+=OnBlock)*;
 
 //Location
 Location:
@@ -31,6 +33,7 @@ Location:
     (entry=LocationEntry)?
     (exits+=LocationExit)*
     (variables+=VariableDeclaration)*
+    (onBlocks+=OnBlock)*
     (Description)?
     ('sublocations' sublocations+=Location* 'end')?;
 LocationExit:
@@ -47,12 +50,14 @@ Quest:
     'quest' name=STRING
     (Description)?
     (variables+=VariableDeclaration)*
+    (onBlocks+=OnBlock)*
     (CompleteableEvents)?
     (objectives+=Objective)+;
 Objective:
     'objective' name=STRING
     (Description)?
     (variables+=VariableDeclaration)*
+    (onBlocks+=OnBlock)*
     (CompleteableEvents)?;
 QuestExpressions:
     ('quest' (QuestCompletedExpression
@@ -79,7 +84,8 @@ ObjectiveFailedExpression:
 Event:
     'event' name=STRING
     (Description)?
-    (codeBlock=CodeBlock)?;
+    (codeBlock=CodeBlock)?
+    (onBlocks+=OnBlock)*;
 EventTrigger:
     'trigger' target=EventRef;
 EventCalledExpression:
@@ -95,6 +101,14 @@ FunctionDeclaration:
 FunctionCall:
    'call' ((predefined?='predefined' predefinedTarget=ID) | target=FunctionRef)  ('with' params+=Expression (',' params+=Expression)*)?;
 
+
+//On Change Handlers
+OnBlock:
+    'on' (occurrence=ChangeOccurrence | occurrence=TriggerOccurrence) 'do' body=CodeBlock 'end';
+ChangeOccurrence:
+    'change' target=RefChain (('to' toValue=Expression) | ('when' guard=BoolExpression))?;
+TriggerOccurrence:
+    'trigger' target=EventRef;
 
 //Code
 CodeBlock:

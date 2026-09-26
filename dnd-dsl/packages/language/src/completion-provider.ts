@@ -6,43 +6,47 @@ import { CompletionItemKind, CompletionList } from "vscode-languageserver";
 import type { CancellationToken, CompletionItem, CompletionParams } from "vscode-languageserver";
 import { isRefChain, isVariableRef, type RefChain } from "./generated/ast.js";
 import { PREDEFINED_SIGNATURES } from "./evaluation/dnd-dsl-predefined-signatures.js";
+import { COLLECTION_FIELDS, ObjectKind } from "./dnd-dsl-validator.js";
 
+/** The name slot of `call predefined <name>` */
+const CALL_KEYWORD = "call";
+const PREDEFINED_KEYWORD = "predefined";
+const PREDEFINED_SLOT = new RegExp(`\\b${CALL_KEYWORD}[ \\t]+${PREDEFINED_KEYWORD}[ \\t]+(\\w*)$`);
+const ENTITY_TYPE: Record<string, ObjectKind> = {
+    location: ObjectKind.Location,
+    npc: ObjectKind.Npc,
+    quest: ObjectKind.Quest,
+    event: ObjectKind.Event,
+    trigger: ObjectKind.Event,
+};
 /**
  * The DSL keywords that introduce a `[Type:STRING]` entity reference, mapped to the
  * cross-reference target type. `event triggered "X"` and `event "X"` both land on Event.
  */
-const ENTITY_SLOT = /(?:^|[^\w"])(location|npc|quest|trigger|event)[ \t]+(?:triggered[ \t]+)?("?)([^"\n]*)$/;
-/** The name slot of `call predefined <name>` - a plain ID, not a cross-reference, so the
- *  base provider offers nothing there. */
-const PREDEFINED_SLOT = /\bcall[ \t]+predefined[ \t]+(\w*)$/;
-const ENTITY_TYPE: Record<string, string> = {
-    location: "Location",
-    npc: "Npc",
-    quest: "Quest",
-    event: "Event",
-    trigger: "Event",
-};
+const TRIGGERED_KEYWORD = "triggered";
+const ENTITY_SLOT = new RegExp(
+    `(?:^|[^\\w"])(${Object.keys(ENTITY_TYPE).join("|")})[ \\t]+(?:${TRIGGERED_KEYWORD}[ \\t]+)?("?)([^"\\n]*)$`,
+);
 
-/**
- * Two completion refinements the built-in cross-reference completion misses in this
- * grammar:
- *
- * 1. `.`-member completion on a RefChain (`location "X" . <member>`,
- *    `npc "Y" . <member>`, `Resources . <member>`). Langium's completion parser does
- *    not surface the `rest+=VariableRefItem` cross reference from a synthetic node
- *    while a segment is being typed, so nothing is offered after a `.`.
- *
- * 2. Entity-name completion after `location` / `npc` / `quest` / `event` / `trigger`.
- *    The base `[Type:STRING]` completion works only for a single-word prefix and not
- *    for the `quest "` bare-quote case, because the keyword also starts a top-level
- *    declaration rule. A name like `"Forest Of The Damned"` stops completing the
- *    moment the space is typed.
- *
- * Trigger characters `.` and `"` make both lists open on the character that starts
- * the reference; general keyword/identifier completion still needs an explicit
- * request (no quick suggestions).
- */
+const COLLECTION_HEAD_TYPE: Record<string, ObjectKind> = {
+    world: ObjectKind.World,
+    location: ObjectKind.Location,
+    npc: ObjectKind.Npc,
+    quest: ObjectKind.Quest,
+    enum: ObjectKind.Enum,
+};
+const FOR_KEYWORD = "for";
+const IN_KEYWORD = "in";
+const WORD = "\\w+";
+const PROPERTY_ACCESS = "\\.\\s*(" + WORD + ")$";
+const COLLECTION_FIELD_SLOT = new RegExp(
+    `\\b${FOR_KEYWORD}\\s+${WORD}\\s+${IN_KEYWORD}\\s+(${Object.keys(COLLECTION_HEAD_TYPE).join("|")})\\b[^.\\n]*${PROPERTY_ACCESS}`,
+);
+
 export class DndCompletionProvider extends DefaultCompletionProvider {
+    //We would like completion for:
+    // - member access via '.' 
+    // - and for entity names via '"'
     override readonly completionOptions = { triggerCharacters: ['"', "."] };
 
     private readonly indexManager: IndexManager;
@@ -58,8 +62,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         cancelToken?: CancellationToken,
     ): Promise<CompletionList | undefined> {
         const members = this.memberCompletions(document, params);
-        // After `entity .` / `var .` the member list is authoritative - the global
-        // variable pool and keywords the base provider would offer there are noise.
+        // After `entity .` / `var .` the member list should be only shown
         if (members.length > 0) {
             return CompletionList.create(this.deduplicateItems(members), true);
         }
@@ -72,6 +75,11 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const predefined = this.predefinedCompletions(document, params);
         if (predefined.length > 0) {
             return CompletionList.create(predefined, true);
+        }
+
+        const collectionFields = this.collectionFieldCompletions(document, params);
+        if (collectionFields.length > 0) {
+            return CompletionList.create(collectionFields, true);
         }
 
         return super.getCompletion(document, params, cancelToken);
@@ -113,11 +121,11 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         let replaceFrom = offset;
 
         if (leaf.text === "." && isRefChain(leaf.astNode)) {
-            // `A . <cursor>` - the member segment does not exist in the AST yet.
+            // `Object . <cursor>` - the member segment does not exist in the AST yet
             chain = leaf.astNode;
             restIndex = chain.rest.length;
         } else {
-            // `A . Go<cursor>` - a half-typed member is a real (unresolved) node.
+            // `Object . Prop<cursor>` - a half-typed member is a real (unresolved) node
             const varRef = AstUtils.getContainerOfType(leaf.astNode, isVariableRef);
             const item = varRef?.$container;
             if (item?.$type === "VariableRefItem" && isRefChain(item.$container) && item.$containerProperty === "rest") {
@@ -207,6 +215,31 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
                     range: { start, end },
                     newText: `${newTextPrefix}${description.name}"`,
                 },
+            });
+        }
+        return items;
+    }
+
+    private collectionFieldCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
+        const td = document.textDocument;
+        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+        const match = COLLECTION_FIELD_SLOT.exec(line);
+        if (!match) return [];
+
+        const [, headKeyword, partial] = match;
+        const kind = COLLECTION_HEAD_TYPE[headKeyword];
+        if (!kind) return [];
+
+        const range = { start: { line: params.position.line, character: params.position.character - partial.length }, end: params.position };
+        const items: CompletionItem[] = [];
+        for (const field of COLLECTION_FIELDS[kind]) {
+            if (partial && !this.fuzzyMatcher.match(partial, field)) continue;
+            items.push({
+                label: field,
+                kind: CompletionItemKind.Field,
+                detail: `${kind} . ${field}`,
+                sortText: "0",
+                textEdit: { range, newText: field },
             });
         }
         return items;

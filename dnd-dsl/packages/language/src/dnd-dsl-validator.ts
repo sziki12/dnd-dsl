@@ -1,5 +1,6 @@
 import type { AstNode, ValidationAcceptor, ValidationChecks } from 'langium';
 import {
+    ChangeOccurrence,
     isBoolVal,
     isCodeBlock,
     isEnumRefItem,
@@ -40,16 +41,45 @@ import { PREDEFINED_SIGNATURES, getPredefinedSignature, predefinedArity } from '
 type NamedNode = Enum | EnumValueDecl | Event | FunctionDeclaration | Location | Npc | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
 
-/** CollectionRef.head kind -> its legal `field` names. Kept in sync with
- *  ENTITY_COLLECTION_FIELDS in scope-provider.ts (the "entity" subset here -
- *  locations/npcs/quests/objectives/sublocations - is exactly that set) and with
- *  LangiumInterpreterService.resolveCollection, which is what actually reads each. */
-const COLLECTION_FIELDS: Record<string, string[]> = {
-    World: ['locations', 'npcs', 'quests', 'events', 'functions', 'enums', 'variables'],
-    Location: ['sublocations', 'exits', 'variables'],
-    Quest: ['objectives', 'variables'],
-    Npc: ['variables'],
-    Enum: ['values'],
+/** 
+ * CollectionRef.head kind -> its legal `field` names
+ */
+export enum ObjectKind {
+    World = 'World',
+    Location = 'Location',
+    Npc = 'Npc',
+    Quest = 'Quest',
+    Objective = 'Objective',
+    Enum = 'Enum',
+    Exit = 'Exit',
+    Event = 'Event',
+    VariableDeclaration = 'VariableDeclaration',
+    FunctionDeclaration = 'FunctionDeclaration',
+}
+export const COLLECTION_FIELDS: Record<ObjectKind, string[]> = {
+    [ObjectKind.World]: ['locations', 'npcs', 'quests', 'events', 'functions', 'enums', 'variables'],
+    [ObjectKind.Location]: ['sublocations', 'exits', 'variables'],
+    [ObjectKind.Exit]: ['identifiers'],
+    [ObjectKind.Quest]: ['objectives', 'variables'],
+    [ObjectKind.Objective]: [],
+    [ObjectKind.Npc]: ['variables'],
+    [ObjectKind.Enum]: ['values'],
+    [ObjectKind.VariableDeclaration]: [],
+    [ObjectKind.FunctionDeclaration]: [],
+    [ObjectKind.Event]: []
+};
+
+export const SIMPLE_FIELDS: Record<ObjectKind, string[]> = {
+    [ObjectKind.World]: ['name', 'description'],
+    [ObjectKind.Location]: ['name', 'description'],
+    [ObjectKind.Exit]: ['name', 'source', 'target', 'description'],
+    [ObjectKind.Quest]: ['name', 'description'],
+    [ObjectKind.Objective]: ['name', 'description'],
+    [ObjectKind.Npc]: ['name', 'description'],
+    [ObjectKind.Enum]: [],
+    [ObjectKind.VariableDeclaration]: ['name', 'value'],
+    [ObjectKind.FunctionDeclaration]: [],
+    [ObjectKind.Event]: ['name', 'description']
 };
 
 /**
@@ -69,6 +99,7 @@ export function registerValidationChecks(services: DndDslServices) {
         ListLiteral: validator.checkListLiteral,
         FunctionCall: validator.checkPredefinedCall,
         ForStatement: validator.checkForSource,
+        ChangeOccurrence: validator.checkChangeOccurrenceTarget,
     };
     registry.register(checks, validator);
 }
@@ -246,12 +277,12 @@ export class DndDslValidator {
         }
     }
 
-    private collectionHeadKind(head: RefChainStart): string | undefined {
-        if (isWorldRefItem(head)) return 'World';
-        if (isLocationRefItem(head)) return 'Location';
-        if (isQuestRefItem(head)) return 'Quest';
-        if (isNpcRefItem(head)) return 'Npc';
-        if (isEnumRefItem(head)) return 'Enum';
+    private collectionHeadKind(head: RefChainStart): ObjectKind | undefined {
+        if (isWorldRefItem(head)) return ObjectKind.World;
+        if (isLocationRefItem(head)) return ObjectKind.Location;
+        if (isQuestRefItem(head)) return ObjectKind.Quest;
+        if (isNpcRefItem(head)) return ObjectKind.Npc;
+        if (isEnumRefItem(head)) return ObjectKind.Enum;
         return undefined;
     }
 
@@ -262,6 +293,12 @@ export class DndDslValidator {
     // link resolution semantics.
     private collectAllLocations(locations: Location[]): Location[] {
         return locations.flatMap(l => [l, ...this.collectAllLocations(l.sublocations)]);
+    }
+
+    checkChangeOccurrenceTarget(occ: ChangeOccurrence, accept: ValidationAcceptor): void {
+        if (!this.endsInVariable(occ.target)) {
+            accept('error', `'on change' must target a variable, e.g. 'on change npc "X" . mood do ... end'.`, { node: occ, property: 'target' });
+        }
     }
 
     private checkUnique(items: NamedNode[], accept: ValidationAcceptor, kind: string): void {

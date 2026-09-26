@@ -9,12 +9,13 @@
  */
 
 import { append, concat, prepend, valuesEqual } from './dnd-dsl-list-ops.js';
+import type { JsonRuntimeValue } from './dnd-dsl-value-evaluator.js';
 
 export type ArithmeticOperator = '+' | '-' | '*' | '/';
 export type ComparisonOperator = '==' | '!=' | '<' | '>' | '<=' | '>=' | 'is';
 export type LogicalOperator = 'and' | 'or';
 
-export function applyArithmetic(operator: ArithmeticOperator, left: unknown, right: unknown): number | string | unknown[] | undefined {
+export function applyArithmetic(operator: ArithmeticOperator, left: unknown, right: unknown): number | string | JsonRuntimeValue[] | undefined {
     // Arithmetic if both sides are numbers, dividing by zero returns undefined
     if (typeof left === 'number' && typeof right === 'number')
     {
@@ -31,13 +32,13 @@ export function applyArithmetic(operator: ArithmeticOperator, left: unknown, rig
     }
     // Array concatrenation, or append/prepend if one side is not an array
     else if (operator === '+' && Array.isArray(left) && Array.isArray(right)) {
-        return concat(left, right);
+        return concat(left, right) as JsonRuntimeValue[];
     }
     else if (operator === '+' && Array.isArray(left)) {
-        return append(left, right);
+        return append(left, right) as JsonRuntimeValue[];
     }
     else if (operator === '+' && Array.isArray(right)) {
-        return prepend(right, left);
+        return prepend(right, left) as JsonRuntimeValue[];
     }
     
     return undefined;
