@@ -5,12 +5,15 @@ import {
     isCodeBlock,
     isEnum,
     isEnumValueRef,
+    isEvent,
     isForStatement,
     isLocationRefItem,
     isNpcRefItem,
     isObjectDeclaration,
+    isParentRefItem,
     isQuestRefItem,
     isRefChain,
+    isThisRefItem,
     isVariableDeclaration,
     isVariableRef,
     isVariableRefItem,
@@ -18,7 +21,7 @@ import {
     type RefChain,
     type VariableDeclaration,
 } from "./generated/ast.js";
-import { unwrapExpression } from "./evaluation/dnd-dsl-state-path.js";
+import { nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from "./evaluation/dnd-dsl-state-path.js";
 
 /** 
  * CollectionRef.field values whose elements are real named entities with their own `.variables` 
@@ -76,6 +79,14 @@ export class DndScopeProvider extends DefaultScopeProvider
         return isEnum(global) ? global : undefined;
     }
 
+    /** Event has no `.variables` field at all - it can never actually be `this`/`parent`
+     *  for a computed value (nothing can nest a computed declaration under an Event),
+     *  but stays in OwningObject's union because OnBlock's own $container can be one -
+     *  handled here defensively rather than assumed unreachable. */
+    private variablesOf(owner: OwningObject): VariableDeclaration[] | undefined {
+        return isEvent(owner) ? undefined : owner.variables;
+    }
+
     /**
      * Members reachable via `.` from the segment at `restIndex - 1` (or `chain.first`
      * when `restIndex === 0`). No global fallback - an unknown member must surface as a
@@ -131,6 +142,16 @@ export class DndScopeProvider extends DefaultScopeProvider
             } else if (isRefChain(value)) {
                 members = this.resolveEntityAliasMembers(value);
             }
+        }
+        else if (isThisRefItem(prev))
+        {
+            const owner = nearestOwningObject(prev);
+            members = owner && this.variablesOf(owner);
+        }
+        else if (isParentRefItem(prev))
+        {
+            const owner = nearestOwningObject(prev);
+            members = owner && this.variablesOf(parentOwningObject(owner));
         }
         // EventRefItem: no variables, no member scope.
 

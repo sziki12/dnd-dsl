@@ -1,4 +1,4 @@
-import type { AstNode } from "langium";
+import { AstUtils, type AstNode } from "langium";
 import {
     isEvent,
     isFunctionDeclaration,
@@ -9,14 +9,62 @@ import {
     isQuest,
     isVariableDeclaration,
     isWorld,
+    type Event,
     type Location,
     type Model,
+    type Npc,
+    type ObjectDeclaration,
+    type Objective,
+    type Quest,
     type VariableDeclaration,
+    type World,
 } from "../generated/ast.js";
 
 // All Langium imports above are used only for their exported type guards / type
 // annotations — no LSP-only services are touched — so this file is safe to import
 // in both the Node.js backend and the browser frontend, same as dnd-dsl-reference.ts.
+export type OwningObject = ObjectDeclaration | Npc | Location | Quest | Objective | Event | World;
+
+function isOwningObject(node: AstNode): node is OwningObject {
+    return isObjectDeclaration(node) || isNpc(node) || isLocation(node)
+        || isQuest(node) || isObjective(node) || isEvent(node) || isWorld(node);
+}
+
+/** Walks up from `node` to the nearest enclosing ObjectDeclaration/Npc/Location/Quest/
+ *  Objective/Event/World - what `this` refers to, wherever it's legally used (a
+ *  `computed` variable's value expression, or an OnBlock body). Passes straight
+ *  through the synthetic `Expression` wrapper nodes the precedence-chain grammar
+ *  rules create (see unwrapExpression) - they never match any target type, so
+ *  they're just transparent hops in the walk. */
+export function nearestOwningObject(node: AstNode): OwningObject | undefined {
+    for (let current: AstNode | undefined = node.$container; current; current = current.$container) {
+        if (isOwningObject(current)) return current;
+    }
+    return undefined;
+}
+
+/** The object one level further out than `owner` - what `parent` refers to. Per
+ *  container kind: a nested object's parent is whatever declares the variable that
+ *  holds it; a sublocation's parent is its containing Location; an Objective's
+ *  parent is its owning Quest; anything else (Npc, a top-level Location/Quest, an
+ *  Event, or World itself) defaults to World. */
+export function parentOwningObject(owner: OwningObject): OwningObject {
+    if (isObjectDeclaration(owner)) {
+        for (let current: AstNode | undefined = owner.$container; current; current = current.$container) {
+            if (isVariableDeclaration(current)) {
+                return nearestOwningObject(current) ?? AstUtils.getContainerOfType(owner, isWorld)!;
+            }
+        }
+        return AstUtils.getContainerOfType(owner, isWorld)!;
+    }
+    if (isLocation(owner) && isLocation(owner.$container)) {
+        return owner.$container;
+    }
+    if (isObjective(owner)) {
+        return owner.$container;
+    }
+    return AstUtils.getContainerOfType(owner, isWorld)!;
+}
 
 /**
  * One step in a name-based path to a declared entity or variable. Unlike Langium's

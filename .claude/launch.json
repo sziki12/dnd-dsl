@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "dnd-dsl-frontend"],
       "port": 5173
+    },
+    {
+      "name": "dnd-dsl-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start:dev", "--prefix", "dnd-dsl-backend"],
+      "port": 3000
     }
   ]
 }

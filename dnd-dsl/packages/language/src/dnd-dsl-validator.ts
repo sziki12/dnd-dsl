@@ -5,16 +5,28 @@ import {
     isCodeBlock,
     isEnumRefItem,
     isEnumValueRef,
+    isEvent,
     isIntVal,
     isListLiteral,
+    isLocation,
     isLocationRefItem,
+    isNpc,
     isNpcRefItem,
     isObjectDeclaration,
+    isObjective,
+    isOnBlock,
+    isParentRefItem,
+    isQuest,
     isQuestRefItem,
     isRefChain,
     isStringVal,
+    isThisRefItem,
+    isVariableDeclaration,
     isVariableRefItem,
+    isWorld,
     isWorldRefItem,
+    ParentRefItem,
+    ThisRefItem,
     type CollectionRef,
     type DndDslAstType,
     type Enum,
@@ -35,7 +47,7 @@ import {
     type VariableDeclaration,
     type World,
 } from './generated/ast.js';
-import { unwrapExpression } from './evaluation/dnd-dsl-state-path.js';
+import { nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from './evaluation/dnd-dsl-state-path.js';
 import { PREDEFINED_SIGNATURES, getPredefinedSignature, predefinedArity } from './evaluation/dnd-dsl-predefined-signatures.js';
 
 type NamedNode = Enum | EnumValueDecl | Event | FunctionDeclaration | Location | Npc | Objective | Quest;
@@ -100,6 +112,8 @@ export function registerValidationChecks(services: DndDslServices) {
         FunctionCall: validator.checkPredefinedCall,
         ForStatement: validator.checkForSource,
         ChangeOccurrence: validator.checkChangeOccurrenceTarget,
+        ThisRefItem: validator.checkThisParentPlacement,
+        ParentRefItem: validator.checkThisParentPlacement,
     };
     registry.register(checks, validator);
 }
@@ -283,7 +297,23 @@ export class DndDslValidator {
         if (isQuestRefItem(head)) return ObjectKind.Quest;
         if (isNpcRefItem(head)) return ObjectKind.Npc;
         if (isEnumRefItem(head)) return ObjectKind.Enum;
+        if (isThisRefItem(head)) return this.owningObjectKind(nearestOwningObject(head));
+        if (isParentRefItem(head)) {
+            const owner = nearestOwningObject(head);
+            return owner ? this.owningObjectKind(parentOwningObject(owner)) : undefined;
+        }
         return undefined;
+    }
+
+    private owningObjectKind(owner: OwningObject | undefined): ObjectKind | undefined {
+        if (!owner) return undefined;
+        if (isWorld(owner)) return ObjectKind.World;
+        if (isLocation(owner)) return ObjectKind.Location;
+        if (isQuest(owner)) return ObjectKind.Quest;
+        if (isNpc(owner)) return ObjectKind.Npc;
+        if (isObjective(owner)) return ObjectKind.Objective;
+        if (isEvent(owner)) return ObjectKind.Event;
+        return undefined; // ObjectDeclaration has no ObjectKind of its own
     }
 
     // Location.sublocations nests arbitrarily. Langium's default scope provider resolves
@@ -299,6 +329,25 @@ export class DndDslValidator {
         if (!this.endsInVariable(occ.target)) {
             accept('error', `'on change' must target a variable, e.g. 'on change npc "X" . mood do ... end'.`, { node: occ, property: 'target' });
         }
+    }
+
+    /** 
+     *  `this`/`parent` are resolved by container-walk (DndScopeProvider inside an
+     *  `object...end` block, LangiumInterpreterService.fireHandler inside a handler
+     *  body) rather than a cross-reference, so nothing else makes them meaningful -
+     *  restricted here to the two positions that give them something to resolve
+     *  against. Walking every ancestor (not stopping at the first CodeBlock/etc.)
+     *  means a nested object's own non-computed variables, or a ConditionalBlock
+     *  inside a handler body, don't break the check - only whether an OnBlock or a
+     *  computed VariableDeclaration encloses the reference at all matters. 
+     **/
+    checkThisParentPlacement(node: ThisRefItem | ParentRefItem, accept: ValidationAcceptor): void {
+        for (let current: AstNode | undefined = node.$container; current; current = current.$container) {
+            if (isOnBlock(current)) return;
+            if (isVariableDeclaration(current) && current.isComputed === 'computed') return;
+        }
+        const keyword = node.$type === 'ThisRefItem' ? 'this' : 'parent';
+        accept('error', `'${keyword}' can only be used inside an 'on change'/'on trigger' handler body, or a 'computed' variable's value.`, { node });
     }
 
     private checkUnique(items: NamedNode[], accept: ValidationAcceptor, kind: string): void {

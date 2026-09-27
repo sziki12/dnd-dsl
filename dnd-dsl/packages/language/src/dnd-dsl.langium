@@ -239,7 +239,9 @@ RefChainStart:
     | EventRefItem
     | NpcRefItem
     | WorldRefItem
-    | EnumRefItem;
+    | EnumRefItem
+    | ThisRefItem
+    | ParentRefItem;
 
 VariableRefItem:
     val=VariableRef;
@@ -258,6 +260,13 @@ WorldRefItem:
 // A single-level cross-reference
 EnumRefItem:
     isEnum='enum' val=[Enum:ID];
+// Resolved by container-walk, not cross-reference - see DndScopeProvider (inside an
+// `object...end` block) and LangiumInterpreterService.fireHandler (inside a handler
+// body). Restricted to those two positions by DndDslValidator - see below.
+ThisRefItem:
+    isThis='this';
+ParentRefItem:
+    isParent='parent';
 
 //val is declared, property is generated
 VariableRef:        
@@ -274,6 +283,7 @@ NpcRef:
     val=[Npc:STRING];
 FunctionRef:
     val=[FunctionDeclaration:ID];
+
 
 //Fragments
 fragment Description:

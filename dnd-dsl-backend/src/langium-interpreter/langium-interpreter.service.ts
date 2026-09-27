@@ -17,6 +17,7 @@ import {
     isConstantExpression,
     isEnumRefItem,
     isEnumValueRef,
+    isEvent,
     isEventRefItem,
     isFunctionCall,
     isGroupedExpression,
@@ -30,11 +31,13 @@ import {
     isNpcRefItem,
     isObjectDeclaration,
     isObjective,
+    isParentRefItem,
     isQuest,
     isQuestRefItem,
     isRefChain,
     isReferenceExpression,
     isStringVal,
+    isThisRefItem,
     isVariableRefItem,
     isWorld,
     isWorldRefItem,
@@ -52,7 +55,7 @@ import {
 } from '@dnd-language/index.js';
 import { Injectable } from '@nestjs/common';
 import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
-import { encodeStatePath, nodeToStatePath, statePathToNode, unwrapExpression, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { encodeStatePath, nodeToStatePath, parentOwningObject, statePathToNode, unwrapExpression, type OwningObject, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefined-signatures.js';
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
@@ -96,6 +99,8 @@ export type EvalContext = {
     triggerHandlers?: Map<string, OnBlock[]>;
     firedHandlers?: Set<OnBlock>;
     handlerDepth?: number;
+    thisEntity?: OwningObject;
+    parentEntity?: OwningObject;
 };
 
 class ReturnSignal {
@@ -271,6 +276,20 @@ export class LangiumInterpreterService {
                 if (!n) throw new Error(`Unresolved npc ref: ${chain.first.val.val.$refText}`);
                 return this.readPersistentValue(ctx.worldState, [{ kind: 'npc', name: n.name }]);
             }
+            if (isThisRefItem(chain.first)) {
+                if (!ctx.thisEntity) throw new Error(`'this' is not available here`);
+                if (isEvent(ctx.thisEntity)) throw new Error(`Cannot read 'this' as a value when it refers to an Event`);
+                const path = nodeToStatePath(ctx.thisEntity);
+                if (!path) throw new Error(`'this' has no persistent address here`);
+                return this.readPersistentValue(ctx.worldState, path);
+            }
+            if (isParentRefItem(chain.first)) {
+                if (!ctx.parentEntity) throw new Error(`'parent' is not available here`);
+                if (isEvent(ctx.parentEntity)) throw new Error(`Cannot read 'parent' as a value when it refers to an Event`);
+                const path = nodeToStatePath(ctx.parentEntity);
+                if (!path) throw new Error(`'parent' has no persistent address here`);
+                return this.readPersistentValue(ctx.worldState, path);
+            }
         }
 
         // Every remaining shape ends in a VariableRefItem - either chain.first itself
@@ -404,6 +423,8 @@ export class LangiumInterpreterService {
             triggerHandlers: callerCtx.triggerHandlers,
             firedHandlers: callerCtx.firedHandlers,
             handlerDepth: callerCtx.handlerDepth,
+            thisEntity: callerCtx.thisEntity,
+            parentEntity: callerCtx.parentEntity,
         };
 
         decl.params.forEach((param, i) => {
@@ -589,11 +610,17 @@ export class LangiumInterpreterService {
     private fireHandler(ctx: EvalContext, block: OnBlock, label: string): void {
         (ctx.firedHandlers ??= new Set()).add(block);
         ctx.handlerDepth = (ctx.handlerDepth ?? 0) + 1;
+        const previousThis = ctx.thisEntity;
+        const previousParent = ctx.parentEntity;
+        ctx.thisEntity = block.$container;
+        ctx.parentEntity = parentOwningObject(block.$container);
         ctx.events?.push({ kind: 'handler', label, depth: this.cascadeDepth(ctx) });
         try {
             this.runCodeBlock(ctx, block.body);
         } finally {
             ctx.handlerDepth = (ctx.handlerDepth ?? 1) - 1;
+            ctx.thisEntity = previousThis;
+            ctx.parentEntity = previousParent;
         }
     }
 
@@ -611,6 +638,18 @@ export class LangiumInterpreterService {
                 const tailName = chain.rest[0].val.val.$refText;
                 return [...headValue.path, { kind: 'variable', target: tailName }];
             }
+        }
+        if (chain.rest.length === 0 && isThisRefItem(chain.first)) {
+            if (!ctx.thisEntity) throw new Error(`'this' is not available here`);
+            const path = nodeToStatePath(ctx.thisEntity);
+            if (!path) throw new Error(`'this' has no persistent address here`);
+            return path;
+        }
+        if (chain.rest.length === 0 && isParentRefItem(chain.first)) {
+            if (!ctx.parentEntity) throw new Error(`'parent' is not available here`);
+            const path = nodeToStatePath(ctx.parentEntity);
+            if (!path) throw new Error(`'parent' has no persistent address here`);
+            return path;
         }
         return this.resolveStaticRefChainToStatePath(chain);
     }
@@ -774,6 +813,8 @@ export class LangiumInterpreterService {
         if (isNpcRefItem(start)) return start.val.val.ref;
         if (isWorldRefItem(start)) return ctx.model?.World;
         if (isEnumRefItem(start)) return start.val.ref;
+        if (isThisRefItem(start)) return ctx.thisEntity;
+        if (isParentRefItem(start)) return ctx.parentEntity;
         return undefined;
     }
 
