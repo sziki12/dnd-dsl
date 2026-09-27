@@ -253,6 +253,7 @@ export class CommandService {
    *  capabilities: `trigger` needs `model`, and entity writes need `pendingOverlayWrites` plus a flush 
    **/
   private newEvalContext(model: Model, scope: Record<string, unknown>, extras: Partial<EvalContext> = {}): EvalContext {
+    const { changeHandlers, triggerHandlers } = this.worldStateService.getHandlerIndex();
     return {
       scope,
       worldState: this.worldStateService.getWorldState(),
@@ -263,6 +264,9 @@ export class CommandService {
       triggeredEvents: new Set(),
       firedReminders: [],
       events: [],
+      changeHandlers,
+      triggerHandlers,
+      firedHandlers: new Set(),
       ...extras,
     };
   }

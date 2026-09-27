@@ -1,7 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { URI } from 'langium';
 import { NodeFileSystem } from 'langium/node';
-import { type CodeBlock, createDndDslServices, isVariableDeclaration, Model } from '@dnd-language/index.js';
+import {
+  type CodeBlock,
+  createDndDslServices,
+  isChangeOccurrence,
+  isOnBlock,
+  isVariableDeclaration,
+  Model,
+  OnBlock,
+} from '@dnd-language/index.js';
+import { AstUtils } from 'langium';
 import { parseModel, stringifyNode } from '@dnd-cli/main.js';
 import {
   decodeStatePath,
@@ -44,6 +53,11 @@ export type DeclaredFunctionsResponse = {
 /** One parse/link problem in a script, with a line number relative to the DM's text. */
 export type ScriptParseError = { message: string; line: number };
 
+export type HandlerIndex = {
+  changeHandlers: Map<string, OnBlock[]>;
+  triggerHandlers: Map<string, OnBlock[]>;
+};
+
 @Injectable()
 export class WorldStateService {
   private _model: Model | undefined = undefined;
@@ -55,6 +69,8 @@ export class WorldStateService {
   private _clock: number = 0;
   private _reminders: ScheduledReminder[] = [];
   private _firedReminders: FiredReminder[] = [];
+  private _changeHandlers: Map<string, OnBlock[]> = new Map();
+  private _triggerHandlers: Map<string, OnBlock[]> = new Map();
 
   constructor(private readonly interpreterService: LangiumInterpreterService) {}
 
@@ -70,6 +86,7 @@ export class WorldStateService {
     this._reminders = overlayFile?.reminders ?? [];
     this._firedReminders = overlayFile?.firedReminders ?? [];
     this.rebuildWorldState();
+    this.buildHandlerIndex();
     return this._worldState;
   }
 
@@ -166,9 +183,11 @@ export class WorldStateService {
     this._firedReminders.push(...fired);
   }
 
-  /** Advances the clock and moves every now-due reminder into firedReminders
-   *  (effectRan starts false - CommandService flips it after running the effect,
-   *  since only it has interpreter access). Returns just the newly-fired ones. */
+  /** 
+   *  Advances the clock and moves every now-due reminder into `_firedReminders`
+   *  (effectRan starts false - CommandService flips it after running the effect, since only it has interpreter access).
+   *  Returns the newly-fired ones.
+   **/
   advanceClock(deltaRounds: number): FiredReminder[] {
     this._clock += deltaRounds;
     const due = this._reminders.filter(r => r.fireAtRound <= this._clock);
@@ -193,6 +212,10 @@ export class WorldStateService {
     if (index < 0) return false;
     this._firedReminders.splice(index, 1);
     return true;
+  }
+
+  getHandlerIndex(): HandlerIndex {
+    return { changeHandlers: this._changeHandlers, triggerHandlers: this._triggerHandlers };
   }
 
   getModel(): Model | undefined {
@@ -236,29 +259,68 @@ export class WorldStateService {
     return this._staleOverlayEntries;
   }
 
-  /** Writes one overlay entry and immediately re-splices `_worldState` so
-   *  `getWorldState()` reflects it without a full reload. This is meant to be the
-   *  only way `_worldState`'s variable values change post-load — see CommandService. */
+  /** 
+   *  Writes one overlay entry and immediately re-splices `_worldState` so
+   *  `getWorldState()` reflects it without a full reload. 
+   *  This is meant to be the only way `_worldState`'s variable values change post-load.
+   **/
   setOverlayEntry(path: StatePath, value: unknown): void {
     this._overlay[encodeStatePath(path)] = value;
     this.spliceOverlayValue(path, value);
   }
 
-  /** Replaces the whole overlay (undo/redo) and rebuilds `_worldState` from scratch
-   *  against it, so no stray in-place mutation from before the swap can linger. */
+  /** 
+   *  Replaces the whole overlay (undo/redo) and rebuilds `_worldState` from scratch against it
+   **/
   restoreOverlay(overlay: Record<string, unknown>): void {
     this._overlay = overlay;
     this.rebuildWorldState();
   }
 
-  /** Drops all overlay entries and clock/reminder state, reverting `_worldState` to the
-   *  `.dnd`-declared defaults. */
+  /** 
+   *  Drops all overlay entries and clock/reminder state, reverting `_worldState` to the declared defaults of the `.dnd` file. 
+   **/
   resetOverlay(): void {
     this._overlay = {};
     this._clock = 0;
     this._reminders = [];
     this._firedReminders = [];
     this.rebuildWorldState();
+  }
+
+  /** 
+   *  Indexes every OnBlock in the model by its resolved target, so a write or event
+   *  trigger can look up matching handlers in O(1) instead of walking the AST per write.
+   *  Rebuilt only on reparse.
+   **/
+  private buildHandlerIndex(): void {
+    this._changeHandlers = new Map();
+    this._triggerHandlers = new Map();
+    if (!this._model) return;
+
+    for (const node of AstUtils.streamAllContents(this._model)) {
+      if (!isOnBlock(node)) continue;
+      const occ = node.occurrence;
+
+      if (isChangeOccurrence(occ)) {
+        let path;
+        try {
+          path = this.interpreterService.resolveStaticRefChainToStatePath(occ.target);
+        } catch {
+          continue;
+        }
+        const key = encodeStatePath(path);
+        const list = this._changeHandlers.get(key) ?? [];
+        list.push(node);
+        this._changeHandlers.set(key, list);
+      } else {
+        const eventName = occ.target.val.ref?.name;
+        if (!eventName) continue;
+        const list = this._triggerHandlers.get(eventName) ?? [];
+        list.push(node);
+        this._triggerHandlers.set(eventName, list);
+      }
+    }
   }
 
   private rebuildWorldState(): void {
@@ -281,15 +343,11 @@ export class WorldStateService {
     return stale;
   }
 
-  /** Resolves `path` against the serialized `_worldState` (structurally generic — walks
-   *  plain JSON the same way it walks real AST nodes) and, if it points at a non-computed
-   *  variable, writes `value` into it. If the leaf doesn't exist yet but its parent
-   *  container does (a real Location/Quest/etc, or an already-declared `object` block),
-   *  creates it — this is what lets ASSIGN_VARIABLE create a variable that wasn't
-   *  declared in the `.dnd` source, and it runs on every rebuild (load/undo/redo), so a
-   *  created variable persists the same way a real one does. Returns false without
-   *  writing anything if neither the leaf nor its parent resolve (renamed/removed
-   *  location, became computed, etc). */
+  /** 
+   *  Resolves `path` against the serialized `_worldState` and if it points at a non-computed variable, writes `value` into it.
+   *  If the leaf doesn't exist yet but its parent container does, creates it.
+   *  Returns false without writing anything if neither the leaf nor its parent resolve.
+   **/
   private spliceOverlayValue(path: StatePath, value: unknown): boolean {
     const node = statePathToNode(this._worldState, path);
     if (node) {

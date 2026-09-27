@@ -38,7 +38,7 @@ const COLLECTION_HEAD_TYPE: Record<string, ObjectKind> = {
 const FOR_KEYWORD = "for";
 const IN_KEYWORD = "in";
 const WORD = "\\w+";
-const PROPERTY_ACCESS = "\\.\\s*(" + WORD + ")$";
+const PROPERTY_ACCESS = "\\.\\s*(\\w*)$";
 const COLLECTION_FIELD_SLOT = new RegExp(
     `\\b${FOR_KEYWORD}\\s+${WORD}\\s+${IN_KEYWORD}\\s+(${Object.keys(COLLECTION_HEAD_TYPE).join("|")})\\b[^.\\n]*${PROPERTY_ACCESS}`,
 );

@@ -1,10 +1,12 @@
 import { randomUUID } from 'crypto';
 import type { AstNode } from 'langium';
 import {
+    ChangeOccurrence,
     Code,
     CodeBlock,
     CollectionRef,
     ConditionalBlock,
+    ConstantExpression,
     EnumValueDecl,
     Expression,
     ForStatement,
@@ -12,6 +14,7 @@ import {
     FunctionDeclaration,
     isBoolExpression,
     isBoolVal,
+    isConstantExpression,
     isEnumRefItem,
     isEnumValueRef,
     isEventRefItem,
@@ -30,15 +33,18 @@ import {
     isQuest,
     isQuestRefItem,
     isRefChain,
+    isReferenceExpression,
     isStringVal,
     isVariableRefItem,
     isWorld,
     isWorldRefItem,
     LocationExit,
     Model,
+    OnBlock,
     PrintStatement,
     RefChain,
     RefChainStart,
+    ReferenceExpression,
     RemindStatement,
     ReturnStatement,
     SetStatement,
@@ -62,7 +68,8 @@ type RuntimeScope = Record<string, any>;
 export type InterpreterEvent =
     | { kind: 'print'; value: unknown; depth: number }
     | { kind: 'write'; path: StatePath; value: unknown; depth: number }
-    | { kind: 'trigger'; eventName: string; depth: number };
+    | { kind: 'trigger'; eventName: string; depth: number }
+    | { kind: 'handler'; label: string; depth: number };
 
 /**
  * `worldState` is the current, overlay-applied JSON world state (WorldStateService.getWorldState()), used to resolve persistent RefChain-s
@@ -85,6 +92,10 @@ export type EvalContext = {
     triggeredEvents?: Set<string>;
     firedReminders?: FiredReminder[];
     events?: InterpreterEvent[];
+    changeHandlers?: Map<string, OnBlock[]>;
+    triggerHandlers?: Map<string, OnBlock[]>;
+    firedHandlers?: Set<OnBlock>;
+    handlerDepth?: number;
 };
 
 class ReturnSignal {
@@ -114,31 +125,20 @@ function isLoopEntityHandle(value: unknown): value is LoopEntityHandle {
 export class LangiumInterpreterService {
 
     evaluateExpression(ctx: EvalContext, expression: Expression): any {
-        if (isIntVal(expression)) {
-            return signedInt(expression);
+        if(isConstantExpression(expression)){
+            return this.evaluateConstantExpression(ctx, expression);
         }
-        if (isBoolVal(expression)) {
-            return negatableBool(expression);
+
+        if(isReferenceExpression(expression)){
+            return this.evaluateReferenceExpression(ctx, expression);
         }
-        if (isStringVal(expression)) {
-            return expression.val;
-        }
+
         if (isEnumValueRef(expression)) {
-            // Runtime value of an enum reference is its value name - keeps `is` / `==`
-            // as plain string comparison and matches the bare name string an
-            // ASSIGN_VARIABLE overlay write stores.
+            // Runtime value of an enum reference is its value name 
+            // Keeps comparison as plain string comparison
             return expression.value.ref?.name ?? expression.value.$refText;
         }
-        if (isListLiteral(expression)) {
-            return expression.elements.map(element => this.evaluateExpression(ctx, element));
-        }
-        if (isObjectDeclaration(expression)) {
-            return expression.variables.reduce((obj: RuntimeScope, v) => {
-                const name = v.target ?? v.name ?? '';
-                obj[name] = v.value ? this.evaluateExpression(ctx, v.value) : undefined;
-                return obj;
-            }, {});
-        }
+        
         if (isGroupedExpression(expression)) {
             return this.evaluateExpression(ctx, expression.exp);
         }
@@ -164,12 +164,6 @@ export class LangiumInterpreterService {
                 () => this.evaluateExpression(ctx, expression.right),
             );
         }
-        if (isRefChain(expression)) {
-            return this.evaluateRefChain(ctx, expression);
-        }
-        if (isFunctionCall(expression)) {
-            return this.executeFunctionCall(ctx, expression);
-        }
 
         if(expression.$type === 'Expression'){
             return this.evaluateExpression(ctx, expression.exp);
@@ -178,8 +172,86 @@ export class LangiumInterpreterService {
         throw new Error(`Unhandled expression type: ${expression.$type}`);
     }
 
+    /** 
+     *  Resolves a RefChain to its StatePath using only its own AST structure, no EvalContext needed.
+     *  Everything resolveRefChainToStatePath does except the for-loop-bound-entity runtime fallback, 
+     *  which a declaration-time target (an OnClause's, resolved once when the handler index is built) can never hit.
+     *  It's never inside a for loops body. 
+     **/
+    resolveStaticRefChainToStatePath(chain: RefChain): StatePath {
+        if (isEventRefItem(chain.first)) {
+            throw new Error(`Cannot resolve a '${chain.first.$type}' reference to a StatePath`);
+        }
+        if (chain.rest.length === 0
+            && (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isNpcRefItem(chain.first))) {
+            const node = chain.first.val.val.ref;
+            if (!node) throw new Error(`Unresolved ref: ${chain.first.val.val.$refText}`);
+            return nodeToStatePath(node)!;
+        }
+
+        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
+        if (!isVariableRefItem(tail)) throw new Error(`Unsupported target: ${tail.$type}`);
+        const decl = tail.val.val.ref;
+        if (!decl) throw new Error(`Unresolved variable ref: ${tail.val.val.$refText}`);
+        const path = nodeToStatePath(decl);
+        if (!path) throw new Error(`Cannot resolve a local/non-persistent variable to a StatePath`);
+        return path;
+    }
+
+    private evaluateReferenceExpression(ctx: EvalContext, expression: ReferenceExpression): any {
+        if (isFunctionCall(expression)) {
+            return this.executeFunctionCall(ctx, expression);
+        }
+        if (isRefChain(expression)) {
+            return this.evaluateRefChain(ctx, expression);
+        }
+    /*  
+        TODO LocationChain
+        if (isLocationChain(expression)) {
+            return this.evaluateLocationChain(ctx, expression);
+        }
+
+        TODO QuestExpressions
+        if (isQuestExpressions(expression)) {
+            return this.evaluateQuestExpressions(ctx, expression);
+        } 
+        
+        TODO EventCalledExpression
+        if (isEventCalledExpression(expression)) {
+            return this.evaluateEventCalledExpression(ctx, expression);
+        } 
+    */
+        throw new Error(`Unhandled reference expression type: ${expression}`);
+    }
+
+    private evaluateConstantExpression(ctx: EvalContext, expression: ConstantExpression): any {
+        if (isIntVal(expression)) {
+            return signedInt(expression);
+        }
+        if (isBoolVal(expression)) {
+            return negatableBool(expression);
+        }
+        if (isStringVal(expression)) {
+            return expression.val;
+        }
+        if (isListLiteral(expression)) {
+            return expression.elements.map(element => this.evaluateExpression(ctx, element));
+        }
+        if (isObjectDeclaration(expression)) {
+            return expression.variables.reduce((obj: RuntimeScope, v) => {
+                const name = v.target ?? v.name ?? '';
+                obj[name] = v.value ? this.evaluateExpression(ctx, v.value) : undefined;
+                return obj;
+            }, {});
+        }
+
+        throw new Error(`Unhandled constant expression type: ${expression}`);
+
+    }
+
     private evaluateRefChain(ctx: EvalContext, chain: RefChain): any {
         if (isEventRefItem(chain.first)) {
+            //TODO EventRefItem
             throw new Error(`RefChain heads of kind '${chain.first.$type}' are not supported yet`);
         }
 
@@ -318,7 +390,7 @@ export class LangiumInterpreterService {
     }
 
     private callFunctionDecl(callerCtx: EvalContext, decl: FunctionDeclaration, args: any[]): any {
-        const localCtx: EvalContext = {
+         const localCtx: EvalContext = {
             scope: Object.create(callerCtx.scope),
             worldState: callerCtx.worldState,
             clock: callerCtx.clock,
@@ -328,6 +400,10 @@ export class LangiumInterpreterService {
             triggeredEvents: callerCtx.triggeredEvents,
             firedReminders: callerCtx.firedReminders,
             events: callerCtx.events,
+            changeHandlers: callerCtx.changeHandlers,
+            triggerHandlers: callerCtx.triggerHandlers,
+            firedHandlers: callerCtx.firedHandlers,
+            handlerDepth: callerCtx.handlerDepth,
         };
 
         decl.params.forEach((param, i) => {
@@ -350,8 +426,10 @@ export class LangiumInterpreterService {
         return undefined;
     }
 
-    /** Runs a DM script body and returns its `return` value (or undefined). Entity
-     *  writes land in `ctx.pendingOverlayWrites` for the caller to flush. */
+    /** 
+     *  Runs a script body and returns its `return` value (or undefined). 
+     *  Entity writes land in `ctx.pendingOverlayWrites` for the caller to flush. 
+     **/
     runScript(ctx: EvalContext, codeBlock: CodeBlock): unknown {
         const result = this.runCodeBlock(ctx, codeBlock);
         return result instanceof ReturnSignal ? result.value : undefined;
@@ -409,7 +487,7 @@ export class LangiumInterpreterService {
                 const c = code as unknown as PrintStatement;
                 const value = this.evaluateExpression(ctx, c.value);
                 console.log('[script print]', value);
-                ctx.events?.push({ kind: 'print', value, depth: ctx.triggeredEvents?.size ?? 0 });
+                ctx.events?.push({ kind: 'print', value, depth: this.cascadeDepth(ctx) });
                 break;
             }
             case 'ConditionalBlock': {
@@ -425,14 +503,13 @@ export class LangiumInterpreterService {
                 const name = code.target.val.ref?.name;
                 if (!name || !ctx.model) break;
                 const seen = (ctx.triggeredEvents ??= new Set());
-                if (seen.has(name)) break; // re-entrancy guard
+                // re-entrancy guard
+                if (seen.has(name)) break;
                 seen.add(name);
-                // depth = seen.size (post-add): the level this trigger's own cascade
-                // runs at, so print/write events pushed inside its body (still inside
-                // this try, before `seen.delete`) get the same depth as siblings.
-                ctx.events?.push({ kind: 'trigger', eventName: name, depth: seen.size });
+                ctx.events?.push({ kind: 'trigger', eventName: name, depth: this.cascadeDepth(ctx) });
                 try {
                     this.triggerEventByName(ctx.model, name, ctx);
+                    this.dispatchTriggerHandlers(ctx, name);
                 } finally {
                     seen.delete(name);
                 }
@@ -494,20 +571,37 @@ export class LangiumInterpreterService {
         return undefined;
     }
 
-    /** Resolves a RefChain to its StatePath address rather than its value - used by
-     *  RemindStatement's `show on <chain>` pin and by `set <chain> = <expr>`. Mirrors
-     *  evaluateRefChain's head/tail resolution and throw conventions. */
-    private resolveRefChainToStatePath(ctx: EvalContext, chain: RefChain): StatePath {
-        if (isEventRefItem(chain.first)) {
-            throw new Error(`Cannot pin a reminder to a '${chain.first.$type}' reference`);
+    private dispatchTriggerHandlers(ctx: EvalContext, eventName: string): void {
+        const handlers = ctx.triggerHandlers?.get(eventName);
+        if (!handlers?.length) return;
+        for (const block of handlers) {
+            if (ctx.firedHandlers?.has(block)) continue;
+            this.fireHandler(ctx, block, `on trigger ${eventName}`);
         }
-        if (chain.rest.length === 0
-            && (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isNpcRefItem(chain.first))) {
-            const node = chain.first.val.val.ref;
-            if (!node) throw new Error(`Unresolved ref: ${chain.first.val.val.$refText}`);
-            return nodeToStatePath(node)!;
-        }
+    }
 
+    /** 
+     *  Runs a matched handler's body as its own cascade frame: marked fired before the
+     *  body runs (so a write inside it can't re-trigger itself), and handlerDepth is
+     *  incremented for the body's duration so nested writes/prints/triggers nest
+     *  correctly under it in the events tree.
+     **/
+    private fireHandler(ctx: EvalContext, block: OnBlock, label: string): void {
+        (ctx.firedHandlers ??= new Set()).add(block);
+        ctx.handlerDepth = (ctx.handlerDepth ?? 0) + 1;
+        ctx.events?.push({ kind: 'handler', label, depth: this.cascadeDepth(ctx) });
+        try {
+            this.runCodeBlock(ctx, block.body);
+        } finally {
+            ctx.handlerDepth = (ctx.handlerDepth ?? 1) - 1;
+        }
+    }
+
+    /** 
+     *  Resolves a RefChain to its StatePath address rather than its value 
+     *  Used by RemindStatement's `show on <chain>` pin and by `set <chain> = <expr>`.
+     **/
+    private resolveRefChainToStatePath(ctx: EvalContext, chain: RefChain): StatePath {
         // A for-loop-bound entity - same shortcut evaluateRefChain's fallback uses.
         if (isVariableRefItem(chain.first)) {
             const headDecl = chain.first.val.val.ref;
@@ -518,18 +612,13 @@ export class LangiumInterpreterService {
                 return [...headValue.path, { kind: 'variable', target: tailName }];
             }
         }
-
-        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
-        if (!isVariableRefItem(tail)) throw new Error(`Unsupported pin target: ${tail.$type}`);
-        const decl = tail.val.val.ref;
-        if (!decl) throw new Error(`Unresolved variable ref: ${tail.val.val.$refText}`);
-        const path = nodeToStatePath(decl);
-        if (!path) throw new Error(`Cannot pin a reminder to a local/non-persistent variable`);
-        return path;
+        return this.resolveStaticRefChainToStatePath(chain);
     }
 
-    /** `for x in <variable holding a list>` - iterates a snapshot of the list, so a
-     *  write-back to the same variable inside the body doesn't change what is iterated. */
+    /** 
+     * `for x in <variable holding a list>` - iterates a snapshot of the list, 
+     * so a write-back to the same variable inside the body doesn't change what is iterated.
+     **/
     private resolveListSource(ctx: EvalContext, source: RefChain): unknown[] {
         const value = this.evaluateRefChain(ctx, source);
         if (!Array.isArray(value)) {
@@ -538,12 +627,13 @@ export class LangiumInterpreterService {
         return [...value];
     }
 
-    /** A statement-position call of a predefined function flagged `writesBack` (see
-     *  PREDEFINED_SIGNATURES) also stores its result into its first argument, so
-     *  `call predefined append with inventory, "sword"` reads as a mutation while the
-     *  function itself stays pure. The validator guarantees the first argument is a
-     *  variable. In expression position nothing is written - only this statement case
-     *  of runCode calls this. */
+    /** 
+     *  A statement-position call of a predefined function flagged `writesBack` (see PREDEFINED_SIGNATURES) 
+     *  also stores its result into its first argument, so:
+     *  `call predefined append with inventory, "sword"` reads as a mutation while the function itself stays pure.
+     *  The validator guarantees the first argument is a variable.
+     *  In expression position nothing is written - only this statement case of `runCode` calls this.
+     **/
     private writeBackIfRequested(ctx: EvalContext, call: FunctionCall, result: unknown): void {
         if (!call.predefined || !getPredefinedSignature(call.predefinedTarget ?? '')?.writesBack) return;
         const target = unwrapExpression(call.params[0]);
@@ -551,17 +641,70 @@ export class LangiumInterpreterService {
         this.writeValue(ctx, target, result);
     }
 
-    /** Records a persistent write: queues it for the caller to flush to the overlay,
-     *  and logs it in `ctx.events` at the position it actually ran, so print output
-     *  and writes can be rendered interleaved instead of grouped by kind. */
-    private pushWrite(ctx: EvalContext, path: StatePath, value: unknown): void {
-        (ctx.pendingOverlayWrites ??= []).push({ path, value });
-        ctx.events?.push({ kind: 'write', path, value, depth: ctx.triggeredEvents?.size ?? 0 });
+    /** 
+     *  How deeply nested the current write/print/trigger is inside cascading effects
+     *  Chained event triggers and handler firings both count as one frame each, 
+     *  so the events tree renders them at consistent nesting regardless of which caused it. 
+     **/
+    private cascadeDepth(ctx: EvalContext): number {
+        return (ctx.triggeredEvents?.size ?? 0) + (ctx.handlerDepth ?? 0);
     }
 
-    /** Stores `value` into the variable a chain names: a bare local variable lands in
+    /** 
+     *  Records a persistent write: queues it for the caller to flush to the overlay,
+     *  and logs it in `ctx.events` at the position it actually ran, so print output
+     *  and writes can be rendered interleaved instead of grouped by kind. 
+     **/
+    private pushWrite(ctx: EvalContext, path: StatePath, value: unknown): void {
+        const before = this.readPath(ctx, path);
+        (ctx.pendingOverlayWrites ??= []).push({ path, value });
+        ctx.events?.push({ kind: 'write', path, value, depth: this.cascadeDepth(ctx) });
+        this.dispatchChangeHandlers(ctx, path, before, value);
+    }
+
+        private dispatchChangeHandlers(ctx: EvalContext, path: StatePath, before: unknown, after: unknown): void {
+        const handlers = ctx.changeHandlers?.get(encodeStatePath(path));
+        if (!handlers?.length) return;
+        for (const block of handlers) {
+            if (ctx.firedHandlers?.has(block)) continue;
+            const occ = block.occurrence as ChangeOccurrence;
+            if (this.changeHandlerMatches(ctx, occ, before, after)) {
+                this.fireHandler(ctx, block, `on change ${occ.target.$cstNode?.text ?? ''}`);
+            }
+        }
+    }
+
+    /** 
+     *  Edge-triggered on all three `ChangeOccurrence` shapes, not just the pre/post-value it's checked against
+     *  otherwise fires on the write that actually caused it, 
+     *  `firedHandlers` a no-op rewrite (same value written again) would spuriously refire it every time. 
+     **/
+    private changeHandlerMatches(ctx: EvalContext, occ: ChangeOccurrence, before: unknown, after: unknown): boolean {
+        if (occ.toValue) {
+            const target = this.evaluateExpression(ctx, occ.toValue);
+            return !this.valuesEqual(before, target) && this.valuesEqual(after, target);
+        }
+        if (occ.guard) {
+            const afterMatch = Boolean(this.evaluateExpression(ctx, occ.guard));
+            if (!afterMatch) return false;
+            const pending = ctx.pendingOverlayWrites!;
+            const thisWrite = pending.pop()!;
+            const beforeMatch = Boolean(this.evaluateExpression(ctx, occ.guard));
+            pending.push(thisWrite);
+            return !beforeMatch;
+        }
+        return !this.valuesEqual(before, after);
+    }
+
+    private valuesEqual(a: unknown, b: unknown): boolean {
+        return JSON.stringify(a) === JSON.stringify(b);
+    }
+
+    /** 
+     *  Stores `value` into the variable a chain names: a bare local variable lands in
      *  the scope, an entity- or world-owned one (or a loop entity's member) becomes a
-     *  pending overlay write for the caller to flush. */
+     *  pending overlay write for the caller to flush. 
+     **/
     private writeValue(ctx: EvalContext, chain: RefChain, value: unknown): void {
         if (chain.rest.length === 0 && isVariableRefItem(chain.first)) {
             const ref = chain.first.val.val;
@@ -581,10 +724,12 @@ export class LangiumInterpreterService {
         this.pushWrite(ctx, path, value);
     }
 
-    /** Resolves a `for`'s collection *source* to the values the loop variable takes on,
+    /** 
+     *  Resolves a `for`'s collection *source* to the values the loop variable takes on,
      *  one iteration each. `DndDslValidator.checkCollectionField` already rejects an
      *  unknown field at parse time, so `field` here is trusted to be legal for `head`'s
-     *  resolved type - this only decides, per field, what an element becomes. */
+     *  resolved type - this only decides, per field, what an element becomes. 
+     **/
     private resolveCollection(ctx: EvalContext, collection: CollectionRef): unknown[] {
         const head = this.resolveCollectionHead(ctx, collection.head);
         if (!head) throw new Error(`Unresolved collection head: ${collection.head.$type}`);

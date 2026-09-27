@@ -68,22 +68,24 @@ export type Command =
   | TriggerEventCommand
   | RunScriptCommand;
 
-/** One observable effect of running a command's code, in the order it executed: 
+/** One observable effect of running a command's code, in the order it executed:
  *  a `print`,
  *  a persistent write,
- *  or a nested `trigger`
+ *  a nested `trigger`,
+ *  or a fired `on change`/`on trigger` handler
  *
- *  `depth` is how many trigger bodies are currently running
- *  0 outside any trigger,
- *  1 inside a top-level `trigger`'s body,
- *  2 inside a trigger fired from within that body, etc.
- *  A trigger event's own `depth` is the level it *opens*, so an event
- *  belongs inside the most recent preceding trigger whose depth is one less. 
+ *  `depth` is how many trigger/handler bodies are currently running
+ *  0 outside any of them,
+ *  1 inside a top-level one's body,
+ *  2 inside one fired from within that body, etc.
+ *  A trigger/handler event's own `depth` is the level it *opens*, so an event
+ *  belongs inside the most recent preceding trigger/handler whose depth is one less.
  **/
 export type ScriptEvent =
   | { kind: 'print'; value: unknown; depth: number }
   | { kind: 'write'; path: string; value: unknown; depth: number }
-  | { kind: 'trigger'; eventName: string; depth: number };
+  | { kind: 'trigger'; eventName: string; depth: number }
+  | { kind: 'handler'; label: string; depth: number };
 
 export type CommandResponse = {
   worldState: any;

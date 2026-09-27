@@ -28,10 +28,10 @@ function formatPath(encoded: string): string {
  *  history sidebar. Empty string when there's nothing to summarize. */
 function summarizeEvents(events?: ScriptEvent[]): string {
   if (!events?.length) return '';
-  const counts = { print: 0, write: 0, trigger: 0 };
+  const counts = { print: 0, write: 0, trigger: 0, handler: 0 };
   for (const e of events) counts[e.kind]++;
   const plural = (n: number, label: string) => `${n} ${label}${n === 1 ? '' : 's'}`;
-  return (['print', 'write', 'trigger'] as const)
+  return (['print', 'write', 'trigger', 'handler'] as const)
     .filter(kind => counts[kind] > 0)
     .map(kind => plural(counts[kind], kind))
     .join(' · ');
@@ -203,14 +203,15 @@ type EventNode = ScriptEvent & { children?: EventNode[] };
  *  doc comment (`dnd-dsl-commands.ts`) for how `depth` encodes this unambiguously. */
 function buildEventTree(events: ScriptEvent[]): EventNode[] {
   const root: EventNode[] = [];
-  const openTriggers: EventNode[] = []; // openTriggers[d] = the open trigger node at depth d+1
+  const openTriggers: EventNode[] = []; // openTriggers[d] = the open trigger/handler node at depth d+1
   for (const e of events) {
-    const node: EventNode = e.kind === 'trigger' ? { ...e, children: [] } : { ...e };
-    const targetDepth = e.kind === 'trigger' ? e.depth - 1 : e.depth;
+    const opensCascade = e.kind === 'trigger' || e.kind === 'handler';
+    const node: EventNode = opensCascade ? { ...e, children: [] } : { ...e };
+    const targetDepth = opensCascade ? e.depth - 1 : e.depth;
     openTriggers.length = Math.max(0, targetDepth);
     const parent = openTriggers.length === 0 ? root : openTriggers[openTriggers.length - 1].children!;
     parent.push(node);
-    if (e.kind === 'trigger') openTriggers.push(node);
+    if (opensCascade) openTriggers.push(node);
   }
   return root;
 }
@@ -249,8 +250,14 @@ function EventRow({ node }: { node: EventNode }) {
         <span style={{ color: 'var(--fg-secondary)', fontSize: 10, width: 10, display: 'inline-block' }}>
           {hasChildren ? (expanded ? '▾' : '▸') : ''}
         </span>
-        <span className="tok-variable">{node.eventName}</span>
-        <span style={{ color: 'var(--fg-secondary)' }}> event triggered</span>
+        {node.kind === 'handler' ? (
+          <span className="tok-variable">{node.label}</span>
+        ) : (
+          <>
+            <span className="tok-variable">{node.eventName}</span>
+            <span style={{ color: 'var(--fg-secondary)' }}> event triggered</span>
+          </>
+        )}
       </div>
       {hasChildren && expanded && (
         <div style={{ marginLeft: 14, paddingLeft: 8, borderLeft: '1px solid var(--bd-soft)' }}>
