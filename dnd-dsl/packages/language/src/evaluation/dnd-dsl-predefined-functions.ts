@@ -1,11 +1,5 @@
-/**
- * Pure list operations behind the predefined list functions, plus the deep equality
- * the comparison operators use. Every function returns a new value and never mutates
- * its inputs - readPersistentValue hands out arrays straight from the served world
- * state, so an in-place change would corrupt it and the undo snapshots.
- *
- * No Langium imports, so this is safe in the browser frontend and the Node backend.
- */
+
+
 
 /** Deep for arrays, identity for everything else (records keep identity semantics). */
 export function valuesEqual(a: unknown, b: unknown): boolean {
@@ -30,6 +24,9 @@ function asNumbers(fn: string, list: unknown[]): number[] {
     return list as number[];
 }
 
+///////////////////////////
+//List specific functions//
+///////////////////////////
 export function length(list: unknown): number {
     return asList('length', list).length;
 }
@@ -152,9 +149,17 @@ export function shuffle(list: unknown): unknown[] {
     return items;
 }
 
-/** Implementation of each list function in PREDEFINED_SIGNATURES, keyed by name. */
-export const LIST_FUNCTIONS: Record<string, (...args: any[]) => unknown> = {
+
+//////////////////////
+//General functions//
+/////////////////////
+export function randomfv(min: number, max: number): number {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/** Implementation of each predefined function from the PREDEFINED_SIGNATURES, keyed by name. */
+export const PREDEFINED_FUNCTIONS: Record<string, (...args: any[]) => unknown> = {
     length, isEmpty, contains, indexOf, at, first, last, sum, min, max, join, slice,
     pickRandom, append, prepend, insertAt, removeAt, remove, concat, reverse, sort,
-    unique, shuffle,
+    unique, shuffle, randomfv,
 };

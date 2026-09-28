@@ -1,6 +1,7 @@
 import type { SerializedEnumValueDecl, SerializedModel, SerializedNode, SerializedRefChain, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import { parseReferenceFromSerializedModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
+import { PREDEFINED_FUNCTIONS } from '@dnd-language/evaluation/dnd-dsl-predefined-functions.js';
 import {
     applyArithmetic,
     applyComparison,
@@ -10,7 +11,7 @@ import {
     type ArithmeticOperator,
     type ComparisonOperator,
     type LogicalOperator,
-} from '@dnd-language/evaluation/dnd-dsl-expression-ops.js';
+} from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
 import type {
     Expression, BoolVal, IntVal, StringVal,
     IntExpression, BoolExpression, IntToBoolExpression, GroupedExpression,
@@ -116,12 +117,20 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
             return evaluateExpression(expr.exp, options);
 
         case 'FunctionCall': {
-            if(!options?.worldState)
+            const call = expr as unknown as { predefined: boolean; predefinedTarget?: string; params: SerializedNode<Expression>[] };
+            if (!call.predefined || !call.predefinedTarget) return undefined;
+            const fn = PREDEFINED_FUNCTIONS[call.predefinedTarget];
+            if (!fn) return undefined;
+            try {
+                const args = call.params.map(p => evaluateExpression(p, options));
+                return fn(...args) as EvalResult | undefined;
+            } catch {
+                // This function runs eagerly during render (LocationView)
+                // A bad-argument throw here would crash the page, same reasoning as the RefChain case below.
                 return undefined;
-
-            // TODO Call function on Backend
-            return 0;
+            }
         }
+
         case 'RefChain': {
             if (!options?.worldState) return undefined;
             try {

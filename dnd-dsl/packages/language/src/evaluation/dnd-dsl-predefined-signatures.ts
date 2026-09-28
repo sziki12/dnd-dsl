@@ -5,7 +5,7 @@
  * - descriptions 
  * - and whether a statement-position call writes its result back.
  * The signatures live here so the language server can validate arity and unknown names and offer completion.
- * The implem,entation of the functions themselves is in `dnd-dsl-list-ops.ts`.
+ * The implementation of the functions themselves is in `dnd-dsl-predefined-functions.ts`.
  * A parameter name ending in `?` is optional.
  */
 

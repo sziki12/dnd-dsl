@@ -18,7 +18,8 @@ import {
     type ArithmeticOperator,
     type ComparisonOperator,
     type LogicalOperator,
-} from './dnd-dsl-expression-ops.js';
+} from './dnd-dsl-expression-operations.js';
+import { PREDEFINED_FUNCTIONS } from './dnd-dsl-predefined-functions.js';
 
 // This file operates entirely on the JSON-serialized model - no Langium LSP-only
 // services are touched - so it's safe to import from both the Node.js backend and the
@@ -162,6 +163,16 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
                 ? buildVariablesRecord(model, target.node.variables)
                 : evaluateSerializedExpression(model, target.node.value);
         }
+
+        case 'FunctionCall': {
+            const call = node as unknown as { predefined: boolean; predefinedTarget?: string; params: unknown[] };
+            if (!call.predefined || !call.predefinedTarget) return undefined;
+            const fn = PREDEFINED_FUNCTIONS[call.predefinedTarget];
+            if (!fn) return undefined;
+            const args = call.params.map(p => evaluateSerializedExpression(model, p));
+            return fn(...args) as JsonRuntimeValue;
+        }
+
 
         default:
             return undefined;

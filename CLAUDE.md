@@ -87,7 +87,7 @@ and its `<world>.state.json` sidecar. The frontend loads a world with
 - `packages/cli/src/main.ts` exports `parseModel()` and `DndDslParseError` (used by the backend).
 
 ### Three expression evaluators (intentional parallel implementations)
-They share operator logic via `packages/language/src/evaluation/dnd-dsl-expression-ops.ts`
+They share operator logic via `packages/language/src/evaluation/dnd-dsl-expression-operations.ts`
 but are otherwise separate:
 1. **Backend** `LangiumInterpreterService.evaluateExpression` — walks the **live AST**, has
    side effects (runs functions, fires events), drives `/command/*`.

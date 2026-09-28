@@ -8,7 +8,7 @@
  * plain values here so the arithmetic / comparison / logical rules live in one place.
  */
 
-import { append, concat, prepend, valuesEqual } from './dnd-dsl-list-ops.js';
+import { append, concat, prepend, valuesEqual } from './dnd-dsl-predefined-functions.js';
 import type { JsonRuntimeValue } from './dnd-dsl-value-evaluator.js';
 
 export type ArithmeticOperator = '+' | '-' | '*' | '/';
