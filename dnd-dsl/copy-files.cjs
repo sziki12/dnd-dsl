@@ -3,9 +3,10 @@ const path = require('path');
 
 async function copyFiles(src, dest) {
   try {
+    // destination is wiped first so a renamed/deleted source file doesn't leave a stale copy behind
+    await fs.rm(dest, { recursive: true, force: true });
     // 'recursive: true' ensures folders and subfolders are copied
-    // 'force: true' overwrites existing files in the destination
-    await fs.cp(src, dest, { recursive: true, force: true });
+    await fs.cp(src, dest, { recursive: true });
     console.log(`✅ Successfully copied from ${src} to ${dest}`);
   } catch (err) {
     console.error(`❌ Error copying files: ${err.message}`);
