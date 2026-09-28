@@ -178,18 +178,6 @@
 }
 .var-row .declaration { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 
-.var-calc-btn {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 3px;
-  border: 1px solid var(--bd-soft);
-  background: var(--bg-input);
-  color: var(--fg-primary);
-  cursor: pointer;
-}
-.var-calc-btn:hover { background: var(--bg-hover); }
-
 .var-doc {
   margin: 10px 16px 16px;
   padding: 10px 12px;

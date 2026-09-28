@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, useRef, useEffect, useContext } from 'react';
 
 import { addEdge, Background, BackgroundVariant, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Edge, type Node } from '@xyflow/react';
-import { evaluateExpression, inferKind, isObjectResult, type EvalResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
+import { evaluateExpression, inferKind, isObjectResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
 import { renderValueToken } from '../common/ValueToken';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
@@ -25,31 +25,11 @@ const LocationView = () => {
   let {worldState} = useContext(DslContext)
 
   let [locationData, setLocationData] = useState<SerializedLocation | undefined>(undefined)
-  // null = calculated but not resolvable (e.g. FunctionCall/RefChain)
-  // undefined = not yet calculated (button not clicked)
-  const [computedValues, setComputedValues] = useState<Record<string, EvalResult | null>>({})
   const [leftTab, setLeftTab] = useState<'variables' | 'npcs'>('variables')
   const [viewMode, setViewMode] = useState<'map' | 'tree'>('map')
   const [selectedVariable, setSelectedVariable] = useState<string | null>(null)
 
-  const calculateVariable = (variable: SerializedVariableDecl, key?: string) => {
-    const storeKey = key ?? variable.target ?? ''
-    const result = evaluateExpression(variable.value, { variableName: variable.target, worldState })
-    const updates: Record<string, EvalResult | null> = { [storeKey]: result ?? null }
-
-    if (isObjectResult(result)) {
-      const obj = result as SerialisedObjectDeclaration
-      for (const propDecl of obj.computedPropertyDecls) {
-        const propKey = `${storeKey}.${propDecl.target ?? ''}`
-        const propResult = evaluateExpression(propDecl.value, { variableName: propDecl.target, worldState })
-        updates[propKey] = propResult ?? null
-      }
-    }
-
-    setComputedValues(prev => ({ ...prev, ...updates }))
-  }
-
-  const renderObjectProps = (obj: SerialisedObjectDeclaration, parentKey: string) => (
+  const renderObjectProps = (obj: SerialisedObjectDeclaration) => (
     <div style={{ marginLeft: 16, marginTop: 2 }}>
       {Object.entries(obj.staticProperties).map(([propName, propValue]) => (
         <div key={propName} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -59,22 +39,13 @@ const LocationView = () => {
         </div>
       ))}
       {obj.computedPropertyDecls.map((propDecl) => {
-        const propKey = `${parentKey}.${propDecl.target ?? ''}`
-        const hasPropCalc = propKey in computedValues
-        const propComputed = computedValues[propKey]
+        const propValue = evaluateExpression(propDecl.value, { variableName: propDecl.target, worldState })
         return (
-          <div key={propDecl.target} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div key={propDecl.target} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="tok-comment">computed</span>
             <span className="tok-variable">{propDecl.target}</span>
-            <button className="var-calc-btn" onClick={() => calculateVariable(propDecl, propKey)}>
-              Calculate
-            </button>
-            {hasPropCalc && (
-              <>
-                <span className="tok-operator">=</span>
-                {renderValueToken(propComputed)}
-              </>
-            )}
+            <span className="tok-operator">=</span>
+            {renderValueToken(propValue)}
           </div>
         )
       })}
@@ -121,13 +92,11 @@ const LocationView = () => {
                   const isSelected = selectedVariable === variable.target
 
                   if (isComputed) {
-                    const key = variable.target ?? ''
-                    const hasCalculated = key in computedValues
-                    const computed = computedValues[key]
-
-                    // Evaluate eagerly to get object structure for preview (safe - ObjectDeclaration has no side effects)
-                    const preview = evaluateExpression(variable.value, { variableName: variable.target, worldState })
-                    const previewObj = isObjectResult(preview) ? preview : undefined
+                    // Live view of the current value - re-evaluated on every render, so it
+                    // reflects any worldState change (local command or another page's, via
+                    // DslContext.applyCommandResponse / the /state-sync broadcast).
+                    const value = evaluateExpression(variable.value, { variableName: variable.target, worldState })
+                    const valueObj = isObjectResult(value) ? value : undefined
 
                     return (
                       <div
@@ -141,19 +110,14 @@ const LocationView = () => {
                           <div className="declaration">
                             <span className="tok-comment">computed</span>
                             <span className="tok-variable">{variable.target}</span>
-                            {!previewObj && (
-                              <button className="var-calc-btn" onClick={(e) => { e.stopPropagation(); calculateVariable(variable) }}>
-                                Calculate
-                              </button>
-                            )}
-                            {!previewObj && hasCalculated && (
+                            {!valueObj && (
                               <>
                                 <span className="tok-operator">=</span>
-                                {renderValueToken(computed)}
+                                {renderValueToken(value)}
                               </>
                             )}
                           </div>
-                          {previewObj && renderObjectProps(previewObj, key)}
+                          {valueObj && renderObjectProps(valueObj)}
                         </div>
                       </div>
                     )
@@ -175,7 +139,7 @@ const LocationView = () => {
                             <span className="tok-keyword">object</span>
                             <span className="tok-variable">{variable.target}</span>
                           </div>
-                          {renderObjectProps(obj, variable.target ?? '')}
+                          {renderObjectProps(obj)}
                         </div>
                       </div>
                     )
