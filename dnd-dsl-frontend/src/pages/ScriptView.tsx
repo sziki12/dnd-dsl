@@ -1,5 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined';
+import CloseIcon from '@mui/icons-material/Close';
 import { DslContext, type ScriptRunResult } from '../contexts/DslContext';
 import { ScriptStateContext, type ScriptHistoryItem } from '../contexts/ScriptStateContext';
 import { useScriptEditor } from '../common/useScriptEditor';
@@ -79,9 +81,29 @@ export default function ScriptView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<ScriptRunResult | null>(restored?.result ?? null);
+  const [history, setHistory] = useState<ScriptHistoryItem[]>(restored?.history ?? []);
+
+  // Which history entry (if any) the editor currently mirrors exactly - drives the
+  // sidebar highlight. Restored by matching the restored result back to its entry
+  // (same object, since ScriptStateContext is ref-backed, not serialized).
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(() => {
+    if (!restored?.result) return null;
+    const idx = (restored.history ?? []).findIndex(h => h.result === restored.result);
+    return idx === -1 ? null : idx;
+  });
+
+  // Any edit that leaves the text no longer matching the selected entry's source
+  // clears the highlight - editing forks away from that historical run rather than
+  // "amending" it; the next Run always appends a fresh entry (below), which becomes
+  // the new selection.
   const persistSource = useCallback(
-    (text: string) => scriptState.writeState({ world, source: text }),
-    [scriptState, world],
+    (text: string) => {
+      scriptState.writeState({ world, source: text });
+      setSelectedIndex(prev => (prev !== null && history[prev]?.source !== text ? null : prev));
+    },
+    [scriptState, world, history],
   );
 
   const { containerRef, getValue, setValue, ready } = useScriptEditor(
@@ -90,10 +112,6 @@ export default function ScriptView() {
     restored?.source || header,
     persistSource,
   );
-
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<ScriptRunResult | null>(restored?.result ?? null);
-  const [history, setHistory] = useState<ScriptHistoryItem[]>(restored?.history ?? []);
 
   // Dragged sizes persist across visits (localStorage) - the handle sits on the
   // output panel's top edge and the history sidebar's left edge, so both grow
@@ -117,6 +135,27 @@ export default function ScriptView() {
     setRunning(false);
     setResult(res);
     setHistory(prev => [{ source, result: res }, ...prev].slice(0, 20));
+    setSelectedIndex(0);
+  };
+
+  // Stashes the current text as a history entry without running it - lets you park
+  // a draft, flip through older entries, and come back to keep writing it later.
+  const saveDraft = () => {
+    const source = getValue();
+    if (source.replace(HEADER_LINE, '').trim().length === 0) return;
+    setHistory(prev => [{ source, result: null }, ...prev].slice(0, 20));
+    setSelectedIndex(0);
+    setResult(null);
+  };
+
+  // Only drafts are deletable - a run's entry is the record of what actually
+  // happened, same as the rest of the history list.
+  const deleteDraft = (i: number) => {
+    setHistory(prev => prev.filter((_, idx) => idx !== i));
+    setSelectedIndex(prev => {
+      if (prev === null || prev === i) return null;
+      return prev > i ? prev - 1 : prev;
+    });
   };
 
   return (
@@ -148,6 +187,20 @@ export default function ScriptView() {
               <PlayArrowIcon style={{ fontSize: 16 }} />
               {running ? 'Running…' : 'Run'}
             </button>
+            <button
+              onClick={saveDraft}
+              disabled={!ready}
+              title="Save the current script to history without running it"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'transparent', color: 'var(--fg-primary)', border: '1px solid var(--bd-soft)', borderRadius: 3,
+                padding: '4px 12px', fontSize: 12, cursor: !ready ? 'default' : 'pointer',
+                opacity: !ready ? 0.5 : 1,
+              }}
+            >
+              <SaveOutlinedIcon style={{ fontSize: 16 }} />
+              Save
+            </button>
             <span style={{ color: 'var(--fg-secondary)', fontSize: 11 }}>Ctrl+Enter to run script | Ctrl+Space for suggestions</span>
           </div>
 
@@ -166,26 +219,51 @@ export default function ScriptView() {
           <div style={{ width: historyWidth, flexShrink: 0, overflow: 'auto', padding: 8 }}>
             <div style={{ color: 'var(--fg-secondary)', fontSize: 11, marginBottom: 6 }}>History</div>
             {history.map((h, i) => {
-              const summary = h.result.ok ? summarizeEvents(h.result.events) : '';
+              const isDraft = h.result === null;
+              const summary = h.result?.ok ? summarizeEvents(h.result.events) : '';
+              const isSelected = i === selectedIndex;
               return (
-                <button
+                <div
                   key={i}
-                  onClick={() => { setValue(h.source); setResult(h.result); }}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => { setValue(h.source); setResult(h.result); setSelectedIndex(i); }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { setValue(h.source); setResult(h.result); setSelectedIndex(i); } }}
                   title={h.source}
                   style={{
-                    display: 'block', width: '100%', textAlign: 'left', marginBottom: 4,
-                    background: 'transparent', border: '1px solid var(--bd-soft)', borderRadius: 3,
-                    color: h.result.ok ? 'var(--fg-primary)' : 'var(--error)',
+                    position: 'relative', width: '100%', textAlign: 'left', marginBottom: 4,
+                    background: isSelected ? 'var(--bg-selection)' : 'transparent',
+                    border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--bd-soft)'}`,
+                    borderRadius: 3,
+                    color: h.result === null ? 'var(--fg-secondary)' : h.result.ok ? 'var(--fg-primary)' : 'var(--error)',
                     fontFamily: 'var(--font-mono)', fontSize: 11, padding: '4px 6px', cursor: 'pointer',
+                    boxSizing: 'border-box',
                   }}
                 >
-                  <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: isDraft ? 16 : 0 }}>
                     {h.source.replace(HEADER_LINE, '').trim().split('\n')[0] || '(empty)'}
                   </div>
-                  {summary && (
+                  {isDraft ? (
+                    <div style={{ color: 'var(--fg-muted)', fontSize: 10, marginTop: 2, fontStyle: 'italic' }}>draft - not run</div>
+                  ) : summary && (
                     <div style={{ color: 'var(--fg-secondary)', fontSize: 10, marginTop: 2 }}>{summary}</div>
                   )}
-                </button>
+                  {isDraft && (
+                    <button
+                      onClick={e => { e.stopPropagation(); deleteDraft(i); }}
+                      title="Delete this draft"
+                      style={{
+                        position: 'absolute', top: 3, right: 3,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        width: 16, height: 16, padding: 0,
+                        background: 'transparent', border: 'none', borderRadius: 3,
+                        color: 'var(--fg-muted)', cursor: 'pointer',
+                      }}
+                    >
+                      <CloseIcon style={{ fontSize: 13 }} />
+                    </button>
+                  )}
+                </div>
               );
             })}
           </div>

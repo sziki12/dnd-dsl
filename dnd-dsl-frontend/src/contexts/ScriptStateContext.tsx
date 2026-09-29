@@ -1,7 +1,8 @@
 import { createContext, useMemo, useRef } from 'react';
 import type { ScriptRunResult } from './DslContext';
 
-export type ScriptHistoryItem = { source: string; result: ScriptRunResult };
+/** `result: null` marks a draft entry, stashed via "Save" without being run. */
+export type ScriptHistoryItem = { source: string; result: ScriptRunResult | null };
 
 type ScriptState = {
   /** The world file the persisted state belongs to; a mismatch discards it. */
