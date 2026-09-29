@@ -23,9 +23,9 @@ function Contact() {
   return <h1>Contact Page</h1>;
 }
 
-function createRoute({path, name, element, }:{path:string, name:string, element:JSX.Element})
+function createRoute({path, element, }:{path:string, element:JSX.Element})
 {
-  return  <Route path={path} element={<PageWrapper name={name}>{element}</PageWrapper>}  />
+  return  <Route path={path} element={<PageWrapper>{element}</PageWrapper>}  />
 }
 
 function App() {
@@ -33,11 +33,11 @@ function App() {
     <ContextWrapper>
       <BrowserRouter>
         <Routes>
-          {createRoute({path:"/", element:<Home />, name:"Home Page"})}
-          {createRoute({path:"/location/:locationName", element:<LocationView />, name:"Location Page"})}
-          {createRoute({path:"/npcs", element:<NpcsView />, name:"NPCs Page"})}
-          {createRoute({path:"/script", element:<ScriptView />, name:"Script Page"})}
-          {createRoute({path:"/editor", element:<DslEditor />, name:"Editor Page"})}
+          {createRoute({path:"/", element:<Home />})}
+          {createRoute({path:"/location/:locationName", element:<LocationView />})}
+          {createRoute({path:"/npcs", element:<NpcsView />})}
+          {createRoute({path:"/script", element:<ScriptView />})}
+          {createRoute({path:"/editor", element:<DslEditor />})}
         </Routes>
       </BrowserRouter>
       <ReminderToast />

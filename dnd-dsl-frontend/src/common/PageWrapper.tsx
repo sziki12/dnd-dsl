@@ -1,6 +1,6 @@
 import AppShell from "./shell/AppShell"
 
-export default function PageWrapper({ children, name }: { children: React.ReactNode, name: string }) {
+export default function PageWrapper({ children }: { children: React.ReactNode }) {
 
-    return <AppShell pageName={name}>{children}</AppShell>
+    return <AppShell>{children}</AppShell>
 }

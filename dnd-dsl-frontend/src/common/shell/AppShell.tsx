@@ -2,10 +2,9 @@ import type { ReactNode } from 'react';
 import TitleBar from './TitleBar';
 import ActivityBar from './ActivityBar';
 import Sidebar from './Sidebar';
-import TabStrip from './TabStrip';
 import StatusBar from './StatusBar';
 
-export default function AppShell({ pageName, children }: { pageName: string; children: ReactNode }) {
+export default function AppShell({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
@@ -20,7 +19,7 @@ export default function AppShell({ pageName, children }: { pageName: string; chi
       }}
     >
       <div style={{ gridArea: 'titlebar' }}>
-        <TitleBar pageName={pageName} />
+        <TitleBar />
       </div>
       <div style={{ gridArea: 'activitybar' }}>
         <ActivityBar />
@@ -29,7 +28,6 @@ export default function AppShell({ pageName, children }: { pageName: string; chi
         <Sidebar />
       </div>
       <div style={{ gridArea: 'main', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-        <TabStrip />
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
           {children}
         </div>
