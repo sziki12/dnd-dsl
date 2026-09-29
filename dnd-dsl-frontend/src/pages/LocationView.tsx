@@ -27,21 +27,55 @@ const LocationView = () => {
   let [locationData, setLocationData] = useState<SerializedLocation | undefined>(undefined)
   const [leftTab, setLeftTab] = useState<'variables' | 'npcs'>('variables')
   const [viewMode, setViewMode] = useState<'map' | 'tree'>('map')
-  const [selectedVariable, setSelectedVariable] = useState<string | null>(null)
 
-  const renderObjectProps = (obj: SerialisedObjectDeclaration) => (
-    <div style={{ marginLeft: 16, marginTop: 2 }}>
-      {Object.entries(obj.staticProperties).map(([propName, propValue]) => (
-        <div key={propName} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span className="tok-variable">{propName}</span>
-          <span className="tok-operator">=</span>
-          {renderValueToken(propValue)}
-        </div>
-      ))}
+  // What the doc panel below the tree currently shows - `path` is a dot-joined name
+  // path (unique across nesting depth, stable across worldState updates, since it's
+  // built from declaration names rather than object identity) used only to detect
+  // "is this the same row clicked again"; `decl` is what the panel displays.
+  type DocTarget = Pick<SerializedVariableDecl, 'target' | 'isComputed'>
+  const [selectedVariable, setSelectedVariable] = useState<{ path: string; decl: DocTarget } | null>(null)
+
+  // Clicking an already-selected row deselects it instead of re-selecting it.
+  const toggleSelected = (path: string, decl: DocTarget) => {
+    setSelectedVariable(prev => (prev?.path === path ? null : { path, decl }))
+  }
+
+  const renderObjectProps = (obj: SerialisedObjectDeclaration, parentPath: string) => (
+    <div style={{ marginLeft: 16, marginTop: 2, fontFamily: 'var(--font-mono)', fontSize: 12.5 }}>
+      {Object.entries(obj.staticProperties).map(([propName, propValue]) => {
+        const path = `${parentPath}.${propName}`
+        const isSelected = selectedVariable?.path === path
+        const decl: DocTarget = { target: propName, isComputed: undefined }
+        return isObjectResult(propValue) ? (
+          <div key={propName}>
+            <div className={"var-prop " + (isSelected ? 'selected' : '')} onClick={() => toggleSelected(path, decl)}>
+              <span className="tok-keyword">object</span>
+              <span className="tok-variable">{propName}</span>
+            </div>
+            {renderObjectProps(propValue, path)}
+          </div>
+        ) : (
+          <div key={propName} className={"var-prop " + (isSelected ? 'selected' : '')} onClick={() => toggleSelected(path, decl)}>
+            <span className="tok-variable">{propName}</span>
+            <span className="tok-operator">=</span>
+            {renderValueToken(propValue)}
+          </div>
+        )
+      })}
       {obj.computedPropertyDecls.map((propDecl) => {
         const propValue = evaluateExpression(propDecl.value, { variableName: propDecl.target, worldState })
-        return (
-          <div key={propDecl.target} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        const path = `${parentPath}.${propDecl.target}`
+        const isSelected = selectedVariable?.path === path
+        return isObjectResult(propValue) ? (
+          <div key={propDecl.target}>
+            <div className={"var-prop " + (isSelected ? 'selected' : '')} onClick={() => toggleSelected(path, propDecl)}>
+              <span className="tok-comment">computed</span>
+              <span className="tok-variable">{propDecl.target}</span>
+            </div>
+            {renderObjectProps(propValue, path)}
+          </div>
+        ) : (
+          <div key={propDecl.target} className={"var-prop " + (isSelected ? 'selected' : '')} onClick={() => toggleSelected(path, propDecl)}>
             <span className="tok-comment">computed</span>
             <span className="tok-variable">{propDecl.target}</span>
             <span className="tok-operator">=</span>
@@ -61,8 +95,6 @@ const LocationView = () => {
     setSelectedVariable(null)
     console.log(`Loaded location data for ${locationName}:`, newLocation)
   },[worldState, locationName])
-
-  const selectedVar = locationData?.variables.find(v => v.target === selectedVariable)
 
   return (
     <div className="h-full w-full flex flex-col lg:flex-row" style={{ background: 'var(--bg-editor)', color: 'var(--fg-primary)' }}>
@@ -89,7 +121,8 @@ const LocationView = () => {
               <div style={{ padding: '8px 0' }}>
                 {locationData?.variables.map((variable: SerializedVariableDecl, i: number) => {
                   const isComputed = variable.isComputed === 'computed'
-                  const isSelected = selectedVariable === variable.target
+                  const path = variable.target ?? ''
+                  const isSelected = selectedVariable?.path === path
 
                   if (isComputed) {
                     // Live view of the current value - re-evaluated on every render, so it
@@ -99,14 +132,12 @@ const LocationView = () => {
                     const valueObj = isObjectResult(value) ? value : undefined
 
                     return (
-                      <div
-                        key={variable.target}
-                        className={"var-row " + (isSelected ? 'selected' : '')}
-                        style={{ alignItems: 'flex-start' }}
-                        onClick={() => setSelectedVariable(variable.target ?? null)}
-                      >
-                        <div className="gutter">{i + 1}</div>
-                        <div>
+                      <div key={variable.target}>
+                        <div
+                          className={"var-row " + (isSelected ? 'selected' : '')}
+                          onClick={() => toggleSelected(path, variable)}
+                        >
+                          <div className="gutter">{i + 1}</div>
                           <div className="declaration">
                             <span className="tok-comment">computed</span>
                             <span className="tok-variable">{variable.target}</span>
@@ -117,8 +148,8 @@ const LocationView = () => {
                               </>
                             )}
                           </div>
-                          {valueObj && renderObjectProps(valueObj)}
                         </div>
+                        {valueObj && renderObjectProps(valueObj, path)}
                       </div>
                     )
                   }
@@ -127,20 +158,18 @@ const LocationView = () => {
                   if (isObjectResult(value)) {
                     const obj = value as SerialisedObjectDeclaration
                     return (
-                      <div
-                        key={variable.target}
-                        className={"var-row " + (isSelected ? 'selected' : '')}
-                        style={{ alignItems: 'flex-start' }}
-                        onClick={() => setSelectedVariable(variable.target ?? null)}
-                      >
-                        <div className="gutter">{i + 1}</div>
-                        <div>
+                      <div key={variable.target}>
+                        <div
+                          className={"var-row " + (isSelected ? 'selected' : '')}
+                          onClick={() => toggleSelected(path, variable)}
+                        >
+                          <div className="gutter">{i + 1}</div>
                           <div className="declaration">
                             <span className="tok-keyword">object</span>
                             <span className="tok-variable">{variable.target}</span>
                           </div>
-                          {renderObjectProps(obj)}
                         </div>
+                        {renderObjectProps(obj, path)}
                       </div>
                     )
                   }
@@ -150,7 +179,7 @@ const LocationView = () => {
                     <div
                       key={variable.target}
                       className={"var-row " + (isSelected ? 'selected' : '')}
-                      onClick={() => setSelectedVariable(variable.target ?? null)}
+                      onClick={() => toggleSelected(path, variable)}
                     >
                       <div className="gutter">{i + 1}</div>
                       <div className="declaration">
@@ -171,14 +200,14 @@ const LocationView = () => {
                 })}
               </div>
 
-              {selectedVar && (
+              {selectedVariable && (
                 <div className="var-doc">
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span className="tok-type">{selectedVar.isComputed === 'computed' ? 'computed' : 'let'}</span>
-                    <span className="tok-variable">{selectedVar.target}</span>
+                    <span className="tok-type">{selectedVariable.decl.isComputed === 'computed' ? 'computed' : 'let'}</span>
+                    <span className="tok-variable">{selectedVariable.decl.target}</span>
                   </div>
                   <div className="meta">
-                    <span><strong>computed:</strong> {selectedVar.isComputed === 'computed' ? 'yes' : 'no'}</span>
+                    <span><strong>computed:</strong> {selectedVariable.decl.isComputed === 'computed' ? 'yes' : 'no'}</span>
                   </div>
                 </div>
               )}

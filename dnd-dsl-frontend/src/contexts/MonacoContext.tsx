@@ -7,7 +7,7 @@ import { DslContext } from './DslContext';
 type MonacoContext = {
     startEditor: (element: HTMLDivElement) => Promise<void>,
     disposeEditor: () => Promise<void>,
-    saveFile: () => Promise<void>,
+    saveFile: () => Promise<{ ok: boolean; errors?: string[] }>,
 }
 
 export const MonacoContext = createContext<MonacoContext>({} as MonacoContext);
@@ -77,12 +77,12 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const saveFile = async () => {
+    const saveFile = async (): Promise<{ ok: boolean; errors?: string[] }> => {
         const content = editorAppRef.current?.getEditor()?.getModel()?.getValue();
-        if (!content) return;
+        if (!content) return { ok: false, errors: ['Nothing to save.'] };
 
         await fileContext?.saveFile({identifier: {adventure: dlsContext.adventure, world:dlsContext.world}, content: content})
-        await dlsContext.reloadWorld();
+        return await dlsContext.reloadWorld();
     };
 
     useEffect(()=>{

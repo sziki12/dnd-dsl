@@ -170,7 +170,7 @@ export default function ScriptView() {
               return (
                 <button
                   key={i}
-                  onClick={() => setValue(h.source)}
+                  onClick={() => { setValue(h.source); setResult(h.result); }}
                   title={h.source}
                   style={{
                     display: 'block', width: '100%', textAlign: 'left', marginBottom: 4,

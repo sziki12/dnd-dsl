@@ -178,6 +178,21 @@
 }
 .var-row .declaration { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 
+/* A nested object/computed property row inside renderObjectProps - same clickable/
+   selectable behavior as .var-row, without its gutter-column grid layout. */
+.var-prop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: 0 -4px;
+}
+.var-prop:hover { background: var(--bg-hover); }
+.var-prop.selected { background: var(--bg-selection); }
+
 .var-doc {
   margin: 10px 16px 16px;
   padding: 10px 12px;
