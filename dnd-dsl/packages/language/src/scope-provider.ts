@@ -187,7 +187,7 @@ export class DndScopeProvider extends DefaultScopeProvider
     {
         const owner = decl.$container;
         return isForStatement(owner) && owner.loopVar === decl
-            && !!owner.collection && ENTITY_COLLECTION_FIELDS.has(owner.collection.field);
+            && !!owner.source && !!owner.source.field && ENTITY_COLLECTION_FIELDS.has(owner.source.field);
     }
 
     /** True for a `for x in <list variable> do ... end` loop variable. The elements

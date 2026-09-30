@@ -4,7 +4,6 @@ import {
     ChangeOccurrence,
     Code,
     CodeBlock,
-    CollectionRef,
     ConditionalBlock,
     ConstantExpression,
     EnumValueDecl,
@@ -255,6 +254,9 @@ export class LangiumInterpreterService {
     }
 
     private evaluateRefChain(ctx: EvalContext, chain: RefChain): any {
+        if (chain.field) 
+            return this.resolveFieldValue(ctx, chain);
+
         if (isEventRefItem(chain.first)) {
             //TODO EventRefItem
             throw new Error(`RefChain heads of kind '${chain.first.$type}' are not supported yet`);
@@ -539,7 +541,7 @@ export class LangiumInterpreterService {
             case 'ForStatement': {
                 const c = code as unknown as ForStatement;
                 const loopVarName = c.loopVar.name ?? '';
-                const values = c.collection ? this.resolveCollection(ctx, c.collection) : this.resolveListSource(ctx, c.source!);
+                const values = c.source ? this.resolveFieldValue(ctx, c.source) as unknown[] : this.resolveListSource(ctx, c.source!);
                 for (const value of values) {
                     ctx.scope[loopVarName] = value;
                     for (const block of c.body) {
@@ -769,15 +771,18 @@ export class LangiumInterpreterService {
      *  unknown field at parse time, so `field` here is trusted to be legal for `head`'s
      *  resolved type - this only decides, per field, what an element becomes. 
      **/
-    private resolveCollection(ctx: EvalContext, collection: CollectionRef): unknown[] {
-        const head = this.resolveCollectionHead(ctx, collection.head);
-        if (!head) throw new Error(`Unresolved collection head: ${collection.head.$type}`);
-        const items = (head as unknown as Record<string, unknown>)[collection.field];
-        if (!Array.isArray(items)) {
-            throw new Error(`'${collection.field}' is not a collection on ${head.$type}`);
+    private resolveFieldValue(ctx: EvalContext, chain: RefChain): unknown {
+        const head = this.resolveCollectionHead(ctx, chain.first);
+        if (!head) throw new Error(`Unresolved collection head: ${chain.first.$type}`);
+
+        // Scalar fields read straight off the entity node.
+        if (chain.field === 'name' || chain.field === 'description') {
+            return (head as unknown as Record<string, unknown>)[chain.field];
         }
 
-        switch (collection.field) {
+        const items = (head as unknown as Record<string, unknown>)[chain.field!];
+        if (!Array.isArray(items)) throw new Error(`'${chain.field}' is not a collection on ${head.$type}`);
+        switch (chain.field) {
             // Entities with their own `.variables` - bind a live handle so `x.member`
             // reads/writes persist through the entity's real StatePath.
             case 'npcs': case 'locations': case 'quests': case 'objectives': case 'sublocations':
@@ -799,14 +804,18 @@ export class LangiumInterpreterService {
             case 'variables':
                 return (items as VariableDeclaration[]).map(v => v.value ? this.evaluateExpression(ctx, v.value) : undefined);
             default:
-                throw new Error(`Unsupported collection field: ${collection.field}`);
+                throw new Error(`Unsupported collection field: ${chain.field}`);
         }
     }
 
-    /** Resolves a CollectionRef's head to the concrete node its field is read off.
-     *  Location/Quest/Npc reuse their existing cross-reference; World has none (only
-     *  one per document); Enum's is a direct [Enum:ID] reference (see the grammar
-     *  comment on EnumRefItem) resolved by Langium's own default scoping. */
+    /** 
+     *  Resolves a CollectionRef's head to the concrete node its field is read off.
+     *  Location/Quest/Npc reuse their existing cross-reference; World has none 
+     *  (only one per document); Enum's is a direct [Enum:ID] reference 
+     *  (see the grammar comment on EnumRefItem) resolved by Langium's own default scoping.
+     *  A VariableRefItem head is only meaningful here when it's a `for`-loop variable
+     *  bound to a LoopEntityHandle - its path is resolved back to the live node. 
+     **/
     private resolveCollectionHead(ctx: EvalContext, start: RefChainStart): AstNode | undefined {
         if (isLocationRefItem(start)) return start.val.val.ref;
         if (isQuestRefItem(start)) return start.val.val.ref;
@@ -815,6 +824,14 @@ export class LangiumInterpreterService {
         if (isEnumRefItem(start)) return start.val.ref;
         if (isThisRefItem(start)) return ctx.thisEntity;
         if (isParentRefItem(start)) return ctx.parentEntity;
+        if (isVariableRefItem(start)) {
+            const decl = start.val.val.ref;
+            const value = decl ? ctx.scope[decl.target ?? decl.name ?? ''] : undefined;
+            if (isLoopEntityHandle(value)) {
+                if (!ctx.model) throw new Error(`No live model available to resolve '${decl?.name}'`);
+                return statePathToNode(ctx.model, value.path) as AstNode | undefined;
+            }
+        }
         return undefined;
     }
 

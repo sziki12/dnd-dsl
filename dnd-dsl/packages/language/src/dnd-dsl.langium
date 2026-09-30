@@ -124,13 +124,21 @@ Code:
     | RemindStatement
     | PrintStatement
     | ForStatement
+    | QuestStatements
     ;
+//General Statements
 SetStatement:
-    'set' target=RefChain '=' value=(Expression);
+    'set' target=RefChain ('=' | 'to') value=(Expression);
 ConditionalBlock:
     'when' condition=BoolExpression 'do' body+=CodeBlock ('otherwise' 'do' otherwise+=CodeBlock)? 'end';
 ReturnStatement:
     'return' (returnValue=(Expression))?;
+VariableAssignment:
+    target=VariableRef ('=' | 'to') value=(Expression);
+PrintStatement:
+    'print' value=(Expression);
+
+//Remind Statement
 RemindStatement:
     'remind' label=STRING ('after' delay=Duration)?
     ('severity' severity=('info' | 'warning' | 'urgent'))?
@@ -138,19 +146,24 @@ RemindStatement:
     ('do' body=CodeBlock 'end')?;
 Duration:
     amount=Expression unit=('round' | 'rounds' | 'minute' | 'minutes' | 'hour' | 'hours' | 'day' | 'days');
-VariableAssignment:
-    target=VariableRef '=' value=(Expression);
-PrintStatement:
-    'print' value=(Expression);
+
+//For Loops
 ForStatement:
-    'for' loopVar=LoopVariable 'in' (collection=CollectionRef | source=RefChain) 'do' body+=CodeBlock 'end';
+    'for' loopVar=LoopVariable 'in' source=RefChain 'do' body+=CodeBlock 'end';
 LoopVariable infers VariableDeclaration:
     name=ID;
-
-CollectionRef:
-    head=RefChainStart '.' field=('locations' | 'npcs' | 'quests' | 'events' | 'functions'
-        | 'enums' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values');
-
+    
+//Quest Statements
+QuestStatements:
+    AcceptQuest |
+    FailStatement |
+    CompleteStatement;
+AcceptQuest infers QuestStatements:
+    status='accept' 'quest' target=QuestRef;
+FailStatement infers QuestStatements:
+    status='fail' ('quest' target=QuestRef | 'objective' target=ObjectiveRef);
+CompleteStatement infers QuestStatements:
+    status='complete' ('quest' target=QuestRef | 'objective' target=ObjectiveRef);
 
 //General Declarations
 VariableDeclaration:
@@ -230,7 +243,13 @@ Parameter infers VariableDeclaration:
 
 //References
 RefChain:
-    first=RefChainStart ('.' rest+=VariableRefItem)*;
+    first=RefChainStart ('.' rest+=VariableRefItem)* ('.' field=(
+        //Collection fields
+        'locations' | 'npcs' | 'quests' | 'events' | 'functions'
+        | 'enums' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values'
+        //Single-value fields
+        | 'name' | 'description'
+        ))?;
 
 RefChainStart:
     VariableRefItem

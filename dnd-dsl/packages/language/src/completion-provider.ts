@@ -4,9 +4,9 @@ import { DefaultCompletionProvider, type CompletionContext } from "langium/lsp";
 import type { LangiumServices } from "langium/lsp";
 import { CompletionItemKind, CompletionList } from "vscode-languageserver";
 import type { CancellationToken, CompletionItem, CompletionParams } from "vscode-languageserver";
-import { isRefChain, isVariableRef, type RefChain } from "./generated/ast.js";
+import { isChangeOccurrence, isRefChain, isSetStatement, isVariableRef, type RefChain } from "./generated/ast.js";
 import { PREDEFINED_SIGNATURES } from "./evaluation/dnd-dsl-predefined-signatures.js";
-import { COLLECTION_FIELDS, ObjectKind } from "./dnd-dsl-validator.js";
+import { COLLECTION_FIELDS, SIMPLE_FIELDS, ObjectKind, collectionHeadKind } from "./dnd-dsl-validator.js";
 
 /** The name slot of `call predefined <name>` */
 const CALL_KEYWORD = "call";
@@ -26,21 +26,6 @@ const ENTITY_TYPE: Record<string, ObjectKind> = {
 const TRIGGERED_KEYWORD = "triggered";
 const ENTITY_SLOT = new RegExp(
     `(?:^|[^\\w"])(${Object.keys(ENTITY_TYPE).join("|")})[ \\t]+(?:${TRIGGERED_KEYWORD}[ \\t]+)?("?)([^"\\n]*)$`,
-);
-
-const COLLECTION_HEAD_TYPE: Record<string, ObjectKind> = {
-    world: ObjectKind.World,
-    location: ObjectKind.Location,
-    npc: ObjectKind.Npc,
-    quest: ObjectKind.Quest,
-    enum: ObjectKind.Enum,
-};
-const FOR_KEYWORD = "for";
-const IN_KEYWORD = "in";
-const WORD = "\\w+";
-const PROPERTY_ACCESS = "\\.\\s*(\\w*)$";
-const COLLECTION_FIELD_SLOT = new RegExp(
-    `\\b${FOR_KEYWORD}\\s+${WORD}\\s+${IN_KEYWORD}\\s+(${Object.keys(COLLECTION_HEAD_TYPE).join("|")})\\b[^.\\n]*${PROPERTY_ACCESS}`,
 );
 
 export class DndCompletionProvider extends DefaultCompletionProvider {
@@ -75,11 +60,6 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const predefined = this.predefinedCompletions(document, params);
         if (predefined.length > 0) {
             return CompletionList.create(predefined, true);
-        }
-
-        const collectionFields = this.collectionFieldCompletions(document, params);
-        if (collectionFields.length > 0) {
-            return CompletionList.create(collectionFields, true);
         }
 
         return super.getCompletion(document, params, cancelToken);
@@ -119,6 +99,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         let chain: RefChain | undefined;
         let restIndex: number | undefined;
         let replaceFrom = offset;
+        let partial = "";
 
         if (leaf.text === "." && isRefChain(leaf.astNode)) {
             // `Object . <cursor>` - the member segment does not exist in the AST yet
@@ -132,6 +113,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
                 chain = item.$container;
                 restIndex = item.$containerIndex ?? 0;
                 replaceFrom = leaf.offset;
+                partial = leaf.text;
             }
         }
 
@@ -156,6 +138,29 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             const value = this.createReferenceCompletionItem(description, refInfo, context);
             const item = this.fillCompletionItem(context, { ...value, kind: CompletionItemKind.Field });
             if (item) items.push(item);
+        }
+
+        // `field` (locations/npcs/.../name/description) is only legal directly off the
+        // head, and never as a `set`/`on change` target - mirrors
+        // DndDslValidator.checkRefChainField exactly, so nothing offered here is ever
+        // rejected once picked.
+        const isWriteOrWatchTarget = (isSetStatement(chain.$container) && chain.$container.target === chain)
+            || (isChangeOccurrence(chain.$container) && chain.$container.target === chain);
+        if (restIndex === 0 && !isWriteOrWatchTarget) {
+            const kind = collectionHeadKind(chain.first);
+            if (kind) {
+                const range = { start: document.textDocument.positionAt(replaceFrom), end: params.position };
+                for (const field of COLLECTION_FIELDS[kind].concat(SIMPLE_FIELDS[kind])) {
+                    if (partial && !this.fuzzyMatcher.match(partial, field)) continue;
+                    items.push({
+                        label: field,
+                        kind: CompletionItemKind.Field,
+                        detail: `${kind} . ${field}`,
+                        sortText: "0",
+                        textEdit: { range, newText: field },
+                    });
+                }
+            }
         }
         return items;
     }
@@ -220,28 +225,4 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         return items;
     }
 
-    private collectionFieldCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
-        const td = document.textDocument;
-        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
-        const match = COLLECTION_FIELD_SLOT.exec(line);
-        if (!match) return [];
-
-        const [, headKeyword, partial] = match;
-        const kind = COLLECTION_HEAD_TYPE[headKeyword];
-        if (!kind) return [];
-
-        const range = { start: { line: params.position.line, character: params.position.character - partial.length }, end: params.position };
-        const items: CompletionItem[] = [];
-        for (const field of COLLECTION_FIELDS[kind]) {
-            if (partial && !this.fuzzyMatcher.match(partial, field)) continue;
-            items.push({
-                label: field,
-                kind: CompletionItemKind.Field,
-                detail: `${kind} . ${field}`,
-                sortText: "0",
-                textEdit: { range, newText: field },
-            });
-        }
-        return items;
-    }
 }

@@ -1,0 +1,4 @@
+reference world "WorldName"
+
+print location "Back Alle"
+print location "Riverside Tavern"
