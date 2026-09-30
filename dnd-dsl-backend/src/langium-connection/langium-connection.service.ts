@@ -3,6 +3,7 @@ import { WebSocketGateway, OnGatewayConnection } from '@nestjs/websockets';
 import { WebSocket } from 'ws';
 import { createConnection, InitializeParams, Message, MessageReader, MessageWriter, WorkspaceFolder, Disposable  } from 'vscode-languageserver';
 import { createDndDslServices } from '../dnd-language/language/src/dnd-dsl-module.js';
+import { registerBuiltinDocument } from '../dnd-language/language/src/builtin-documents.js';
 // Import your generated Langium module
 import { IWebSocket, WebSocketMessageReader, WebSocketMessageWriter } from 'vscode-ws-jsonrpc/socket';
 import { NodeFileSystem } from 'langium/node';
@@ -45,6 +46,11 @@ export class LangiumConnectionGateway implements OnGatewayConnection {
         ...NodeFileSystem,
         connection: connection
       });
+
+      // Load pre declared objects
+      // One-time per connection
+      // The client never opens this URI
+      await registerBuiltinDocument(services.shared);
 
       startLanguageServer(services.shared);
 

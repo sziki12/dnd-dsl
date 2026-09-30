@@ -12,6 +12,7 @@ import {
 } from '@dnd-language/index.js';
 import { AstUtils } from 'langium';
 import { parseModel, stringifyNode } from '@dnd-cli/main.js';
+import { registerBuiltinDocument } from '@dnd-language/builtin-documents.js';
 import {
   decodeStatePath,
   encodeStatePath,
@@ -113,6 +114,8 @@ export class WorldStateService {
     const scriptDoc = ws.LangiumDocumentFactory.fromString(scriptSource, scriptUri);
     ws.LangiumDocuments.addDocument(worldDoc);
     ws.LangiumDocuments.addDocument(scriptDoc);
+    // Load pre declared objects
+    await registerBuiltinDocument(shared);
     await ws.DocumentBuilder.build([worldDoc, scriptDoc], { validation: true });
 
     const errors: ScriptParseError[] = [];

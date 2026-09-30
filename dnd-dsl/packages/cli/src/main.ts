@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import { extractDocument, DndDslParseError } from './util.js';
 import { generateJavaScript, /*generateWorldState*/ } from './generator.js';
 import { NodeFileSystem } from 'langium/node';
+import { registerBuiltinDocument } from '../../language/src/builtin-documents.js';
 import * as url from 'node:url';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -42,10 +43,13 @@ export const parseModel = async (fileName: string, paramServices: DndDslServices
     const services = paramServices || createDndDslServices(NodeFileSystem).DndDsl;
     // 1. Document betöltése
     const document = await extractDocument(fileName, services);
-    
+
+    // Load pre declared objects
+    await registerBuiltinDocument(services.shared);
+
     // 2. Explicitly build-elni kell – ez futtatja a linkert!
     await services.shared.workspace.DocumentBuilder.build(
-        [document], 
+        [document],
         { validation: true }
     );
 
