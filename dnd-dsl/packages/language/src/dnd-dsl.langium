@@ -27,6 +27,13 @@ Npc:
     (variables+=VariableDeclaration)*
     (onBlocks+=OnBlock)*;
 
+//TODO Party ref
+Party:
+    'party' name=STRING
+    (Description)?
+    (variables+=VariableDeclaration)*
+    (onBlocks+=OnBlock)*;
+
 //Location
 Location:
     'location' name=STRING
@@ -311,7 +318,7 @@ fragment Description:
 fragment CompleteableEvents:
     ('enabled' 'on' enabled+=BoolExpression)?
     ('requierement' requierement+=BoolExpression)?
-    ('on' ('completed' completed+=CodeBlock) | ('failed' failed+=CodeBlock))*;
+    ('on' ('completed' completed+=CodeBlock | 'failed' failed+=CodeBlock))*;
 
 
 

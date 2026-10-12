@@ -1,5 +1,6 @@
 import { URI, type LangiumDocument } from 'langium';
 import type { LangiumSharedServices } from 'langium/lsp';
+import { OBJECTIVE_STATUSES, QUEST_STATUSES } from './evaluation/dnd-dsl-status.js';
 
 /**
  * Enums that exist in every world without the DM ever declaring them. Injected into
@@ -15,8 +16,8 @@ import type { LangiumSharedServices } from 'langium/lsp';
  */
 export const BUILTIN_SOURCE = [
     'world "__builtin__"',
-    'enum QuestStatus { Unavailable, Available, Started, Succeeded, Failed }',
-    'enum ObjectiveStatus { Incomplete, Completed, Failed }',
+    `enum QuestStatus { ${QUEST_STATUSES.join(', ')} }`,
+    `enum ObjectiveStatus { ${OBJECTIVE_STATUSES.join(', ')} }`,
 ].join('\n');
 
 export const BUILTIN_URI = 'memory://builtin/status.dnd';

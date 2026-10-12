@@ -6,6 +6,7 @@ import {
     isNpc,
     isObjectDeclaration,
     isObjective,
+    isParty,
     isQuest,
     isVariableDeclaration,
     isWorld,
@@ -15,6 +16,7 @@ import {
     type Npc,
     type ObjectDeclaration,
     type Objective,
+    type Party,
     type Quest,
     type VariableDeclaration,
     type World,
@@ -23,10 +25,10 @@ import {
 // All Langium imports above are used only for their exported type guards / type
 // annotations — no LSP-only services are touched — so this file is safe to import
 // in both the Node.js backend and the browser frontend, same as dnd-dsl-reference.ts.
-export type OwningObject = ObjectDeclaration | Npc | Location | Quest | Objective | Event | World;
+export type OwningObject = ObjectDeclaration | Npc | Party | Location | Quest | Objective | Event | World;
 
 function isOwningObject(node: AstNode): node is OwningObject {
-    return isObjectDeclaration(node) || isNpc(node) || isLocation(node)
+    return isObjectDeclaration(node) || isNpc(node) || isParty(node) || isLocation(node)
         || isQuest(node) || isObjective(node) || isEvent(node) || isWorld(node);
 }
 

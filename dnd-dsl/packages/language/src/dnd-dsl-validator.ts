@@ -395,15 +395,19 @@ export class DndDslValidator {
      *  against. Walking every ancestor (not stopping at the first CodeBlock/etc.)
      *  means a nested object's own non-computed variables, or a ConditionalBlock
      *  inside a handler body, don't break the check - only whether an OnBlock or a
-     *  computed VariableDeclaration encloses the reference at all matters. 
+     *  computed VariableDeclaration encloses the reference at all matters.
+     *  A quest's or objective's own `on completed` / `on failed` block counts as a
+     *  handler body too: it is a bare CodeBlock owned by the Quest/Objective, not an
+     *  OnBlock, but the interpreter binds `this`/`parent` for it the same way.
      **/
     checkThisParentPlacement(node: ThisRefItem | ParentRefItem, accept: ValidationAcceptor): void {
         for (let current: AstNode | undefined = node.$container; current; current = current.$container) {
             if (isOnBlock(current)) return;
+            if (isCodeBlock(current) && (isQuest(current.$container) || isObjective(current.$container))) return;
             if (isVariableDeclaration(current) && current.isComputed === 'computed') return;
         }
         const keyword = node.$type === 'ThisRefItem' ? 'this' : 'parent';
-        accept('error', `'${keyword}' can only be used inside an 'on change'/'on trigger' handler body, or a 'computed' variable's value.`, { node });
+        accept('error', `'${keyword}' can only be used inside an 'on change'/'on trigger'/'on completed'/'on failed' body, or a 'computed' variable's value.`, { node });
     }
 
     private checkUnique(items: NamedNode[], accept: ValidationAcceptor, kind: string): void {

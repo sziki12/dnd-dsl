@@ -21,6 +21,7 @@ import {
   type StatePath,
 } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import type { FiredReminder, ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
+import { seedStatusDefaults } from '@dnd-language/evaluation/dnd-dsl-status.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 import { predefinedFunctions, predefinedFunctionsAsMap } from '../predefined/predefined-functions.js';
 import { type StateOverlayFile } from './state-overlay.types.js';
@@ -61,12 +62,23 @@ export type HandlerIndex = {
 
 @Injectable()
 export class WorldStateService {
-  private _model: Model | undefined = undefined;
+  //Source text of the loaded world
   private _worldSource = '';
+
+  // The parsed AST of the loaded world, without overlay
+  private _model: Model | undefined = undefined;
+  
+  // The current world state, with overlay applied
   private _worldState: any = {};
+
+  // Only values that differ from the source
   private _overlay: Record<string, unknown> = {};
   private _staleOverlayEntries: StatePath[] = [];
+  
   private _statePath: string | undefined = undefined;
+
+  
+  
   private _clock: number = 0;
   private _reminders: ScheduledReminder[] = [];
   private _firedReminders: FiredReminder[] = [];
@@ -334,6 +346,8 @@ export class WorldStateService {
     }
     this._worldState = JSON.parse(stringifyNode(this._model));
     this._worldState.predefinedFunctions = predefinedFunctionsAsMap;
+    // Before the overlay, so a saved Status transition splices into the seeded entry.
+    seedStatusDefaults(this._worldState);
     this._staleOverlayEntries = this.applyOverlay();
   }
 
@@ -341,7 +355,9 @@ export class WorldStateService {
     const stale: StatePath[] = [];
     for (const [encodedPath, value] of Object.entries(this._overlay)) {
       const path = decodeStatePath(encodedPath);
-      if (!this.spliceOverlayValue(path, value)) stale.push(path);
+      
+      if (!this.spliceOverlayValue(path, value)) 
+        stale.push(path);
     }
     return stale;
   }

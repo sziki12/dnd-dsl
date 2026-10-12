@@ -32,6 +32,7 @@ import {
     isObjective,
     isParentRefItem,
     isQuest,
+    isQuestRef,
     isQuestRefItem,
     isRefChain,
     isReferenceExpression,
@@ -42,8 +43,11 @@ import {
     isWorldRefItem,
     LocationExit,
     Model,
+    Objective,
     OnBlock,
     PrintStatement,
+    Quest,
+    QuestStatements,
     RefChain,
     RefChainStart,
     ReferenceExpression,
@@ -61,6 +65,7 @@ import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialize
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
 import { applyArithmetic, applyComparison, applyLogical, negatableBool, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
 import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
+import { objectiveStatusPath, questStatusPath, statusTransition, type StatusAction } from '@dnd-language/evaluation/dnd-dsl-status.js';
 
 type RuntimeScope = Record<string, any>;
 
@@ -538,6 +543,13 @@ export class LangiumInterpreterService {
                 }
                 break;
             }
+            case 'QuestStatements': {
+                const stmt = code as unknown as QuestStatements;
+                const entity = stmt.target.val.ref;
+                if (!entity) throw new Error(`Unresolved ${isQuestRef(stmt.target) ? 'quest' : 'objective'} ref: ${stmt.target.val.$refText}`);
+                this.applyStatusAction(ctx, entity, stmt.status);
+                break;
+            }
             case 'ForStatement': {
                 const c = code as unknown as ForStatement;
                 const loopVarName = c.loopVar.name ?? '';
@@ -603,7 +615,7 @@ export class LangiumInterpreterService {
         }
     }
 
-    /** 
+    /**
      *  Runs a matched handler's body as its own cascade frame: marked fired before the
      *  body runs (so a write inside it can't re-trigger itself), and handlerDepth is
      *  incremented for the body's duration so nested writes/prints/triggers nest
@@ -611,19 +623,51 @@ export class LangiumInterpreterService {
      **/
     private fireHandler(ctx: EvalContext, block: OnBlock, label: string): void {
         (ctx.firedHandlers ??= new Set()).add(block);
+        this.runInFrame(ctx, block.$container, label, () => this.runCodeBlock(ctx, block.body));
+    }
+
+    /**
+     *  One cascade frame: `this`/`parent` bound to `owner`, a `handler` event logged, and
+     *  everything `run` does nested under it. Shared by change/trigger handlers and a
+     *  quest or objective's `on completed` / `on failed` blocks.
+     **/
+    private runInFrame(ctx: EvalContext, owner: OwningObject, label: string, run: () => void): void {
         ctx.handlerDepth = (ctx.handlerDepth ?? 0) + 1;
         const previousThis = ctx.thisEntity;
         const previousParent = ctx.parentEntity;
-        ctx.thisEntity = block.$container;
-        ctx.parentEntity = parentOwningObject(block.$container);
+        ctx.thisEntity = owner;
+        ctx.parentEntity = parentOwningObject(owner);
         ctx.events?.push({ kind: 'handler', label, depth: this.cascadeDepth(ctx) });
         try {
-            this.runCodeBlock(ctx, block.body);
+            run();
         } finally {
             ctx.handlerDepth = (ctx.handlerDepth ?? 1) - 1;
             ctx.thisEntity = previousThis;
             ctx.parentEntity = previousParent;
         }
+    }
+
+    /**
+     *  `accept` / `complete` / `fail` on a quest or objective. Returns whether it applied:
+     *  an action that does not fit the current Status (`accept` on a quest that is not
+     *  Available, anything on a finished one) is a silent no-op, so a script or handler can
+     *  call these defensively. The new Status is written first, so the `on completed` /
+     *  `on failed` blocks it then runs, and any action they take, already see it,
+     *  which also stops a block from re-firing its own transition.
+     **/
+    applyStatusAction(ctx: EvalContext, entity: Quest | Objective, action: StatusAction): boolean {
+        const path = isQuest(entity) ? questStatusPath(entity.name) : objectiveStatusPath(entity.$container.name, entity.name);
+        const transition = statusTransition(isQuest(entity) ? 'quest' : 'objective', action, this.readPath(ctx, path));
+        if (!transition) return false;
+
+        this.pushWrite(ctx, path, transition.to);
+        const blocks = transition.runs ? entity[transition.runs] : [];
+        if (blocks.length > 0) {
+            this.runInFrame(ctx, entity, `on ${transition.runs} ${isQuest(entity) ? 'quest' : 'objective'} "${entity.name}"`, () => {
+                for (const block of blocks) this.runCodeBlock(ctx, block);
+            });
+        }
+        return true;
     }
 
     /** 
