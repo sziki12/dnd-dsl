@@ -49,8 +49,13 @@ export function objectiveStatusPath(questName: string, objectiveName: string): S
     return [{ kind: "objective", questName, name: objectiveName }, { kind: "variable", target: STATUS_VARIABLE }];
 }
 
-/** The three explicit statements: `accept quest`, `complete quest|objective`, `fail quest|objective`. */
-export type StatusAction = "accept" | "complete" | "fail";
+/**
+ * `accept`, `complete` and `fail` are the explicit statements (`accept quest`,
+ * `complete quest|objective`, `fail quest|objective`). `enable` has no statement: it is the
+ * automatic Unavailable -> Available hop the interpreter takes when a quest's `enabled`
+ * condition becomes true.
+ */
+export type StatusAction = "enable" | "accept" | "complete" | "fail";
 export type StatusKind = "quest" | "objective";
 /** Which of the entity's `on completed` / `on failed` blocks a transition runs. */
 export type StatusBlock = "completed" | "failed";
@@ -59,6 +64,7 @@ export type StatusTransition = { to: string; runs?: StatusBlock };
 type Rule<S extends string> = { from: S; to: S; runs?: StatusBlock };
 
 const QUEST_RULES: Partial<Record<StatusAction, Rule<QuestStatusValue>>> = {
+    enable: { from: "Unavailable", to: "Available" },
     accept: { from: "Available", to: "Started" },
     complete: { from: "Started", to: "Succeeded", runs: "completed" },
     fail: { from: "Started", to: "Failed", runs: "failed" },
@@ -69,17 +75,40 @@ const OBJECTIVE_RULES: Partial<Record<StatusAction, Rule<ObjectiveStatusValue>>>
     fail: { from: "Incomplete", to: "Failed", runs: "failed" },
 };
 
+/** A stored status, or the default when there is none (a value that is not a string means unseeded). */
+export function statusOrDefault(kind: StatusKind, current: unknown): string {
+    if (typeof current === "string") return current;
+    return kind === "quest" ? DEFAULT_QUEST_STATUS : DEFAULT_OBJECTIVE_STATUS;
+}
+
+const STATUS_EXPRESSIONS = {
+    QuestCompletedExpression: { kind: "quest", holds: (s: string) => s === "Succeeded" },
+    QuestFailedExpression: { kind: "quest", holds: (s: string) => s === "Failed" },
+    // Crossed `accept` at all, whatever became of the quest since.
+    QuestAcceptedExpression: { kind: "quest", holds: (s: string) => s !== "Unavailable" && s !== "Available" },
+    ObjectiveCompletedExpression: { kind: "objective", holds: (s: string) => s === "Completed" },
+    ObjectiveFailedExpression: { kind: "objective", holds: (s: string) => s === "Failed" },
+} as const;
+
+export type StatusExpressionType = keyof typeof STATUS_EXPRESSIONS;
+
+export function isStatusExpressionType(type: unknown): type is StatusExpressionType {
+    return typeof type === "string" && Object.prototype.hasOwnProperty.call(STATUS_EXPRESSIONS, type);
+}
+
+/** `quest completed "A"` and the other four forms, given the target's current status (or none yet). */
+export function statusExpressionHolds(type: StatusExpressionType, current: unknown): boolean {
+    const rule = STATUS_EXPRESSIONS[type];
+    return rule.holds(statusOrDefault(rule.kind, current));
+}
+
 /**
  * What `action` does to something currently at `current`, or `undefined` when it does not
  * apply (`accept` on a quest that is not Available, anything on a finished quest, ...).
  * Callers treat `undefined` as a silent no-op, so a script can call these defensively.
- * A `current` that is not a string (an unseeded context) counts as the default status.
  */
 export function statusTransition(kind: StatusKind, action: StatusAction, current: unknown): StatusTransition | undefined {
     const rule = (kind === "quest" ? QUEST_RULES : OBJECTIVE_RULES)[action];
-    const status = typeof current === "string"
-        ? current
-        : kind === "quest" ? DEFAULT_QUEST_STATUS : DEFAULT_OBJECTIVE_STATUS;
-    if (!rule || rule.from !== status) return undefined;
+    if (!rule || rule.from !== statusOrDefault(kind, current)) return undefined;
     return { to: rule.to, runs: rule.runs };
 }

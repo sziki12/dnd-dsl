@@ -55,7 +55,32 @@ describe('Duplicate name validation', () => {
         expect(errors.filter(e => e.includes('Duplicate Quest name "Rising Dead"'))).toHaveLength(2);
     });
 
-    test('flags duplicate objective names only within the same quest', async () => {
+    test('flags duplicate objective names within one quest, once per objective', async () => {
+        const errors = await errorsFor(`
+            world "Test"
+            quest "Rising Dead"
+                objective "Find it"
+                objective "Find it"
+            quest "Buried Secrets"
+                objective "Seal it"
+        `);
+        expect(errors.filter(e => e.includes('Duplicate Objective name "Find it"'))).toHaveLength(2);
+    });
+
+    test('flags the same objective name in different quests, since `objective completed "X"` names no quest', async () => {
+        const errors = await errorsFor(`
+            world "Test"
+            quest "Rising Dead"
+                objective "Find it"
+            quest "Buried Secrets"
+                objective "Find it"
+        `);
+        const dupes = errors.filter(e => e.includes('Duplicate Objective name "Find it"'));
+        expect(dupes).toHaveLength(2);
+        expect(dupes[0]).toContain('across all quests');
+    });
+
+    test('counts every clash once: two in one quest plus one in another is three errors', async () => {
         const errors = await errorsFor(`
             world "Test"
             quest "Rising Dead"
@@ -64,7 +89,18 @@ describe('Duplicate name validation', () => {
             quest "Buried Secrets"
                 objective "Find it"
         `);
-        expect(errors.filter(e => e.includes('Duplicate Objective name "Find it"'))).toHaveLength(2);
+        expect(errors.filter(e => e.includes('Duplicate Objective name "Find it"'))).toHaveLength(3);
+    });
+
+    test('allows distinct objective names, and an objective named like a quest', async () => {
+        const errors = await errorsFor(`
+            world "Test"
+            quest "Rising Dead"
+                objective "Find it"
+            quest "Buried Secrets"
+                objective "Rising Dead"
+        `);
+        expect(errors).toHaveLength(0);
     });
 
     test('flags duplicate event and function names', async () => {

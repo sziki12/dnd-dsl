@@ -32,6 +32,7 @@ import {
     isObjective,
     isParentRefItem,
     isQuest,
+    isQuestExpressions,
     isQuestRef,
     isQuestRefItem,
     isRefChain,
@@ -65,7 +66,7 @@ import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialize
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
 import { applyArithmetic, applyComparison, applyLogical, negatableBool, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
 import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
-import { objectiveStatusPath, questStatusPath, statusTransition, type StatusAction } from '@dnd-language/evaluation/dnd-dsl-status.js';
+import { objectiveStatusPath, questStatusPath, statusExpressionHolds, statusOrDefault, statusTransition, type StatusAction, type StatusKind } from '@dnd-language/evaluation/dnd-dsl-status.js';
 
 type RuntimeScope = Record<string, any>;
 
@@ -214,17 +215,17 @@ export class LangiumInterpreterService {
         if (isRefChain(expression)) {
             return this.evaluateRefChain(ctx, expression);
         }
-    /*  
+        if (isQuestExpressions(expression)) {
+            const entity = expression.target.val.ref;
+            if (!entity) throw new Error(`Unresolved quest/objective ref: ${expression.target.val.$refText}`);
+            return statusExpressionHolds(expression.$type, this.statusOf(ctx, entity));
+        }
+    /*
         TODO LocationChain
         if (isLocationChain(expression)) {
             return this.evaluateLocationChain(ctx, expression);
         }
 
-        TODO QuestExpressions
-        if (isQuestExpressions(expression)) {
-            return this.evaluateQuestExpressions(ctx, expression);
-        } 
-        
         TODO EventCalledExpression
         if (isEventCalledExpression(expression)) {
             return this.evaluateEventCalledExpression(ctx, expression);
@@ -656,18 +657,117 @@ export class LangiumInterpreterService {
      *  which also stops a block from re-firing its own transition.
      **/
     applyStatusAction(ctx: EvalContext, entity: Quest | Objective, action: StatusAction): boolean {
-        const path = isQuest(entity) ? questStatusPath(entity.name) : objectiveStatusPath(entity.$container.name, entity.name);
-        const transition = statusTransition(isQuest(entity) ? 'quest' : 'objective', action, this.readPath(ctx, path));
+        const path = this.statusPathOf(entity);
+        const transition = statusTransition(this.statusKindOf(entity), action, this.readPath(ctx, path));
         if (!transition) return false;
 
         this.pushWrite(ctx, path, transition.to);
         const blocks = transition.runs ? entity[transition.runs] : [];
         if (blocks.length > 0) {
-            this.runInFrame(ctx, entity, `on ${transition.runs} ${isQuest(entity) ? 'quest' : 'objective'} "${entity.name}"`, () => {
+            this.runInFrame(ctx, entity, `on ${transition.runs} ${this.statusKindOf(entity)} "${entity.name}"`, () => {
                 for (const block of blocks) this.runCodeBlock(ctx, block);
             });
         }
         return true;
+    }
+
+    private statusKindOf(entity: Quest | Objective): StatusKind {
+        return isQuest(entity) ? 'quest' : 'objective';
+    }
+
+    private statusPathOf(entity: Quest | Objective): StatePath {
+        return isQuest(entity) ? questStatusPath(entity.name) : objectiveStatusPath(entity.$container.name, entity.name);
+    }
+
+    /** The current status, seeing this command's own earlier writes. */
+    private statusOf(ctx: EvalContext, entity: Quest | Objective): string {
+        return statusOrDefault(this.statusKindOf(entity), this.readPath(ctx, this.statusPathOf(entity)));
+    }
+
+    /**
+     *  The automatic half of the status machine. Every command ends with this, so a quest
+     *  unlocks (`enabled`) and a started quest or an objective finishes (`requierement`) the
+     *  moment its condition becomes true, whatever caused it.
+     *
+     *  Repeated until nothing changes, so a transition made during the pass (a quest that
+     *  completes, and the `on completed` block that unlocks another one declared earlier in
+     *  the file) is picked up in the same command regardless of declaration order. Unlike
+     *  `on change` handlers this cannot loop: a status only ever moves forward, so each
+     *  entity transitions at most once and the pass count is bounded by their number.
+     *
+     *  An objective is only checked while its quest is Started, so a `requierement true`
+     *  does not finish it before the quest has even been accepted. The explicit
+     *  `complete objective` statement is not gated.
+     **/
+    recheckQuestStatuses(ctx: EvalContext): void {
+        const quests = ctx.model?.World?.quests;
+        if (!quests?.length) return;
+        const maxPasses = quests.reduce((total, quest) => total + 1 + quest.objectives.length, 1);
+        for (let pass = 0; pass < maxPasses && this.recheckPass(ctx, quests); pass++) { /* until stable */ }
+    }
+
+    private recheckPass(ctx: EvalContext, quests: Quest[]): boolean {
+        let changed = false;
+        for (const quest of quests) {
+            const status = this.statusOf(ctx, quest);
+            if (status === 'Unavailable') {
+                // No `enabled` clause means nothing gates it: with no statement that could
+                // make it Available by hand, it would otherwise never be startable.
+                changed = this.autoTransition(ctx, quest, quest.enabled[0], 'enable', true) || changed;
+            } else if (status === 'Started') {
+                changed = this.autoTransition(ctx, quest, quest.requierement[0], 'complete', false) || changed;
+            }
+            // Read again: the quest may just have finished above.
+            if (this.statusOf(ctx, quest) !== 'Started') continue;
+            for (const objective of quest.objectives) {
+                if (this.statusOf(ctx, objective) === 'Incomplete') {
+                    changed = this.autoTransition(ctx, objective, objective.requierement[0], 'complete', false) || changed;
+                }
+            }
+        }
+        return changed;
+    }
+
+    /**
+     *  Applies `action` if `condition` holds now. `whenMissing` is the answer when there is
+     *  no condition: `enabled` defaults to open, `requierement` to "only by hand".
+     **/
+    private autoTransition(ctx: EvalContext, entity: Quest | Objective, condition: Expression | undefined, action: StatusAction, whenMissing: boolean): boolean {
+        return this.guarded(ctx, `${this.statusKindOf(entity)} "${entity.name}" ${action}`, () =>
+            (condition ? Boolean(this.evaluateExpression(ctx, condition)) : whenMissing) && this.applyStatusAction(ctx, entity, action));
+    }
+
+    private readonly warnedAutoTransitions = new Set<string>();
+
+    /**
+     *  Runs one automatic transition so that a broken condition or `on completed` block
+     *  cannot take every later command down with it - this pass runs on all of them, and a
+     *  throw would otherwise repeat forever. On an error it undoes whatever the attempt
+     *  queued, reports it once to the console, and counts as "did not apply"; that entity
+     *  is simply tried again on the next command.
+     **/
+    private guarded(ctx: EvalContext, label: string, run: () => boolean): boolean {
+        const mark = {
+            writes: ctx.pendingOverlayWrites?.length ?? 0,
+            events: ctx.events?.length ?? 0,
+            reminders: ctx.reminders.length,
+            fired: ctx.firedReminders?.length ?? 0,
+        };
+        try {
+            return run();
+        } catch (e) {
+            ctx.pendingOverlayWrites?.splice(mark.writes);
+            ctx.events?.splice(mark.events);
+            ctx.reminders.splice(mark.reminders);
+            ctx.firedReminders?.splice(mark.fired);
+            const message = e instanceof Error ? e.message : String(e);
+            const key = `${label}: ${message}`;
+            if (!this.warnedAutoTransitions.has(key)) {
+                this.warnedAutoTransitions.add(key);
+                console.warn(`[quest status] ${label} skipped: ${message}`);
+            }
+            return false;
+        }
     }
 
     /** 

@@ -4,10 +4,13 @@ import type {
     SerializedLocation,
     SerializedModel,
     SerializedNpc,
+    SerializedObjective,
     SerializedQuest,
+    SerializedRef,
     SerializedVariableDecl,
     SerializedRefChain,
 } from './dnd-dsl-serialized-types.js';
+import { isStatusExpressionType, STATUS_VARIABLE, statusExpressionHolds, type StatusExpressionType } from './dnd-dsl-status.js';
 import { parseReferenceFromSerializedModel } from './dnd-dsl-reference.js';
 import {
     applyArithmetic,
@@ -92,6 +95,20 @@ export function buildVariablesRecord(model: SerializedModel, variables: Serializ
 }
 
 /**
+ * `quest completed "A"` and the other four status forms, against a served worldState. The
+ * status is read from the target's `Status` variable, so it is the overlay-applied value
+ * (seedStatusDefaults has already given every quest/objective one); a target with none yet
+ * counts as its default.
+ */
+export function evaluateStatusExpression(model: SerializedModel, expr: { $type: StatusExpressionType; target: { val: SerializedRef } }): boolean {
+    const ref = expr.target.val;
+    const entity = parseReferenceFromSerializedModel<SerializedQuest | SerializedObjective>(model, ref);
+    if (!entity) throw new Error(`Unresolved quest/objective ref: ${ref.$ref}`);
+    const status = entity.variables?.find(v => (v.target ?? v.name) === STATUS_VARIABLE);
+    return statusExpressionHolds(expr.$type, status ? evaluateSerializedExpression(model, status.value) : undefined);
+}
+
+/**
  * JSON-native counterpart to LangiumInterpreterService.evaluateExpression, for reading
  * live (overlay-applied) values out of a served worldState.
  *
@@ -100,9 +117,9 @@ export function buildVariablesRecord(model: SerializedModel, variables: Serializ
  * `$type` at all (see WorldStateService.spliceOverlayValue) - without this check, every
  * overlaid leaf would silently evaluate to `undefined`.
  *
- * FunctionCall / EventCalledExpression / Quest*Expression / ObjectiveExpressions return
- * `undefined` - running call/quest semantics against JSON isn't implemented (mirrors the
- * frontend evaluator's pre-existing FunctionCall stub); out of scope here.
+ * FunctionCall / EventCalledExpression return `undefined` - running call/event semantics
+ * against JSON isn't implemented (mirrors the frontend evaluator's pre-existing
+ * FunctionCall stub); out of scope here.
  */
 export function evaluateSerializedExpression(model: SerializedModel, expr: unknown): JsonRuntimeValue {
     if (expr === undefined || expr === null) return undefined;
@@ -173,8 +190,10 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
             return fn(...args) as JsonRuntimeValue;
         }
 
-
         default:
+            if (isStatusExpressionType(node.$type)) {
+                return evaluateStatusExpression(model, node as unknown as Parameters<typeof evaluateStatusExpression>[1]);
+            }
             return undefined;
     }
 }

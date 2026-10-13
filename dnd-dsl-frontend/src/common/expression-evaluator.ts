@@ -1,5 +1,6 @@
 import type { SerializedEnumValueDecl, SerializedModel, SerializedNode, SerializedRefChain, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
-import { resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
+import { evaluateStatusExpression, resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
+import { isStatusExpressionType } from '@dnd-language/evaluation/dnd-dsl-status.js';
 import { parseReferenceFromSerializedModel } from '@dnd-language/evaluation/dnd-dsl-reference.js';
 import { PREDEFINED_FUNCTIONS } from '@dnd-language/evaluation/dnd-dsl-predefined-functions.js';
 import {
@@ -88,7 +89,7 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
         case 'IntExpression': {
             const e = expr as SerializedNode<IntExpression>;
             return applyArithmetic(e.operator as ArithmeticOperator, evaluateExpression(e.left, options), evaluateExpression(e.right, options));
-        }
+        }       
         case 'BoolExpression': {
             const e = expr as SerializedNode<BoolExpression>;
             return applyLogical(e.operator as LogicalOperator, evaluateExpression(e.left, options), () => evaluateExpression(e.right, options));
@@ -142,14 +143,24 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
                 return evaluateExpression(target.node.value, { variableName: target.node.target, worldState: options.worldState });
             } catch {
                 // Unresolved/unsupported chain (e.g. an event head - not implemented yet).
-                // This function runs eagerly during render (LocationView), so a throw here
-                // would crash the page - treat it like any other unresolvable expression.
+                // This function runs eagerly during render (LocationView), so a throw here would crash the page
+                // Treat it like any other unresolvable expression.
                 return undefined;
             }
         }
+        default:
+            if (isStatusExpressionType(expr.$type)) {
+                if (!options?.worldState) return undefined;
+                try {
+                    return evaluateStatusExpression(options.worldState, expr as unknown as Parameters<typeof evaluateStatusExpression>[1]);
+                } catch {
+                    // Same reasoning as the RefChain case: this runs eagerly during render.
+                    return undefined;
+                }
+            }
     }
 
-    // FunctionCall, RefChain, EventCalledExpression, quest/objective expressions etc.
-    // can't be resolved without runtime state - caller decides how to display these
+    // FunctionCall, EventCalledExpression etc. can't be resolved without runtime state
+    // Caller decides how to display these
     return undefined;
 }

@@ -69,10 +69,31 @@ export class CommandService {
 
     const previous = this.snapshotRuntimeState();
     this.applyCommand(cmd);
-    this.worldStateService.persistOverlay();
-    this.history.push({ command: cmd, previous });
+
+    // A plain write can unlock or finish a quest, and the `on completed` block that runs
+    // may roll dice, so this command is no longer deterministic: it takes a `post` snapshot
+    // like the others, and redo restores that instead of re-applying it.
+    const model = this.worldStateService.getModel();
+    if (!model) {
+      this.worldStateService.persistOverlay();
+      this.history.push({ command: cmd, previous });
+      this.future.splice(0);
+      return this.buildResponse();
+    }
+
+    const state = this.worldStateService.getWorldState();
+    state.runtimeVariables ??= {};
+    //Create new eval context to process any quest status changes that may have been triggered by the command
+    const ctx = this.newEvalContext(model, state.runtimeVariables);
+    this.interpreterService.recheckQuestStatuses(ctx);
+    this.worldStateService.addFiredReminders(ctx.firedReminders!);
+    this.flushPendingWrites(ctx);
+
+    const post = this.snapshotRuntimeState();
+    this.history.push({ command: cmd, previous, post });
     this.future.splice(0);
-    return this.buildResponse();
+    this.worldStateService.persistOverlay();
+    return { ...this.buildResponse(), firedReminders: nonEmpty(ctx.firedReminders!), events: this.encodeEvents(ctx.events!) };
   }
 
   // Only the page StateSyncGateway currently considers "in control" may rewind the shared history.
@@ -129,6 +150,7 @@ export class CommandService {
     const state = this.worldStateService.getWorldState();
     const ctx = this.newEvalContext(model, { ...(state.runtimeVariables ?? {}) });
     const result = this.interpreterService.callFunctionByName(model, cmd.functionName, cmd.args, ctx);
+    this.interpreterService.recheckQuestStatuses(ctx);
     this.worldStateService.addFiredReminders(ctx.firedReminders!);
     this.flushPendingWrites(ctx);
 
@@ -154,6 +176,7 @@ export class CommandService {
     // The event itself counts as already running, so a self-`trigger` is guarded too.
     const ctx = this.newEvalContext(model, state.runtimeVariables, { triggeredEvents: new Set([cmd.eventName]) });
     this.interpreterService.triggerEventByName(model, cmd.eventName, ctx);
+    this.interpreterService.recheckQuestStatuses(ctx);
     this.worldStateService.addFiredReminders(ctx.firedReminders!);
     this.flushPendingWrites(ctx);
 
@@ -192,6 +215,11 @@ export class CommandService {
         console.error(`Reminder '${reminder.id}' effect body threw:`, e);
       }
     }
+
+    // Time passing can satisfy a quest condition too, and a reminder body may have changed state.
+    const questCtx = this.newEvalContext(model, state.runtimeVariables, { firedReminders: firedFromBodies, events: allEvents });
+    this.interpreterService.recheckQuestStatuses(questCtx);
+    this.flushPendingWrites(questCtx);
     this.worldStateService.addFiredReminders(firedFromBodies);
 
     const post = this.snapshotRuntimeState();
@@ -229,6 +257,7 @@ export class CommandService {
     } catch (e) {
       throw new Error(`Script failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+    this.interpreterService.recheckQuestStatuses(ctx);
 
     state.runtimeVariables = ctx.scope;
     this.worldStateService.setReminders(ctx.reminders);

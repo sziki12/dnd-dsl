@@ -161,7 +161,6 @@ export function registerValidationChecks(services: DndDslServices) {
     const validator = services.validation.DndDslValidator;
     const checks: ValidationChecks<DndDslAstType> = {
         World: validator.checkUniqueNames,
-        Quest: validator.checkUniqueObjectiveNames,
         Enum: validator.checkUniqueEnumValues,
         VariableDeclaration: validator.checkEnumValue,
         IntToBoolExpression: validator.checkEnumComparison,
@@ -185,14 +184,13 @@ export class DndDslValidator {
     checkUniqueNames(world: World, accept: ValidationAcceptor): void {
         this.checkUnique(this.collectAllLocations(world.locations), accept, 'Location');
         this.checkUnique(world.quests, accept, 'Quest');
+        // `objective completed "X"` and `fail objective "X"` name an objective on its own, with
+        // no quest in front of it, so the name has to be unique across every quest.
+        this.checkUnique(world.quests.flatMap(q => q.objectives), accept, 'Objective', 'names must be unique across all quests.');
         this.checkUnique(world.events, accept, 'Event');
         this.checkUnique(world.functions, accept, 'Function');
         this.checkUnique(world.npcs, accept, 'Npc');
         this.checkUnique(world.enums, accept, 'Enum');
-    }
-
-    checkUniqueObjectiveNames(quest: Quest, accept: ValidationAcceptor): void {
-        this.checkUnique(quest.objectives, accept, 'Objective');
     }
 
     checkUniqueEnumValues(e: Enum, accept: ValidationAcceptor): void {
@@ -410,7 +408,7 @@ export class DndDslValidator {
         accept('error', `'${keyword}' can only be used inside an 'on change'/'on trigger'/'on completed'/'on failed' body, or a 'computed' variable's value.`, { node });
     }
 
-    private checkUnique(items: NamedNode[], accept: ValidationAcceptor, kind: string): void {
+    private checkUnique(items: NamedNode[], accept: ValidationAcceptor, kind: string, rule = 'names must be unique.'): void {
         const byName = new Map<string, NamedNode[]>();
         for (const item of items) {
             const group = byName.get(item.name);
@@ -420,7 +418,7 @@ export class DndDslValidator {
         for (const group of byName.values()) {
             if (group.length > 1) {
                 for (const dupe of group) {
-                    accept('error', `Duplicate ${kind} name "${dupe.name}" — names must be unique.`, { node: dupe, property: 'name' });
+                    accept('error', `Duplicate ${kind} name "${dupe.name}" — ${rule}`, { node: dupe, property: 'name' });
                 }
             }
         }
