@@ -60,7 +60,7 @@ Never edit files under `*/src/dnd-language/` directly — they are overwritten.
 ### Frontend (`dnd-dsl-frontend/`)
 - `npm run dev` — Vite dev server (needs the backend running on :3000).
 - `npm run build` — `tsc -b && vite build`. `npm run lint`. `npx tsc -b --noEmit`.
-- No test runner is configured.
+- `npm test` - Vitest, for pure logic only (`src/pages/map-coords.test.ts`); components are checked in the browser.
 - **Baseline:** `npx tsc -b --noEmit` reports ~26 pre-existing unused-import errors.
 
 ### Running the app

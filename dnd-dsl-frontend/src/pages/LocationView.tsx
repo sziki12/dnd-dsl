@@ -1,12 +1,15 @@
 import { useCallback, useMemo, useState, useRef, useEffect, useContext } from 'react';
 
-import { addEdge, Background, BackgroundVariant, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, type Connection, type Edge, type Node } from '@xyflow/react';
+import { addEdge, Background, BackgroundVariant, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow, ViewportPortal, type Connection, type Edge, type Node } from '@xyflow/react';
 import { evaluateExpression, inferKind, isObjectResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
 import { renderValueToken } from '../common/ValueToken';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
+import ZoomInOutlinedIcon from '@mui/icons-material/ZoomInOutlined';
+import ZoomOutOutlinedIcon from '@mui/icons-material/ZoomOutOutlined';
+import FitScreenOutlinedIcon from '@mui/icons-material/FitScreenOutlined';
 
 import MapNode from '../nodes/MapNode.js';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -18,7 +21,7 @@ import type { SerializedModel, SerializedLocation, SerializedVariableDecl, Seria
 import { findLocation } from '../common/location-tree';
 import EnumValueSelect from '../common/EnumValueSelect';
 import { layoutAsTree } from './tree-layout';
-import { computeContainRect, normalizedToPixel, pixelToNormalized, type Size } from './map-coords';
+import { fitViewport, mapRectFor, normalizedToPixel, paddedRect, pixelToNormalized, resizedViewport, zoomLimits, type Size, type Viewport } from './map-coords';
 
 const LocationView = () => {
   let {locationName} = useParams()
@@ -250,7 +253,12 @@ const NODE_TYPES = { mapNode: MapNode };
 const EDGE_TYPES = { floating: FloatingEdge };
 const NODE_ORIGIN: [number, number] = [0.5, 0];
 const PRO_OPTIONS = { hideAttribution: true };
-const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 };
+const ZOOM_BUTTON_MS = 150;
+
+const mapControlStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, padding: 0,
+  background: 'transparent', border: 'none', color: 'var(--fg-secondary)', cursor: 'pointer',
+};
 
 type NormPos = { x: number; y: number };
 
@@ -286,24 +294,55 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
   // loses a drag and never desyncs.
   const positionsRef = useRef<Record<string, NormPos>>({});
 
-  // "Usable" area - same margin the canvas has always used, whether or not an image is present.
-  const usableSize = useMemo<Size>(
-    () => ({ width: Math.max(containerSize.width - 20, 100), height: Math.max(containerSize.height - 20, 100) }),
-    [containerSize.width, containerSize.height],
-  );
-  const mapBounds = useMemo<[[number, number], [number, number]]>(
-    () => [[0, 0], [usableSize.width, usableSize.height]],
-    [usableSize.width, usableSize.height],
-  );
   const measured = containerSize.width > 0 && containerSize.height > 0;
-  // The rect every node position is normalized against: the image's letterboxed
-  // contain-rect when one resolves, otherwise the full usable canvas.
+  // Map space (see map-coords.ts): a fixed-size rect that every node position is a fraction of.
+  // It depends only on the image's aspect, never on the pane, so resizing the pane scales the
+  // image and the nodes together instead of re-laying anything out.
   const naturalW = mapImage?.natural.width ?? 0;
   const naturalH = mapImage?.natural.height ?? 0;
   const rect = useMemo(
-    () => computeContainRect(usableSize, naturalW > 0 && naturalH > 0 ? { width: naturalW, height: naturalH } : null),
-    [usableSize, naturalW, naturalH],
+    () => mapRectFor(naturalW > 0 && naturalH > 0 ? { width: naturalW, height: naturalH } : null),
+    [naturalW, naturalH],
   );
+  // What the viewport may show: the map plus a margin to pan into. The nodes stay on the map itself.
+  const padded = useMemo(() => paddedRect(rect), [rect]);
+  const nodeExtent = useMemo<[[number, number], [number, number]]>(
+    () => [[rect.x, rect.y], [rect.x + rect.width, rect.y + rect.height]],
+    [rect],
+  );
+  const translateExtent = useMemo<[[number, number], [number, number]]>(
+    () => [[padded.x, padded.y], [padded.x + padded.width, padded.y + padded.height]],
+    [padded],
+  );
+  const limits = useMemo(() => zoomLimits(containerSize, padded), [containerSize, padded]);
+  const initialViewport = useMemo(() => fitViewport(containerSize, padded), [containerSize, padded]);
+
+  const reactFlow = useReactFlow();
+  // Latest viewport, kept from onMove, and the frame it was last fitted for.
+  const viewportRef = useRef<Viewport>({ x: 0, y: 0, zoom: 1 });
+  const frameRef = useRef<{ key: string; container: Size; fitZoom: number } | null>(null);
+  // True once the user has panned or zoomed. Until then the map re-fits whenever the pane
+  // is resized; after, a resize keeps the same map-space centre and zoom relative to the fit.
+  const userMovedRef = useRef(false);
+  const frameKey = `${location?.name ?? ''}|${rect.width}x${rect.height}`;
+
+  const applyFrame = useCallback((forceFit: boolean) => {
+    if (!measured) return;
+    const fit = fitViewport(containerSize, padded);
+    const last = frameRef.current;
+    const sameFrame = last?.key === frameKey;
+    if (forceFit || !sameFrame) userMovedRef.current = false;
+
+    const next = userMovedRef.current && last
+      ? resizedViewport(viewportRef.current, last.container, last.fitZoom, containerSize, fit.zoom)
+      : fit;
+    frameRef.current = { key: frameKey, container: containerSize, fitZoom: fit.zoom };
+    viewportRef.current = next;
+    void reactFlow.setViewport(next);
+  }, [measured, containerSize, padded, frameKey, reactFlow]);
+
+  // Re-frame when the pane, the map rect or the location changes.
+  useEffect(() => { applyFrame(false); }, [applyFrame]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as Edge[]);
@@ -460,12 +499,12 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
     return () => { cancelled = true; };
   }, [location?.name, adventure, world]);
 
-  // Build the graph and project every node to pixels. Re-runs whenever the source,
-  // the view mode, or the rect changes - projecting fresh from normalized positions
-  // each time (no lossy round-trip), so a late container measurement or an image
-  // resolving simply re-lays-out correctly. Waits for a real container measurement.
+  // Build the graph and project every node into map space. Re-runs whenever the source, the
+  // view mode, or the map rect changes (an image resolving or being replaced) - projecting
+  // fresh from normalized positions each time (no lossy round-trip). Independent of the pane
+  // size: resizing only moves the viewport.
   useEffect(() => {
-    if (typeof location == "undefined" || !measured) return;
+    if (typeof location == "undefined") return;
     // Map mode needs the saved layout resolved first; tree mode never reads it.
     if (mode === 'map' && !layoutReady) return;
 
@@ -485,7 +524,21 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
       const p = node.position as NormPos;
       return { ...node, position: normalizedToPixel(rect, p.x, p.y) };
     }));
-  }, [location?.name, mode, measured, layoutReady, savedLayout, rect.x, rect.y, rect.width, rect.height]);
+  }, [location?.name, mode, layoutReady, savedLayout, rect.x, rect.y, rect.width, rect.height]);
+
+  // A user-initiated move arrives with an event; setViewport / zoomIn from here arrive with null.
+  const handleMoveStart = useCallback((event: unknown) => {
+    if (event) userMovedRef.current = true;
+  }, []);
+  const handleMove = useCallback((_event: unknown, viewport: Viewport) => {
+    viewportRef.current = viewport;
+  }, []);
+  // ReactFlow has no pan/zoom handle yet when the first frame is applied above, so apply it again once it does.
+  const handleInit = useCallback(() => applyFrame(true), [applyFrame]);
+
+  const zoomIn = useCallback(() => { userMovedRef.current = true; void reactFlow.zoomIn({ duration: ZOOM_BUTTON_MS }); }, [reactFlow]);
+  const zoomOut = useCallback(() => { userMovedRef.current = true; void reactFlow.zoomOut({ duration: ZOOM_BUTTON_MS }); }, [reactFlow]);
+  const fit = useCallback(() => applyFrame(true), [applyFrame]);
 
   useEffect(() => {
     if (typeof location == "undefined" || mode !== 'map') return;
@@ -507,17 +560,6 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
 
   return (
     <div ref={containerRef} className="w-full h-full overflow-hidden" style={{ background: 'var(--bg-editor)', position: 'relative' }}>
-      {mapImage && (
-        <img
-          src={mapImage.url}
-          alt=""
-          style={{
-            position: 'absolute',
-            left: rect.x, top: rect.y, width: rect.width, height: rect.height,
-            objectFit: 'contain', pointerEvents: 'none', userSelect: 'none',
-          }}
-        />
-      )}
       {measured &&
       (
         <ReactFlow
@@ -531,34 +573,66 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
           onNodeDoubleClick={onNodeDoubleClick}
           onNodeDragStop={onNodeDragStop}
           nodeOrigin={NODE_ORIGIN}
+          onMoveStart={handleMoveStart}
+          onMove={handleMove}
+          onInit={handleInit}
           // Types and Options
           proOptions={PRO_OPTIONS}
           nodeTypes={NODE_TYPES}
           edgeTypes={EDGE_TYPES}
           connectionLineComponent={FloatingConnectionLine}
-          // Manually controlled bounds and zoom
-          translateExtent={mapBounds}
-          nodeExtent={mapBounds}
-          // Camera defaults (No fitView)
-          defaultViewport={DEFAULT_VIEWPORT}
-          minZoom={1}
-          maxZoom={1}
-          // Locking
-          panOnDrag={false}
+          // Bounds: nodes stay on the map, the view may pan into the padding around it
+          translateExtent={translateExtent}
+          nodeExtent={nodeExtent}
+          // Camera: starts fitted, zooms from the fit of the whole map to MAX_ZOOM_FACTOR times that
+          defaultViewport={initialViewport}
+          minZoom={limits.minZoom}
+          maxZoom={limits.maxZoom}
+          // Interaction (a double-click on a node navigates, so it must not also zoom)
+          panOnDrag
           selectionOnDrag={false}
-          zoomOnScroll={false}
-          zoomOnPinch={false}
+          zoomOnScroll
+          zoomOnPinch
           zoomOnDoubleClick={false}
           preventScrolling={true}
           nodesDraggable={mode === 'map'}
           // Styles
         >
           {!mapImage && <Background variant={BackgroundVariant.Dots} color="var(--bd-soft)" gap={16} />}
+          {/* Drawn in map space, behind the edges and nodes, so it pans and zooms with them. */}
+          <ViewportPortal>
+            {mapImage ? (
+              <img
+                src={mapImage.url}
+                alt=""
+                draggable={false}
+                style={{
+                  position: 'absolute', left: rect.x, top: rect.y, width: rect.width, height: rect.height,
+                  // Tailwind's preflight gives every img max-width: 100%, and the layer this sits in is as wide as the
+                  // pane in unscaled pixels, so without this a pane narrower than the map squeezes the image sideways.
+                  maxWidth: 'none', maxHeight: 'none',
+                  zIndex: -1, pointerEvents: 'none', userSelect: 'none',
+                }}
+              />
+            ) : (
+              <div style={{
+                position: 'absolute', left: rect.x, top: rect.y, width: rect.width, height: rect.height,
+                zIndex: -1, pointerEvents: 'none', border: '1px dashed var(--bd-soft)',
+              }} />
+            )}
+          </ViewportPortal>
           <Panel position="top-right" style={{
             background: 'var(--bg-panel)', border: '1px solid var(--bd-soft)', color: 'var(--fg-secondary)',
             padding: '4px 10px', borderRadius: 4, fontSize: 11, fontFamily: 'var(--font-mono)',
           }}>
-            {mode === 'map' ? 'Draggable · Ctrl+S to save' : 'Tree layout · read-only'}
+            {mode === 'map' ? 'Drag nodes · Scroll to zoom · Ctrl+S to save' : 'Tree layout · read-only'}
+          </Panel>
+          <Panel position="bottom-left" style={{
+            display: 'flex', background: 'var(--bg-panel)', border: '1px solid var(--bd-soft)', borderRadius: 4, overflow: 'hidden',
+          }}>
+            <button type="button" title="Zoom in" style={mapControlStyle} onClick={zoomIn}><ZoomInOutlinedIcon style={{ fontSize: 16 }} /></button>
+            <button type="button" title="Zoom out" style={mapControlStyle} onClick={zoomOut}><ZoomOutOutlinedIcon style={{ fontSize: 16 }} /></button>
+            <button type="button" title="Fit the whole map" style={mapControlStyle} onClick={fit}><FitScreenOutlinedIcon style={{ fontSize: 16 }} /></button>
           </Panel>
       </ReactFlow>
       )}
