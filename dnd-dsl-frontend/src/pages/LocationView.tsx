@@ -10,6 +10,7 @@ import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import ZoomInOutlinedIcon from '@mui/icons-material/ZoomInOutlined';
 import ZoomOutOutlinedIcon from '@mui/icons-material/ZoomOutOutlined';
 import FitScreenOutlinedIcon from '@mui/icons-material/FitScreenOutlined';
+import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 
 import MapNode from '../nodes/MapNode.js';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -21,15 +22,23 @@ import type { SerializedModel, SerializedLocation, SerializedVariableDecl, Seria
 import { findLocation } from '../common/location-tree';
 import EnumValueSelect from '../common/EnumValueSelect';
 import { layoutAsTree } from './tree-layout';
+import MapSettingsPanel from './MapSettingsPanel';
+import { MapViewContext } from './MapViewContext';
+import { assignParallelSlots } from '../edges/edge-geometry';
+import { effectiveNodeScale, settingsToClasses, settingsToCssVars, type MapViewSettings } from './map-view-settings';
+import { useMapViewSettings } from './useMapViewSettings';
 import { fitViewport, mapRectFor, normalizedToPixel, paddedRect, pixelToNormalized, resizedViewport, zoomLimits, type Size, type Viewport } from './map-coords';
 
 const LocationView = () => {
   let {locationName} = useParams()
-  let {worldState} = useContext(DslContext)
+  const {worldState, adventure, world} = useContext(DslContext)
 
   let [locationData, setLocationData] = useState<SerializedLocation | undefined>(undefined)
   const [leftTab, setLeftTab] = useState<'variables' | 'npcs'>('variables')
   const [viewMode, setViewMode] = useState<'map' | 'tree'>('map')
+  // Live view settings of the map: per location, saved on the server, applied as they change.
+  const [viewSettings, setViewSettings, settingsReady] = useMapViewSettings(adventure, world, locationName ?? '')
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // What the doc panel below the tree currently shows - `path` is a dot-joined name
   // path (unique across nesting depth, stable across worldState updates, since it's
@@ -234,12 +243,25 @@ const LocationView = () => {
               <AccountTreeOutlinedIcon style={{ fontSize: 13 }} /> Tree
             </button>
           </div>
+          <button
+            type="button"
+            className={"pane-tab " + (settingsOpen ? 'active' : '')}
+            style={{ marginLeft: 'auto' }}
+            title="Map settings"
+            onClick={() => setSettingsOpen(open => !open)}
+          >
+            <TuneOutlinedIcon style={{ fontSize: 14 }} /> Customize
+          </button>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           <ReactFlowProvider>
-            <MapFlow location={locationData} mode={viewMode} />
+            <MapFlow location={locationData} mode={viewMode} settings={viewSettings} settingsReady={settingsReady} />
           </ReactFlowProvider>
+          {/* Outside ReactFlow: its scroll prevention would otherwise swallow the wheel over the panel. */}
+          {settingsOpen && (
+            <MapSettingsPanel settings={viewSettings} mode={viewMode} onChange={setViewSettings} onClose={() => setSettingsOpen(false)} />
+          )}
         </div>
       </div>
 
@@ -278,7 +300,7 @@ function sanitizeLayout(raw: Record<string, NormPos> | null | undefined): Record
   return out;
 }
 
-const MapFlow = ({location, mode}: { location: SerializedLocation | undefined, mode: 'map' | 'tree' }) => {
+const MapFlow = ({location, mode, settings, settingsReady}: { location: SerializedLocation | undefined, mode: 'map' | 'tree', settings: MapViewSettings, settingsReady: boolean }) => {
 const navigate = useNavigate();
 const containerRef = useRef<HTMLDivElement>(null);
 let { getByReference, adventure, world } = useContext(DslContext)
@@ -326,6 +348,20 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
   const userMovedRef = useRef(false);
   const frameKey = `${location?.name ?? ''}|${rect.width}x${rect.height}`;
 
+  // The node-size factor is written straight onto the container (not through React state) because in
+  // fixed-on-screen mode it follows the zoom, which changes on every wheel tick.
+  const settingsRef = useRef(settings);
+  const applyNodeScale = useCallback(() => {
+    containerRef.current?.style.setProperty(
+      '--map-node-scale',
+      String(effectiveNodeScale(settingsRef.current.nodes, viewportRef.current.zoom)),
+    );
+  }, []);
+  useEffect(() => {
+    settingsRef.current = settings;
+    applyNodeScale();
+  }, [settings, applyNodeScale]);
+
   const applyFrame = useCallback((forceFit: boolean) => {
     if (!measured) return;
     const fit = fitViewport(containerSize, padded);
@@ -338,8 +374,9 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
       : fit;
     frameRef.current = { key: frameKey, container: containerSize, fitZoom: fit.zoom };
     viewportRef.current = next;
+    applyNodeScale();
     void reactFlow.setViewport(next);
-  }, [measured, containerSize, padded, frameKey, reactFlow]);
+  }, [measured, containerSize, padded, frameKey, reactFlow, applyNodeScale]);
 
   // Re-frame when the pane, the map rect or the location changes.
   useEffect(() => { applyFrame(false); }, [applyFrame]);
@@ -532,7 +569,8 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
   }, []);
   const handleMove = useCallback((_event: unknown, viewport: Viewport) => {
     viewportRef.current = viewport;
-  }, []);
+    applyNodeScale();
+  }, [applyNodeScale]);
   // ReactFlow has no pan/zoom handle yet when the first frame is applied above, so apply it again once it does.
   const handleInit = useCallback(() => applyFrame(true), [applyFrame]);
 
@@ -559,9 +597,33 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
   }, [location?.name, adventure, world, mode]);
 
   return (
-    <div ref={containerRef} className="w-full h-full overflow-hidden" style={{ background: 'var(--bg-editor)', position: 'relative' }}>
+    <div
+      ref={containerRef}
+      className={['w-full h-full overflow-hidden', ...settingsToClasses(settings, mode)].join(' ')}
+      style={{
+        background: 'var(--bg-editor)', position: 'relative',
+        // Hidden until the saved settings arrive, so the map is not drawn in the default colours first.
+        visibility: settingsReady ? 'visible' : 'hidden',
+        ...settingsToCssVars(settings, mode),
+      } as React.CSSProperties}
+    >
+      {/* The arrowhead every exit edge points with; its colour follows the exit colour setting. */}
+      <svg width={0} height={0} style={{ position: 'absolute' }} aria-hidden="true">
+        <defs>
+          <marker
+            id="map-arrow" className="react-flow__arrowhead" markerWidth="50" markerHeight="50" viewBox="-10 -10 20 20"
+            markerUnits="strokeWidth" orient="auto-start-reverse" refX="0" refY="0"
+          >
+            <polyline
+              style={{ stroke: 'var(--map-color-exit, #cccccc)', fill: 'var(--map-color-exit, #cccccc)', strokeWidth: 1 }}
+              strokeLinecap="round" strokeLinejoin="round" points="-5,-4 0,0 -5,4 -5,-4"
+            />
+          </marker>
+        </defs>
+      </svg>
       {measured &&
       (
+        <MapViewContext.Provider value={settings}>
         <ReactFlow
           // Nodes and Edges
           nodes={nodes}
@@ -621,7 +683,7 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
               }} />
             )}
           </ViewportPortal>
-          <Panel position="top-right" style={{
+          <Panel position="bottom-right" style={{
             background: 'var(--bg-panel)', border: '1px solid var(--bd-soft)', color: 'var(--fg-secondary)',
             padding: '4px 10px', borderRadius: 4, fontSize: 11, fontFamily: 'var(--font-mono)',
           }}>
@@ -635,6 +697,7 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
             <button type="button" title="Fit the whole map" style={mapControlStyle} onClick={fit}><FitScreenOutlinedIcon style={{ fontSize: 16 }} /></button>
           </Panel>
       </ReactFlow>
+        </MapViewContext.Provider>
       )}
     </div>
   );
@@ -645,10 +708,6 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
   const edges: Edge[] = [];
   const knownIds = new Set(location.sublocations.map(s => s.name));
 
-  const targetSize = 50;
-
-  const lineColor = '#9d9d9d'; // mirrors --fg-secondary - exit edges
-  const markerColor = '#cccccc'; // mirrors --fg-primary - exit edge arrowheads
   //Create current location node
   nodes.push({
           id: location.name,
@@ -657,6 +716,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
           data: {
             location: location.name,
             type: 'group',
+            kind: 'root',
           },
         });
 
@@ -673,6 +733,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
         position: { x: 0, y: 0 },
         data: {
           location: targetName,
+          kind: 'external',
         },
       });
     }
@@ -682,28 +743,21 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
         target: targetName,
         label: exit.name,
         type: 'floating',
-        data: { identifiers: exit.identifiers },
-        markerEnd: { 
-          type: MarkerType.ArrowClosed, 
-          width: targetSize,
-          height: targetSize,
-          color: markerColor, 
-        },
-        style: {
-        strokeWidth: 1,
-        stroke: lineColor,
-        },
+        data: { identifiers: exit.identifiers, kind: 'exit', arrow: true },
+        style: { strokeWidth: 1 },
       });
   }
 
   for (const sub of location.sublocations) {
+    const isEntry = getByReference<SerializedLocation>(location.entry?.entry)?.name === sub.name;
     nodes.push({
       id: sub.name,
       type: 'mapNode',
       position: { x: 0, y: 0 },
       data: {
         location: sub.name,
-        isEntry: getByReference<SerializedLocation>(location.entry?.entry)?.name === sub.name,
+        isEntry,
+        kind: isEntry ? 'entry' : 'sub',
       },
       parentId: location.name,
     });
@@ -712,11 +766,8 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
       source: location.name,
       target: sub.name,
       type: 'floating',
-      style: {
-        strokeWidth: 1,
-        stroke: '#4ec9b0', // mirrors --syn-type - sublocation edges
-        strokeDasharray: '5 5', // Dashed line for sublocation edges
-      },
+      data: { kind: 'sublocation' },
+      style: { strokeWidth: 1 },
     });
 
     for (const exit of sub.exits ?? []) {
@@ -732,7 +783,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
           position: { x: 0, y: 0 },
           data: {
             location: targetName,
-            isEntry: getByReference<SerializedLocation>(location.entry?.entry)?.name === targetName,
+            kind: 'external',
           },
         });
       }
@@ -743,20 +794,15 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
         target: targetName,
         label: exit.name,
         type: 'floating',
-        data: { identifiers: exit.identifiers },
-        markerEnd: { 
-          type: MarkerType.ArrowClosed, 
-          width: targetSize, 
-          height: targetSize, 
-          color: markerColor
-        },
-        style: {
-        strokeWidth: 1,
-        stroke: lineColor,
-        },
+        data: { identifiers: exit.identifiers, kind: 'exit', arrow: true },
+        style: { strokeWidth: 1 },
       });
     }
   }
+  // Exits that join the same pair of nodes (either direction) get their labels spread so they do not stack.
+  const exitEdges = edges.filter(e => e.data?.kind === 'exit');
+  assignParallelSlots(exitEdges).forEach((slot, i) => { exitEdges[i].data = { ...exitEdges[i].data, slot }; });
+
   console.log(location);
   console.log(`Processed location ${location.name} with ${location.sublocations.length} sublocations`);
   console.log(`Built graph with ${nodes.length} nodes and ${edges.length} edges from location ${location.name}`);

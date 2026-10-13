@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs/common';
 import fs from "fs"
 import { type FileDto } from "./dto/save-file.dto.js"
 import { ConfigurationService } from '../configuration/configuration.service.js';
 import { FileService } from './file.service.js';
 import { WorldStateService } from '../world-state/world-state.service.js';
 import { EMPTY_STATE_OVERLAY, type StateOverlayFile } from '../world-state/state-overlay.types.js';
+import { isSafeSegment, readMapView, writeMapView, type MapViewEntry } from './map-view-store.js';
 
 @Controller('file')
 export class FileController {
@@ -62,6 +63,32 @@ export class FileController {
         if (!fs.existsSync(layoutPath)) return {};
         const allLayouts = JSON.parse(fs.readFileSync(layoutPath, 'utf-8'));
         return allLayouts[location] ?? {};
+    }
+
+    // Map view settings (colours, labels, node size, ...) per location. An empty body clears the location's entry.
+    @Post('view/save')
+    saveView(
+        @Query('adventure') adventure: string,
+        @Query('world') world: string,
+        @Query('location') location: string,
+        @Body() settings: MapViewEntry,
+    ): { success: boolean } {
+        writeMapView(this.viewFilePath(adventure, world), location, settings);
+        return { success: true };
+    }
+
+    @Get('view/load')
+    loadView(
+        @Query('adventure') adventure: string,
+        @Query('world') world: string,
+        @Query('location') location: string,
+    ): MapViewEntry {
+        return readMapView(this.viewFilePath(adventure, world), location);
+    }
+
+    private viewFilePath(adventure: string, world: string): string {
+        if (!isSafeSegment(adventure) || !isSafeSegment(world)) throw new BadRequestException('Invalid adventure or world.');
+        return this.fileService.getViewFilePath(adventure, world);
     }
 
     @Get('state/load')

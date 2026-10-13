@@ -60,13 +60,13 @@ Never edit files under `*/src/dnd-language/` directly — they are overwritten.
 ### Frontend (`dnd-dsl-frontend/`)
 - `npm run dev` — Vite dev server (needs the backend running on :3000).
 - `npm run build` — `tsc -b && vite build`. `npm run lint`. `npx tsc -b --noEmit`.
-- `npm test` - Vitest, for pure logic only (`src/pages/map-coords.test.ts`); components are checked in the browser.
+- `npm test` - Vitest, for pure logic only (`pages/map-coords`, `pages/map-view-settings`, `edges/edge-geometry`); components are checked in the browser.
 - **Baseline:** `npx tsc -b --noEmit` reports ~26 pre-existing unused-import errors.
 
 ### Running the app
 Backend reads `dnd-dsl-backend/config/config.json` (**tracked**, machine-specific):
 `DefaultFilePath` is an absolute path *outside the repo* holding `<adventure>/<world>.dnd`
-and its `<world>.state.json` sidecar. The frontend loads a world with
+and its `<world>.state.json` sidecar (the map page also keeps `<world>.layout.json` and `<world>.mapview.json` there). The frontend loads a world with
 `POST /parse?adventure=<a>&world=<w>`, then `GET /world`.
 
 ## Architecture
