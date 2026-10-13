@@ -49,13 +49,12 @@ import {
     type Objective,
     type Quest,
     type RefChain,
-    type RefChainStart,
     type RemindStatement,
     type SetStatement,
     type VariableDeclaration,
     type World,
 } from './generated/ast.js';
-import { lastChainSegment, nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from './evaluation/dnd-dsl-state-path.js';
+import { chainHead, lastChainSegment, nearestOwningObject, parentOwningObject, unwrapExpression, type ChainHead, type OwningObject } from './evaluation/dnd-dsl-state-path.js';
 import { PREDEFINED_SIGNATURES, getPredefinedSignature, predefinedArity } from './evaluation/dnd-dsl-predefined-signatures.js';
 import { AstUtils } from 'langium';
 import { NAMED_COLLECTION_FIELDS } from './evaluation/dnd-dsl-expression-operations.js';
@@ -138,7 +137,7 @@ const COLLECTION_FIELD_NAMES = new Set(Object.values(COLLECTION_FIELDS).flat());
  *  Exported (not a validator method) so the completion provider can offer the
  *  same field names it validates, off the same AST-only logic, no EvalContext needed. 
  **/
-export function collectionHeadKind(head: RefChainStart): ObjectKind | undefined {
+export function collectionHeadKind(head: ChainHead): ObjectKind | undefined {
     if (isWorldRefItem(head)) return ObjectKind.World;
     if (isLocationRefItem(head)) return ObjectKind.Location;
     if (isQuestRefItem(head)) return ObjectKind.Quest;
@@ -227,7 +226,7 @@ export class DndDslValidator {
     /** `set quest "X" . Status = "Bogus"` is caught here when the value is a literal or an enum value; any other expression is checked when it runs. */
     checkStatusAssignment(stmt: SetStatement, accept: ValidationAcceptor): void {
         const chain = stmt.target;
-        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
+        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chainHead(chain);
         const decl = isVariableRefItem(tail) ? tail.val.val.ref : undefined;
         if (!decl || !isBuiltInStatus(decl)) return;
 
@@ -361,7 +360,7 @@ export class DndDslValidator {
             return;
         }
         if (field) {
-            const kind = collectionHeadKind(stmt.source.first);
+            const kind = collectionHeadKind(chainHead(stmt.source));
             if (kind && !COLLECTION_FIELDS[kind].includes(field)) {
                 accept('error', `'${field}' is a single value, not a list - 'for ... in' needs something iterable.`, { node: stmt, property: 'source' });
             }
@@ -381,7 +380,7 @@ export class DndDslValidator {
     }
 
     private firstSegmentEndsInVariable(chain: RefChain): boolean {
-        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
+        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chainHead(chain);
         return isVariableRefItem(tail);
     }
 
@@ -416,9 +415,9 @@ export class DndDslValidator {
             accept('error', `'.${chain.field}' must be the first member access after the head, not after '.${chain.rest[chain.rest.length - 1].val.val.$refText}'.`, { node: chain, property: 'field' });
             return;
         }
-        const headKind = collectionHeadKind(chain.first);
+        const headKind = collectionHeadKind(chainHead(chain));
         if (!headKind) {
-            accept('error', `'.${chain.field}' needs a location/npc/quest/world/enum/this/parent head, not '${chain.first.$type}'.`, { node: chain, property: 'field' });
+            accept('error', `'.${chain.field}' needs a location/npc/quest/world/enum/this/parent head, not '${chainHead(chain).$type}'.`, { node: chain, property: 'field' });
             return;
         }
 
@@ -497,7 +496,7 @@ export class DndDslValidator {
     /** The item names of `<head> . <field>` when the head is a fixed entity, else undefined (not knowable before the script runs). */
     private knownChildNames(chain: RefChain): string[] | undefined {
         const field = chain.field;
-        const head = chain.first;
+        const head = chainHead(chain);
         if (isQuestRefItem(head) && field === 'objectives') return head.val.val.ref?.objectives.map(o => o.name);
         if (isLocationRefItem(head) && field === 'sublocations') return head.val.val.ref?.sublocations.map(l => l.name);
         if (isLocationRefItem(head) && field === 'exits') return head.val.val.ref?.exits.map(e => e.name);

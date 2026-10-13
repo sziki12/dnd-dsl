@@ -12,6 +12,7 @@ import type {
 } from './dnd-dsl-serialized-types.js';
 import { isStatusExpressionType, STATUS_VARIABLE, statusExpressionHolds, type StatusExpressionType } from './dnd-dsl-status.js';
 import { parseReferenceFromSerializedModel } from './dnd-dsl-reference.js';
+import { chainHead } from './dnd-dsl-state-path.js';
 import {
     applyArithmetic,
     applyComparison,
@@ -53,7 +54,7 @@ export type RefChainTarget =
  * runtime state yet; deferred, not this MVP's scope.
  */
 export function resolveSerializedRefChain(model: SerializedModel, chain: SerializedRefChain): RefChainTarget {
-    const first = chain.first as { $type: string };
+    const first = chainHead(chain) as { $type: string };
 
     if (first.$type === 'EventRefItem') {
         throw new Error(`RefChain heads of kind '${first.$type}' are not supported yet`);
@@ -73,9 +74,9 @@ export function resolveSerializedRefChain(model: SerializedModel, chain: Seriali
         return { kind: 'entity', node };
     }
 
-    // Every remaining shape ends in a VariableRefItem - either chain.first itself (a
+    // Every remaining shape ends in a VariableRefItem - either the head itself (a
     // bare or entity-qualified-with-rest variable chain) or the last chain.rest item.
-    const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
+    const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chainHead(chain);
     const ref = (tail as unknown as { val: { val: { $ref: string } } }).val.val;
     const decl = parseReferenceFromSerializedModel<SerializedVariableDecl>(model, ref);
     if (!decl) throw new Error(`Unresolved variable ref in chain: ${ref.$ref}`);

@@ -52,7 +52,6 @@ import {
     Quest,
     QuestStatements,
     RefChain,
-    RefChainStart,
     ReferenceExpression,
     RemindStatement,
     ReturnStatement,
@@ -61,7 +60,7 @@ import {
 } from '@dnd-language/index.js';
 import { Injectable } from '@nestjs/common';
 import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
-import { encodeStatePath, nodeToStatePath, parentOwningObject, statePathToNode, unwrapExpression, type OwningObject, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { chainHead, encodeStatePath, nodeToStatePath, parentOwningObject, statePathToNode, unwrapExpression, type ChainHead, type OwningObject, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefined-signatures.js';
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
@@ -194,17 +193,18 @@ export class LangiumInterpreterService {
      *  It's never inside a for loops body. 
      **/
     resolveStaticRefChainToStatePath(chain: RefChain): StatePath {
-        if (isEventRefItem(chain.first)) {
-            throw new Error(`Cannot resolve a '${chain.first.$type}' reference to a StatePath`);
+        const head = chainHead(chain);
+        if (isEventRefItem(head)) {
+            throw new Error(`Cannot resolve a '${head.$type}' reference to a StatePath`);
         }
         if (chain.rest.length === 0
-            && (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isObjectiveRefItem(chain.first) || isNpcRefItem(chain.first))) {
-            const node = chain.first.val.val.ref;
-            if (!node) throw new Error(`Unresolved ref: ${chain.first.val.val.$refText}`);
+            && (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head))) {
+            const node = head.val.val.ref;
+            if (!node) throw new Error(`Unresolved ref: ${head.val.val.$refText}`);
             return nodeToStatePath(node)!;
         }
 
-        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
+        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : head;
         if (!isVariableRefItem(tail)) throw new Error(`Unsupported target: ${tail.$type}`);
         const decl = tail.val.val.ref;
         if (!decl) throw new Error(`Unresolved variable ref: ${tail.val.val.$refText}`);
@@ -362,57 +362,58 @@ export class LangiumInterpreterService {
     }
 
     private evaluateRefChainBase(ctx: EvalContext, chain: RefChain): any {
+        const head = chainHead(chain);
         if (chain.field) 
             return this.resolveFieldValue(ctx, chain);
 
-        if (isEventRefItem(chain.first)) {
+        if (isEventRefItem(head)) {
             //TODO EventRefItem
-            throw new Error(`RefChain heads of kind '${chain.first.$type}' are not supported yet`);
+            throw new Error(`RefChain heads of kind '${head.$type}' are not supported yet`);
         }
 
         if (chain.rest.length === 0) {
-            if (isLocationRefItem(chain.first)) {
-                const loc = chain.first.val.val.ref;
-                if (!loc) throw new Error(`Unresolved location ref: ${chain.first.val.val.$refText}`);
-                return this.readPersistentValue(ctx.worldState, [{ kind: 'location', name: loc.name }]);
+            if (isLocationRefItem(head)) {
+                const loc = head.val.val.ref;
+                if (!loc) throw new Error(`Unresolved location ref: ${head.val.val.$refText}`);
+                return this.readPath(ctx, [{ kind: 'location', name: loc.name }]);
             }
-            if (isQuestRefItem(chain.first)) {
-                const q = chain.first.val.val.ref;
-                if (!q) throw new Error(`Unresolved quest ref: ${chain.first.val.val.$refText}`);
-                return this.readPersistentValue(ctx.worldState, [{ kind: 'quest', name: q.name }]);
+            if (isQuestRefItem(head)) {
+                const q = head.val.val.ref;
+                if (!q) throw new Error(`Unresolved quest ref: ${head.val.val.$refText}`);
+                return this.readPath(ctx, [{ kind: 'quest', name: q.name }]);
             }
-            if (isObjectiveRefItem(chain.first)) {
-                const o = chain.first.val.val.ref;
-                if (!o) throw new Error(`Unresolved objective ref: ${chain.first.val.val.$refText}`);
-                return this.readPersistentValue(ctx.worldState, nodeToStatePath(o)!);
+            if (isObjectiveRefItem(head)) {
+                const o = head.val.val.ref;
+                if (!o) throw new Error(`Unresolved objective ref: ${head.val.val.$refText}`);
+                return this.readPath(ctx, nodeToStatePath(o)!);
             }
-            if (isNpcRefItem(chain.first)) {
-                const n = chain.first.val.val.ref;
-                if (!n) throw new Error(`Unresolved npc ref: ${chain.first.val.val.$refText}`);
-                return this.readPersistentValue(ctx.worldState, [{ kind: 'npc', name: n.name }]);
+            if (isNpcRefItem(head)) {
+                const n = head.val.val.ref;
+                if (!n) throw new Error(`Unresolved npc ref: ${head.val.val.$refText}`);
+                return this.readPath(ctx, [{ kind: 'npc', name: n.name }]);
             }
-            if (isThisRefItem(chain.first)) {
+            if (isThisRefItem(head)) {
                 if (!ctx.thisEntity) throw new Error(`'this' is not available here`);
                 if (isEvent(ctx.thisEntity)) throw new Error(`Cannot read 'this' as a value when it refers to an Event`);
                 const path = nodeToStatePath(ctx.thisEntity);
                 if (!path) throw new Error(`'this' has no persistent address here`);
-                return this.readPersistentValue(ctx.worldState, path);
+                return this.readPath(ctx, path);
             }
-            if (isParentRefItem(chain.first)) {
+            if (isParentRefItem(head)) {
                 if (!ctx.parentEntity) throw new Error(`'parent' is not available here`);
                 if (isEvent(ctx.parentEntity)) throw new Error(`Cannot read 'parent' as a value when it refers to an Event`);
                 const path = nodeToStatePath(ctx.parentEntity);
                 if (!path) throw new Error(`'parent' has no persistent address here`);
-                return this.readPersistentValue(ctx.worldState, path);
+                return this.readPath(ctx, path);
             }
         }
 
-        // Every remaining shape ends in a VariableRefItem - either chain.first itself
+        // Every remaining shape ends in a VariableRefItem - either head itself
         // (a bare or location-qualified-with-rest variable chain) or the last chain.rest
         // item. Once scoping links each segment directly to its target, no per-segment
         // key-walk is needed for the persistent case - nodeToStatePath on the tail alone
         // recovers the full path back to the syntactic root.
-        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
+        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : head;
         if (!isVariableRefItem(tail)) {
             throw new Error(`Unsupported RefChain tail: ${tail.$type}`);
         }
@@ -423,14 +424,14 @@ export class LangiumInterpreterService {
         if (path) return this.readPath(ctx, path);
 
         // Local/function-scoped - nodeToStatePath only returns a path for a
-        // Location-rooted declaration, so chain.first can't be a LocationRefItem here;
+        // Location-rooted declaration, so head can't be a LocationRefItem here;
         // it must itself be a VariableRefItem. No StatePath bridge exists for it - walk
         // ctx.scope by name instead.
-        if (!isVariableRefItem(chain.first)) {
-            throw new Error(`Unsupported RefChain head: ${chain.first.$type}`);
+        if (!isVariableRefItem(head)) {
+            throw new Error(`Unsupported RefChain head: ${head.$type}`);
         }
-        const headDecl = chain.first.val.val.ref;
-        if (!headDecl) throw new Error(`Unresolved variable ref: ${chain.first.val.val.$refText}`);
+        const headDecl = head.val.val.ref;
+        if (!headDecl) throw new Error(`Unresolved variable ref: ${head.val.val.$refText}`);
         const headValue = ctx.scope[headDecl.target ?? headDecl.name ?? ''];
 
         // A for-loop-bound entity (see LoopEntityHandle) - read through its real
@@ -457,8 +458,8 @@ export class LangiumInterpreterService {
     /** A persistent read that sees this run's own not-yet-flushed writes: the newest
      *  pending write to exactly this path wins, else the served state is read. Without
      *  it a second `append` on a persistent list would start from the old value and
-     *  lose the first. Only an exact path is matched - a parent record read after a
-     *  write to one of its members still reflects the served state. */
+     *  lose the first. An entity read as a whole (`print quest "Q"`) is the served record
+     *  with every pending write to one of its variables laid over it, in order. */
     private readPath(ctx: EvalContext, path: StatePath): any {
         const pending = ctx.pendingOverlayWrites;
         if (pending?.length) {
@@ -467,7 +468,28 @@ export class LangiumInterpreterService {
                 if (encodeStatePath(pending[i].path) === key) return structuredClone(pending[i].value);
             }
         }
-        return this.readPersistentValue(ctx.worldState, path);
+        const value = this.readPersistentValue(ctx.worldState, path);
+        const isEntity = path[path.length - 1]?.kind !== 'variable';
+        if (!pending?.length || !isEntity || value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+        return this.overlayPendingOnto(structuredClone(value), path, pending);
+    }
+
+    /** Lays the pending writes under `entityPath` onto a copy of that entity's variables record. */
+    private overlayPendingOnto(record: Record<string, any>, entityPath: StatePath, pending: { path: StatePath; value: unknown }[]): Record<string, any> {
+        const prefix = encodeStatePath(entityPath);
+        for (const write of pending) {
+            if (write.path.length <= entityPath.length || encodeStatePath(write.path.slice(0, entityPath.length)) !== prefix) continue;
+            const rest = write.path.slice(entityPath.length);
+            if (!rest.every(segment => segment.kind === 'variable')) continue;
+            const keys = rest.map(segment => (segment as { target: string }).target);
+            let holder: any = record;
+            for (const key of keys.slice(0, -1)) {
+                holder = holder?.[key];
+                if (holder === null || typeof holder !== 'object') { holder = undefined; break; }
+            }
+            if (holder) holder[keys[keys.length - 1]] = structuredClone(write.value);
+        }
+        return record;
     }
 
     /** Reads the current (overlay-applied) value a persistent StatePath addresses, from
@@ -911,10 +933,11 @@ export class LangiumInterpreterService {
      *  Used by RemindStatement's `show on <chain>` pin and by `set <chain> = <expr>`.
      **/
     private resolveRefChainToStatePath(ctx: EvalContext, chain: RefChain): StatePath {
+        const head = chainHead(chain);
         if (this.isItemChain(chain)) return this.resolveItemTarget(ctx, chain).path;
         // A for-loop-bound entity - same shortcut evaluateRefChain's fallback uses.
-        if (isVariableRefItem(chain.first)) {
-            const headDecl = chain.first.val.val.ref;
+        if (isVariableRefItem(head)) {
+            const headDecl = head.val.val.ref;
             const headValue = headDecl ? ctx.scope[headDecl.target ?? headDecl.name ?? ''] : undefined;
             if (isLoopEntityHandle(headValue)) {
                 if (chain.rest.length === 0) return headValue.path;
@@ -922,13 +945,13 @@ export class LangiumInterpreterService {
                 return [...headValue.path, { kind: 'variable', target: tailName }];
             }
         }
-        if (chain.rest.length === 0 && isThisRefItem(chain.first)) {
+        if (chain.rest.length === 0 && isThisRefItem(head)) {
             if (!ctx.thisEntity) throw new Error(`'this' is not available here`);
             const path = nodeToStatePath(ctx.thisEntity);
             if (!path) throw new Error(`'this' has no persistent address here`);
             return path;
         }
-        if (chain.rest.length === 0 && isParentRefItem(chain.first)) {
+        if (chain.rest.length === 0 && isParentRefItem(head)) {
             if (!ctx.parentEntity) throw new Error(`'parent' is not available here`);
             const path = nodeToStatePath(ctx.parentEntity);
             if (!path) throw new Error(`'parent' has no persistent address here`);
@@ -1075,6 +1098,7 @@ export class LangiumInterpreterService {
      *  pending overlay write for the caller to flush. 
      **/
     private writeValue(ctx: EvalContext, chain: RefChain, value: unknown): void {
+        const head = chainHead(chain);
         if (this.isItemChain(chain)) {
             const { path, indexes } = this.resolveItemTarget(ctx, chain);
             if (path[path.length - 1]?.kind !== 'variable') throw new Error('Cannot store into a target that is not a variable');
@@ -1085,8 +1109,8 @@ export class LangiumInterpreterService {
         // With `[i]` the value replaces one item of the list the variable holds, not the variable.
         const stored = (whole: unknown) => indexes.length === 0 ? value : replaceAtIndexes(whole, indexes, value);
 
-        if (chain.rest.length === 0 && isVariableRefItem(chain.first)) {
-            const ref = chain.first.val.val;
+        if (chain.rest.length === 0 && isVariableRefItem(head)) {
+            const ref = head.val.val;
             const decl = ref.ref;
             const path = decl ? nodeToStatePath(decl) : undefined;
             if (path) {
@@ -1111,8 +1135,9 @@ export class LangiumInterpreterService {
      *  resolved type - this only decides, per field, what an element becomes. 
      **/
     private resolveFieldValue(ctx: EvalContext, chain: RefChain): unknown {
-        const head = this.resolveCollectionHead(ctx, chain.first);
-        if (!head) throw new Error(`Unresolved collection head: ${chain.first.$type}`);
+        const start = chainHead(chain);
+        const head = this.resolveCollectionHead(ctx, start);
+        if (!head) throw new Error(`Unresolved collection head: ${start.$type}`);
         return this.fieldValueOf(ctx, head, chain.field!);
     }
 
@@ -1145,7 +1170,11 @@ export class LangiumInterpreterService {
                 return (items as LocationExit[]).map(exit => ({ name: exit.name, target: exit.exit?.ref?.name }));
             // The VariableDeclarations themselves - bind each one's current value.
             case 'variables':
-                return (items as VariableDeclaration[]).map(v => v.value ? this.evaluateExpression(ctx, v.value) : undefined);
+                return (items as VariableDeclaration[]).map(v => {
+                    // The declaration's own value is the initial one; the current value is in the served state.
+                    const path = nodeToStatePath(v);
+                    return path ? this.readPath(ctx, path) : v.value ? this.evaluateExpression(ctx, v.value) : undefined;
+                });
             default:
                 throw new Error(`Unsupported collection field: ${field}`);
         }
@@ -1159,7 +1188,7 @@ export class LangiumInterpreterService {
      *  A VariableRefItem head is only meaningful here when it's a `for`-loop variable
      *  bound to a LoopEntityHandle - its path is resolved back to the live node. 
      **/
-    private resolveCollectionHead(ctx: EvalContext, start: RefChainStart): AstNode | undefined {
+    private resolveCollectionHead(ctx: EvalContext, start: ChainHead): AstNode | undefined {
         if (isLocationRefItem(start)) return start.val.val.ref;
         if (isQuestRefItem(start)) return start.val.val.ref;
         if (isObjectiveRefItem(start)) return start.val.val.ref;

@@ -8,9 +8,13 @@ import {
     isEnumValueRef,
     isEvent,
     isForStatement,
+    isLocation,
+    isLocationEntry,
+    isLocationRef,
     isLocationRefItem,
     isNpcRefItem,
     isObjectDeclaration,
+    isObjectiveRef,
     isObjectiveRefItem,
     isParentRefItem,
     isQuestRefItem,
@@ -20,15 +24,64 @@ import {
     isVariableRef,
     isVariableRefItem,
     isWorld,
+    type Location,
+    type Objective,
+    type Quest,
     type RefChain,
     type VariableDeclaration,
 } from "./generated/ast.js";
-import { lastChainSegment, nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from "./evaluation/dnd-dsl-state-path.js";
+import { chainHead, lastChainSegment, nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from "./evaluation/dnd-dsl-state-path.js";
 
 /** 
  * CollectionRef.field values whose elements are real named entities with their own `.variables` 
  **/
 const ENTITY_COLLECTION_FIELDS = new Set(['npcs', 'locations', 'quests', 'objectives', 'sublocations']);
+
+/** The head a step starts from: the step before it in the chain, or the chain's own head for the first step. */
+function stepBase(step: AstNode): AstNode | undefined
+{
+    const chain = step.$container;
+    if (!isRefChain(chain)) return undefined;
+    const index = step.$containerIndex ?? 0;
+    return index === 0 ? chain.first : chain.steps[index - 1];
+}
+
+export interface ChildSlot
+{
+    owner: Location | Quest;
+    /** What the children are called in a message: `sublocation` or `objective`. */
+    noun: string;
+    children: Array<Location | Objective>;
+}
+
+/**
+ * The children a name may pick, when `ref` is a step down to a child or an `entry`. After `location "A" ->` /
+ * `. sublocations` they are A's own sublocations, after `quest "Q" ->` / `. objectives` Q's own objectives, and for
+ * `entry` the sublocations of the location it sits in. Names are unique, so the global scope would also link a name
+ * that is not a child; scoping to these is what makes a step a check. Undefined when `ref` is not such a reference,
+ * or the name before it did not link (that error is enough).
+ */
+export function childSlot(ref: AstNode): ChildSlot | undefined
+{
+    const step = ref.$container;
+    if (isLocationRef(ref) && isLocationRefItem(step) && step.$containerProperty === "steps")
+    {
+        const base = stepBase(step);
+        const owner = isLocationRefItem(base) ? base.val.val.ref : undefined;
+        return owner && { owner, noun: "sublocation", children: owner.sublocations };
+    }
+    if (isObjectiveRef(ref) && isObjectiveRefItem(step) && step.$containerProperty === "steps")
+    {
+        const base = stepBase(step);
+        const owner = isQuestRefItem(base) ? base.val.val.ref : undefined;
+        return owner && { owner, noun: "objective", children: owner.objectives };
+    }
+    if (isLocationEntry(ref) && isLocation(ref.$container))
+    {
+        return { owner: ref.$container, noun: "sublocation", children: ref.$container.sublocations };
+    }
+    return undefined;
+}
 
 /** A `for` source that ends in a collection field itself, not in one item of it. */
 function isIteratedCollection(source: RefChain): boolean {
@@ -69,6 +122,9 @@ export class DndScopeProvider extends DefaultScopeProvider
             return this.getVariableScope(context.container, context);
         }
 
+        const stepScope = this.getStepScope(context);
+        if (stepScope) return stepScope;
+
         // `EnumName::Value` - the value half is scoped to that enum's own members.
         // EnumValueDecl nodes are only visible inside their Enum declaration by
         // default, so without this the value never resolves at any use site.
@@ -85,7 +141,15 @@ export class DndScopeProvider extends DefaultScopeProvider
         return super.getScope(context);
     }
 
-    /** 
+    /** See `childSlot`: the children a step or `entry` may name, as a scope, so the global pool never links a name that is not one. */
+    private getStepScope(context: ReferenceInfo): Scope | undefined
+    {
+        const slot = childSlot(context.container);
+        if (!slot) return undefined;
+        return new MapScope(stream(slot.children).map(child => this.descriptions.createDescription(child, child.name)));
+    }
+
+    /**
      * The enclosing World's enum by name, or - for a `reference world` script whose
      *  own World declares no enums - the loaded world's enum from the global index. 
      **/
@@ -106,7 +170,7 @@ export class DndScopeProvider extends DefaultScopeProvider
     }
 
     /**
-     * Members reachable via `.` from the segment at `restIndex - 1` (or `chain.first`
+     * Members reachable via `.` from the segment at `restIndex - 1` (or the head
      * when `restIndex === 0`). No global fallback - an unknown member must surface as a
      * linking error, not silently bind to a same-named variable elsewhere in the world.
      *
@@ -115,7 +179,7 @@ export class DndScopeProvider extends DefaultScopeProvider
      */
     private getMemberScope(chain: RefChain, restIndex: number): Scope
     {
-        const prev = restIndex === 0 ? chain.first : chain.rest[restIndex - 1];
+        const prev = restIndex === 0 ? chainHead(chain) : chain.rest[restIndex - 1];
 
         let members: VariableDeclaration[] | undefined;
 
@@ -193,9 +257,10 @@ export class DndScopeProvider extends DefaultScopeProvider
     private resolveEntityAliasMembers(chain: RefChain): VariableDeclaration[] | undefined
     {
         if (chain.rest.length > 0) return undefined;
-        if (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isObjectiveRefItem(chain.first) || isNpcRefItem(chain.first))
+        const head = chainHead(chain);
+        if (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head))
         {
-            return chain.first.val.val.ref?.variables;
+            return head.val.val.ref?.variables;
         }
         return undefined;
     }
@@ -221,7 +286,7 @@ export class DndScopeProvider extends DefaultScopeProvider
         const owner = decl.$container;
         if (!isForStatement(owner) || owner.loopVar !== decl || !owner.source) return false;
         const source = owner.source;
-        const tail = source.rest.length > 0 ? source.rest[source.rest.length - 1] : source.first;
+        const tail = source.rest.length > 0 ? source.rest[source.rest.length - 1] : chainHead(source);
         const listDecl = isVariableRefItem(tail) ? tail.val.val.ref : undefined;
         return !(listDecl?.isList && listDecl.enumType);
     }

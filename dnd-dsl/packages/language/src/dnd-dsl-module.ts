@@ -3,6 +3,7 @@ import { createDefaultModule, createDefaultSharedModule, type DefaultSharedModul
 import { DndDslGeneratedModule, DndDslGeneratedSharedModule } from './generated/module.js';
 import { DndDslValidator, registerValidationChecks } from './dnd-dsl-validator.js';
 import { DndScopeProvider } from './scope-provider.js';
+import { DndLinker } from './linker.js';
 import { DndScopeComputation } from './scope-computation.js';
 import { DndCompletionProvider } from './completion-provider.js';
 import { DndHoverProvider } from './hover-provider.js';
@@ -36,6 +37,7 @@ export const DndDslModule: Module<DndDslServices, PartialLangiumServices & DndDs
         LangiumParser: (services) => withBuiltInStatus(createLangiumParser(services))
     },
     references: {
+        Linker: (services) => new DndLinker(services),
         ScopeProvider: (services) => new DndScopeProvider(services),
         ScopeComputation: (services) => new DndScopeComputation(services)
     },

@@ -252,9 +252,24 @@ Parameter infers VariableDeclaration:
 // `first` / `rest` / `field` / `indexes` are the chain's first segment. After at least one index the chain may
 // carry on through `next`, a segment of the same shape, because the indexed item is itself something with members:
 // `quest "Q" . objectives[0] . Status`, `world . quests["Rising Dead"] . objectives[1] . Status`.
+// A step down to a child (`->`, or `. sublocations "B"` / `. objectives "O"`) is kept in `steps`, after the head it
+// starts from. The chain then continues from the LAST step, so the entity a chain's head denotes is `chainHead(chain)`
+// (the last step, else `first`); both spellings mean the same thing, and names are unique, so nothing after the head
+// needs to know the path. A step is told from the plain collection field by the string after it: `. sublocations "B"`
+// is a step, `. sublocations` and `. sublocations[0]` are the collection. That lookahead works because the members
+// and the field that follow are in this same rule; in the head rules a trailing repetition is decided on its first
+// token alone, which cannot tell `. sublocations "B"` from `. Torches`.
 RefChain:
-    first=RefChainStart ('.' rest+=VariableRefItem)* ('.' field=ChainField)?
+    (   first=LocationRefItem (steps+=LocationStep)*
+      | first=QuestRefItem (steps+=ObjectiveStep)?
+      | first=RefChainHead )
+    ('.' rest+=VariableRefItem)* ('.' field=ChainField)?
     (('[' indexes+=Expression ']')+ next=ChainTail?)?;
+
+LocationStep infers LocationRefItem:
+    ('->' | '.' 'sublocations') val=LocationRef;
+ObjectiveStep infers ObjectiveRefItem:
+    ('->' | '.' 'objectives') val=ObjectiveRef;
 
 ChainTail:
     ('.' rest+=VariableRefItem)+ ('.' field=ChainField)? (('[' indexes+=Expression ']')+ next=ChainTail?)?
@@ -267,10 +282,8 @@ ChainField returns string:
     //Single-value fields
     | 'name' | 'description';
 
-RefChainStart:
+RefChainHead infers RefChainStart:
     VariableRefItem
-    | LocationRefItem
-    | QuestRefItem
     | ObjectiveRefItem
     | EventRefItem
     | NpcRefItem
@@ -281,6 +294,7 @@ RefChainStart:
 
 VariableRefItem:
     val=VariableRef;
+
 LocationRefItem:
     isLocation='location' val=LocationRef;
 QuestRefItem:

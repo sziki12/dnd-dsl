@@ -88,6 +88,10 @@ and its `<world>.state.json` sidecar. The frontend loads a world with
   each parse by `builtin-status.ts` (a parser wrapper in `dnd-dsl-module.ts`); its rules live in
   `evaluation/dnd-dsl-status.ts`. It is a normal variable for linking, `set` and `on change`, so code
   that reads a variable's `value` must evaluate it, not assume a string.
+- A chain's head is `chainHead(chain)` (`evaluation/dnd-dsl-state-path.ts`), not `chain.first`: after a step down
+  to a child (`location "A" -> "B"`, `quest "Q" . objectives "O"`) the head is the last step, so every reader of a
+  chain goes through that helper. Steps live in `RefChain` itself; a trailing repetition at the end of a head rule
+  would be predicted on its first token alone (see `COLLECTION_ACCESS_IDEAS.md`).
 - `packages/cli/src/main.ts` exports `parseModel()` and `DndDslParseError` (used by the backend).
 
 ### Three expression evaluators (intentional parallel implementations)

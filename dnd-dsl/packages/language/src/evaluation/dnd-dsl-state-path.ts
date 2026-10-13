@@ -244,6 +244,19 @@ export function lastChainSegment(chain: RefChain): RefChain | ChainTail {
     return segment;
 }
 
+/** What a chain starts from: a head such as `location "A"`, `quest "Q"`, `world`, or a variable. */
+export type ChainHead = RefChain['first'];
+
+/**
+ * The head a chain's members and fields apply to. After a step down to a child (`location "A" -> "B"`,
+ * `quest "Q" . objectives "O"`) that is the last step, since names are unique and the child alone says which
+ * entity is meant; otherwise it is `first`. Works on the serialized model too, where `steps` can be absent.
+ */
+export function chainHead<T>(chain: { first: T; steps?: ReadonlyArray<T> }): T {
+    const steps = chain.steps;
+    return steps && steps.length > 0 ? steps[steps.length - 1] : chain.first;
+}
+
 export function unwrapExpression(node: AstNode | undefined): AstNode | undefined {
     while (node && node.$type === 'Expression') {
         node = (node as unknown as { exp?: AstNode }).exp;

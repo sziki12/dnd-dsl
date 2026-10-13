@@ -1,12 +1,13 @@
 import { AstUtils, CstUtils } from "langium";
-import type { AstNode, IndexManager, LangiumDocument, Reference, ReferenceInfo } from "langium";
+import type { AstNode, AstNodeDescription, AstNodeLocator, IndexManager, LangiumDocument, LangiumDocuments, Reference, ReferenceInfo } from "langium";
 import { DefaultCompletionProvider, type CompletionContext } from "langium/lsp";
 import type { LangiumServices } from "langium/lsp";
 import { CompletionItemKind, CompletionList } from "vscode-languageserver";
 import type { CancellationToken, CompletionItem, CompletionParams } from "vscode-languageserver";
-import { isChangeOccurrence, isRefChain, isSetStatement, isVariableRef, type RefChain } from "./generated/ast.js";
+import { isChangeOccurrence, isLocation, isQuest, isRefChain, isSetStatement, isVariableRef, type RefChain } from "./generated/ast.js";
 import { PREDEFINED_SIGNATURES } from "./evaluation/dnd-dsl-predefined-signatures.js";
 import { COLLECTION_FIELDS, SIMPLE_FIELDS, ObjectKind, collectionHeadKind } from "./dnd-dsl-validator.js";
+import { chainHead } from "./evaluation/dnd-dsl-state-path.js";
 
 /** The name slot of `call predefined <name>` */
 const CALL_KEYWORD = "call";
@@ -29,6 +30,13 @@ const ENTITY_SLOT = new RegExp(
     `(?:^|[^\\w"])(${Object.keys(ENTITY_TYPE).join("|")})[ \\t]+(?:${TRIGGERED_KEYWORD}[ \\t]+)?("?)([^"\\n]*)$`,
 );
 
+/**
+ * `location "A" -> "B" -> "` / `quest "Q" . objectives "`: the head, the names of the steps already taken, and what is
+ * typed of the next one. The keyword after the dot, when there is one, says which collection the step names.
+ */
+const STEP_SLOT = /\b(location|quest)[ \t]+"([^"\n]*)"((?:[ \t]*(?:->|\.[ \t]*(?:sublocations|objectives))[ \t]*"[^"\n]*")*)[ \t]*(?:->|\.[ \t]*(sublocations|objectives))[ \t]*"([^"\n]*)$/;
+const ENTRY_SLOT = /(?:^|[^\w"])entry[ \t]+"([^"\n]*)$/;
+
 export class DndCompletionProvider extends DefaultCompletionProvider {
     //We would like completion for:
     // - member access via '.' 
@@ -36,10 +44,14 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
     override readonly completionOptions = { triggerCharacters: ['"', "."] };
 
     private readonly indexManager: IndexManager;
+    private readonly documents: LangiumDocuments;
+    private readonly locator: AstNodeLocator;
 
     constructor(services: LangiumServices) {
         super(services);
         this.indexManager = services.shared.workspace.IndexManager;
+        this.documents = services.shared.workspace.LangiumDocuments;
+        this.locator = services.workspace.AstNodeLocator;
     }
 
     override async getCompletion(
@@ -51,6 +63,11 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         // After `entity .` / `var .` the member list should be only shown
         if (members.length > 0) {
             return CompletionList.create(this.deduplicateItems(members), true);
+        }
+
+        const children = this.childNameCompletions(document, params);
+        if (children) {
+            return CompletionList.create(this.deduplicateItems(children), true);
         }
 
         const names = this.entityNameCompletions(document, params);
@@ -148,7 +165,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const isWriteOrWatchTarget = (isSetStatement(chain.$container) && chain.$container.target === chain)
             || (isChangeOccurrence(chain.$container) && chain.$container.target === chain);
         if (restIndex === 0 && !isWriteOrWatchTarget) {
-            const kind = collectionHeadKind(chain.first);
+            const kind = collectionHeadKind(chainHead(chain));
             if (kind) {
                 const range = { start: document.textDocument.positionAt(replaceFrom), end: params.position };
                 for (const field of COLLECTION_FIELDS[kind].concat(SIMPLE_FIELDS[kind])) {
@@ -199,7 +216,58 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const typeName = ENTITY_TYPE[keyword];
         if (!typeName) return [];
 
-        const hasOpenQuote = quote === '"';
+        return this.nameItems(document, params, partial, quote === '"', typeName, Array.from(this.indexManager.allElements(typeName), d => d.name));
+    }
+
+    /**
+     * Only the children a step or `entry` may name: after `location "A" ->` / `. sublocations` the sublocations of A,
+     * after `quest "Q" ->` / `. objectives` the objectives of Q, and for `entry` the sublocations of the location it
+     * sits in. Undefined when the cursor is in no such slot, so the general name completion still runs. The base is
+     * found by name, not from the half-typed AST, which does not hold a step that has no closing quote yet.
+     */
+    private childNameCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] | undefined {
+        const td = document.textDocument;
+        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+
+        const slot = STEP_SLOT.exec(line);
+        if (slot) {
+            const [, keyword, headName, earlier, collection, partial] = slot;
+            if (collection && (collection === "sublocations") !== (keyword === "location")) return [];
+
+            let current = this.findByName(keyword === "location" ? ObjectKind.Location : ObjectKind.Quest, headName);
+            for (const [, name] of earlier.matchAll(/"([^"\n]*)"/g)) {
+                current = isLocation(current) ? current.sublocations.find(l => l.name === name) : undefined;
+            }
+            const children = isLocation(current) ? current.sublocations : isQuest(current) ? current.objectives : [];
+            const detail = isLocation(current) ? ObjectKind.Location : ObjectKind.Objective;
+            return this.nameItems(document, params, partial, true, detail, children.map(c => c.name));
+        }
+
+        const entry = ENTRY_SLOT.exec(line);
+        if (entry) {
+            const cst = document.parseResult.value.$cstNode;
+            const leaf = cst && CstUtils.findLeafNodeBeforeOffset(cst, td.offsetAt(params.position));
+            const owner = leaf && AstUtils.getContainerOfType(leaf.astNode, isLocation);
+            return this.nameItems(document, params, entry[1], true, ObjectKind.Location, owner ? owner.sublocations.map(l => l.name) : []);
+        }
+        return undefined;
+    }
+
+    private findByName(type: ObjectKind, name: string): AstNode | undefined {
+        for (const description of this.indexManager.allElements(type)) {
+            if (description.name === name) return this.nodeOf(description);
+        }
+        return undefined;
+    }
+
+    private nodeOf(description: AstNodeDescription): AstNode | undefined {
+        if (description.node) return description.node;
+        const target = this.documents.hasDocument(description.documentUri) ? this.documents.getDocument(description.documentUri) : undefined;
+        return target ? this.locator.getAstNode(target.parseResult.value, description.path) : undefined;
+    }
+
+    private nameItems(document: LangiumDocument, params: CompletionParams, partial: string, hasOpenQuote: boolean, detail: string, names: string[]): CompletionItem[] {
+        const td = document.textDocument;
         const offset = td.offsetAt(params.position);
         const text = td.getText();
         // The replaced range must start at the partial, not at the opening quote -
@@ -210,16 +278,16 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const newTextPrefix = hasOpenQuote ? "" : '"';
 
         const items: CompletionItem[] = [];
-        for (const description of this.indexManager.allElements(typeName)) {
-            if (partial && !this.fuzzyMatcher.match(partial, description.name)) continue;
+        for (const name of names) {
+            if (partial && !this.fuzzyMatcher.match(partial, name)) continue;
             items.push({
-                label: description.name,
+                label: name,
                 kind: CompletionItemKind.Value,
-                detail: typeName,
+                detail,
                 sortText: "0",
                 textEdit: {
                     range: { start, end },
-                    newText: `${newTextPrefix}${description.name}"`,
+                    newText: `${newTextPrefix}${name}"`,
                 },
             });
         }
