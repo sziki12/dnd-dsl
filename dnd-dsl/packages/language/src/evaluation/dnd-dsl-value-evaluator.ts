@@ -15,6 +15,7 @@ import { parseReferenceFromSerializedModel } from './dnd-dsl-reference.js';
 import {
     applyArithmetic,
     applyComparison,
+    applyIndex,
     applyLogical,
     negatableBool,
     signedInt,
@@ -38,7 +39,7 @@ export type JsonRuntimeValue =
 
 export type RefChainTarget =
     | { kind: 'location'; node: SerializedLocation }
-    | { kind: 'entity'; node: SerializedNpc | SerializedQuest }
+    | { kind: 'entity'; node: SerializedNpc | SerializedQuest | SerializedObjective }
     | { kind: 'variable'; node: SerializedVariableDecl };
 
 /**
@@ -65,9 +66,9 @@ export function resolveSerializedRefChain(model: SerializedModel, chain: Seriali
         return { kind: 'location', node: loc };
     }
 
-    if ((first.$type === 'QuestRefItem' || first.$type === 'NpcRefItem') && chain.rest.length === 0) {
+    if ((first.$type === 'QuestRefItem' || first.$type === 'ObjectiveRefItem' || first.$type === 'NpcRefItem') && chain.rest.length === 0) {
         const ref = (first as unknown as { val: { val: { $ref: string } } }).val.val;
-        const node = parseReferenceFromSerializedModel<SerializedNpc | SerializedQuest>(model, ref);
+        const node = parseReferenceFromSerializedModel<SerializedNpc | SerializedQuest | SerializedObjective>(model, ref);
         if (!node) throw new Error(`Unresolved entity ref: ${ref.$ref}`);
         return { kind: 'entity', node };
     }
@@ -175,10 +176,15 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
             return buildVariablesRecord(model, (node as unknown as { variables: SerializedVariableDecl[] }).variables);
 
         case 'RefChain': {
-            const target = resolveSerializedRefChain(model, node as unknown as SerializedRefChain);
-            return target.kind === 'location' || target.kind === 'entity'
+            const chain = node as unknown as SerializedRefChain;
+            const target = resolveSerializedRefChain(model, chain);
+            const value = target.kind === 'location' || target.kind === 'entity'
                 ? buildVariablesRecord(model, target.node.variables)
                 : evaluateSerializedExpression(model, target.node.value);
+            return (chain.indexes ?? []).reduce<JsonRuntimeValue>(
+                (list, index) => applyIndex(list, evaluateSerializedExpression(model, index)) as JsonRuntimeValue,
+                value,
+            );
         }
 
         case 'FunctionCall': {

@@ -21,7 +21,6 @@ import {
   type StatePath,
 } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import type { FiredReminder, ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
-import { seedStatusDefaults } from '@dnd-language/evaluation/dnd-dsl-status.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 import { predefinedFunctions, predefinedFunctionsAsMap } from '../predefined/predefined-functions.js';
 import { type StateOverlayFile } from './state-overlay.types.js';
@@ -346,8 +345,6 @@ export class WorldStateService {
     }
     this._worldState = JSON.parse(stringifyNode(this._model));
     this._worldState.predefinedFunctions = predefinedFunctionsAsMap;
-    // Before the overlay, so a saved Status transition splices into the seeded entry.
-    seedStatusDefaults(this._worldState);
     this._staleOverlayEntries = this.applyOverlay();
   }
 

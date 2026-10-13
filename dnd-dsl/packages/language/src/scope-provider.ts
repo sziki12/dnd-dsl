@@ -10,6 +10,7 @@ import {
     isLocationRefItem,
     isNpcRefItem,
     isObjectDeclaration,
+    isObjectiveRefItem,
     isParentRefItem,
     isQuestRefItem,
     isRefChain,
@@ -110,6 +111,10 @@ export class DndScopeProvider extends DefaultScopeProvider
         {
             members = prev.val.val.ref?.variables;
         }
+        else if (isObjectiveRefItem(prev))
+        {
+            members = prev.val.val.ref?.variables;
+        }
         else if (isNpcRefItem(prev))
         {
             members = prev.val.val.ref?.variables;
@@ -171,7 +176,7 @@ export class DndScopeProvider extends DefaultScopeProvider
     private resolveEntityAliasMembers(chain: RefChain): VariableDeclaration[] | undefined
     {
         if (chain.rest.length > 0) return undefined;
-        if (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isNpcRefItem(chain.first))
+        if (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isObjectiveRefItem(chain.first) || isNpcRefItem(chain.first))
         {
             return chain.first.val.val.ref?.variables;
         }

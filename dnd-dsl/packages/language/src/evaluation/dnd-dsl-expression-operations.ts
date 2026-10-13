@@ -81,3 +81,43 @@ export function signedInt(node: { isNegative?: boolean; val: number }): number {
 export function negatableBool(node: { isNegated?: boolean; val: boolean }): boolean {
     return node.isNegated ? !node.val : node.val;
 }
+
+function describeValue(value: unknown): string {
+    if (value === undefined || value === null) return 'nothing';
+    if (Array.isArray(value)) return 'a list';
+    if (typeof value === 'string') return JSON.stringify(value);
+    return typeof value === 'object' ? 'a record' : String(value);
+}
+
+function asIndex(index: unknown): number {
+    if (typeof index !== 'number' || !Number.isInteger(index)) {
+        throw new Error(`A list is indexed by a whole number, not ${describeValue(index)}.`);
+    }
+    return index;
+}
+
+/**
+ * `list[index]`: the item at a 0-based position, or nothing when the position is outside the list (a negative one included).
+ *  Indexing anything that is not a list, or by anything that is not a whole number, is an error.
+ */
+export function applyIndex(list: unknown, index: unknown): unknown {
+    if (!Array.isArray(list)) throw new Error(`Only a list can be indexed, not ${describeValue(list)}.`);
+    const position = asIndex(index);
+    return position < 0 ? undefined : list[position];
+}
+
+/**
+ * A copy of `list` with the item at `indexes` replaced by `value` (several indexes reach into a list of lists).
+ * Unlike a read, an index outside the list is an error, so a write is never silently lost.
+ */
+export function replaceAtIndexes(list: unknown, indexes: readonly unknown[], value: unknown): unknown[] {
+    if (!Array.isArray(list)) throw new Error(`Only a list can be indexed, not ${describeValue(list)}.`);
+    const [head, ...rest] = indexes;
+    const position = asIndex(head);
+    if (position < 0 || position >= list.length) {
+        throw new Error(`Index ${position} is outside the list (it has ${list.length} item${list.length === 1 ? '' : 's'}).`);
+    }
+    const copy = [...list];
+    copy[position] = rest.length === 0 ? value : replaceAtIndexes(list[position], rest, value);
+    return copy;
+}

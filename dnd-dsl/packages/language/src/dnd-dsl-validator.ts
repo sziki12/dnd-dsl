@@ -17,6 +17,7 @@ import {
     isNpcRefItem,
     isObjectDeclaration,
     isObjective,
+    isObjectiveRefItem,
     isOnBlock,
     isParentRefItem,
     isQuest,
@@ -128,6 +129,7 @@ export function collectionHeadKind(head: RefChainStart): ObjectKind | undefined 
     if (isWorldRefItem(head)) return ObjectKind.World;
     if (isLocationRefItem(head)) return ObjectKind.Location;
     if (isQuestRefItem(head)) return ObjectKind.Quest;
+    if (isObjectiveRefItem(head)) return ObjectKind.Objective;
     if (isNpcRefItem(head)) return ObjectKind.Npc;
     if (isEnumRefItem(head)) return ObjectKind.Enum;
     if (isThisRefItem(head)) return owningObjectKind(nearestOwningObject(head));
@@ -169,7 +171,7 @@ export function registerValidationChecks(services: DndDslServices) {
         SetStatement: validator.checkStatusAssignment,
         IntToBoolExpression: validator.checkEnumComparison,
         RemindStatement: validator.checkRemindPlacement,
-        RefChain: validator.checkRefChainField,
+        RefChain: [validator.checkRefChainField, validator.checkRefChainIndexes],
         ListLiteral: validator.checkListLiteral,
         FunctionCall: validator.checkPredefinedCall,
         ForStatement: validator.checkForSource,
@@ -406,9 +408,30 @@ export class DndDslValidator {
         return locations.flatMap(l => [l, ...this.collectAllLocations(l.sublocations)]);
     }
 
+    /** `list[i]`: only a variable holding a list can be indexed, and only by a whole number. */
+    checkRefChainIndexes(chain: RefChain, accept: ValidationAcceptor): void {
+        if (chain.indexes.length === 0) return;
+        if (chain.field) {
+            accept('error', `'.${chain.field}' cannot be indexed yet; loop over it with 'for ... in'.`, { node: chain, property: 'indexes' });
+            return;
+        }
+        if (!this.endsInVariable(chain)) {
+            accept('error', `Only a variable holding a list can be indexed, e.g. npc "X" . items[0].`, { node: chain, property: 'indexes' });
+            return;
+        }
+        for (const [i, index] of chain.indexes.entries()) {
+            const value = unwrapExpression(index);
+            if (isStringVal(value) || isBoolVal(value) || isListLiteral(value)) {
+                accept('error', `A list is indexed by a whole number.`, { node: chain, property: 'indexes', index: i });
+            }
+        }
+    }
+
     checkChangeOccurrenceTarget(occ: ChangeOccurrence, accept: ValidationAcceptor): void {
         if (!this.endsInVariable(occ.target)) {
             accept('error', `'on change' must target a variable, e.g. 'on change npc "X" . mood do ... end'.`, { node: occ, property: 'target' });
+        } else if (occ.target.indexes.length > 0) {
+            accept('error', `'on change' watches a whole variable, not one item of it.`, { node: occ, property: 'target' });
         }
     }
 

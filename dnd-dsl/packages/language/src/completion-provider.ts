@@ -16,6 +16,7 @@ const ENTITY_TYPE: Record<string, ObjectKind> = {
     location: ObjectKind.Location,
     npc: ObjectKind.Npc,
     quest: ObjectKind.Quest,
+    objective: ObjectKind.Objective,
     event: ObjectKind.Event,
     trigger: ObjectKind.Event,
 };

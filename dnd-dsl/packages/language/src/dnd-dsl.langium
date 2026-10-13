@@ -256,12 +256,14 @@ RefChain:
         | 'enums' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values'
         //Single-value fields
         | 'name' | 'description'
-        ))?;
+        ))?
+    ('[' indexes+=Expression ']')*;
 
 RefChainStart:
     VariableRefItem
     | LocationRefItem
     | QuestRefItem
+    | ObjectiveRefItem
     | EventRefItem
     | NpcRefItem
     | WorldRefItem
@@ -275,6 +277,10 @@ LocationRefItem:
     isLocation='location' val=LocationRef;
 QuestRefItem:
     isQuest='quest' val=QuestRef;
+// Objective names are unique across every quest (see the validator), so `objective "X"` names one on its own.
+// `objective completed "X"` / `objective failed "X"` (ObjectiveExpressions) are told apart by the keyword that follows.
+ObjectiveRefItem:
+    isObjective='objective' val=ObjectiveRef;
 EventRefItem:
     isEvent='event' val=EventRef;
 NpcRefItem:

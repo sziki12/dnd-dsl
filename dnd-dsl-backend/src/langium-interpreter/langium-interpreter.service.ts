@@ -30,6 +30,7 @@ import {
     isNpcRefItem,
     isObjectDeclaration,
     isObjective,
+    isObjectiveRefItem,
     isParentRefItem,
     isQuest,
     isQuestExpressions,
@@ -64,7 +65,7 @@ import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefi
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
-import { applyArithmetic, applyComparison, applyLogical, negatableBool, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
+import { applyArithmetic, applyComparison, applyIndex, applyLogical, negatableBool, replaceAtIndexes, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
 import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import { assertValidStatusWrite, objectiveStatusPath, questStatusPath, STATUS_VARIABLE, statusBlockFor, statusExpressionHolds, statusOrDefault, statusTransition, type StatusAction, type StatusBlock, type StatusKind } from '@dnd-language/evaluation/dnd-dsl-status.js';
 
@@ -196,7 +197,7 @@ export class LangiumInterpreterService {
             throw new Error(`Cannot resolve a '${chain.first.$type}' reference to a StatePath`);
         }
         if (chain.rest.length === 0
-            && (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isNpcRefItem(chain.first))) {
+            && (isLocationRefItem(chain.first) || isQuestRefItem(chain.first) || isObjectiveRefItem(chain.first) || isNpcRefItem(chain.first))) {
             const node = chain.first.val.val.ref;
             if (!node) throw new Error(`Unresolved ref: ${chain.first.val.val.$refText}`);
             return nodeToStatePath(node)!;
@@ -262,7 +263,13 @@ export class LangiumInterpreterService {
 
     }
 
+    /** The chain's value, then each `[index]` applied in turn (a list of lists takes several). */
     private evaluateRefChain(ctx: EvalContext, chain: RefChain): any {
+        const value = this.evaluateRefChainBase(ctx, chain);
+        return chain.indexes.reduce((list, index) => applyIndex(list, this.evaluateExpression(ctx, index)), value);
+    }
+
+    private evaluateRefChainBase(ctx: EvalContext, chain: RefChain): any {
         if (chain.field) 
             return this.resolveFieldValue(ctx, chain);
 
@@ -281,6 +288,11 @@ export class LangiumInterpreterService {
                 const q = chain.first.val.val.ref;
                 if (!q) throw new Error(`Unresolved quest ref: ${chain.first.val.val.$refText}`);
                 return this.readPersistentValue(ctx.worldState, [{ kind: 'quest', name: q.name }]);
+            }
+            if (isObjectiveRefItem(chain.first)) {
+                const o = chain.first.val.val.ref;
+                if (!o) throw new Error(`Unresolved objective ref: ${chain.first.val.val.$refText}`);
+                return this.readPersistentValue(ctx.worldState, nodeToStatePath(o)!);
             }
             if (isNpcRefItem(chain.first)) {
                 const n = chain.first.val.val.ref;
@@ -501,6 +513,11 @@ export class LangiumInterpreterService {
                 if (path[path.length - 1]?.kind !== 'variable') {
                     throw new Error('`set` needs an entity variable target, e.g. `set npc "X" . mood = ...`');
                 }
+                const indexes = c.target.indexes.map(index => this.evaluateExpression(ctx, index));
+                if (indexes.length > 0) {
+                    this.pushWrite(ctx, path, replaceAtIndexes(this.readPath(ctx, path), indexes, value));
+                    break;
+                }
                 const statusOwner = this.statusOwner(ctx, path);
                 if (statusOwner) this.setStatus(ctx, statusOwner, value);
                 else this.pushWrite(ctx, path, value);
@@ -559,7 +576,7 @@ export class LangiumInterpreterService {
             case 'ForStatement': {
                 const c = code as unknown as ForStatement;
                 const loopVarName = c.loopVar.name ?? '';
-                const values = c.source ? this.resolveFieldValue(ctx, c.source) as unknown[] : this.resolveListSource(ctx, c.source!);
+                const values = c.source.field ? this.resolveFieldValue(ctx, c.source) as unknown[] : this.resolveListSource(ctx, c.source);
                 for (const value of values) {
                     ctx.scope[loopVarName] = value;
                     for (const block of c.body) {
@@ -925,14 +942,19 @@ export class LangiumInterpreterService {
      *  pending overlay write for the caller to flush. 
      **/
     private writeValue(ctx: EvalContext, chain: RefChain, value: unknown): void {
+        const indexes = chain.indexes.map(index => this.evaluateExpression(ctx, index));
+        // With `[i]` the value replaces one item of the list the variable holds, not the variable.
+        const stored = (whole: unknown) => indexes.length === 0 ? value : replaceAtIndexes(whole, indexes, value);
+
         if (chain.rest.length === 0 && isVariableRefItem(chain.first)) {
             const ref = chain.first.val.val;
             const decl = ref.ref;
             const path = decl ? nodeToStatePath(decl) : undefined;
             if (path) {
-                this.pushWrite(ctx, path, value);
+                this.pushWrite(ctx, path, stored(this.readPath(ctx, path)));
             } else {
-                ctx.scope[decl?.target ?? decl?.name ?? ref.$refText] = value;
+                const name = decl?.target ?? decl?.name ?? ref.$refText;
+                ctx.scope[name] = stored(ctx.scope[name]);
             }
             return;
         }
@@ -940,7 +962,7 @@ export class LangiumInterpreterService {
         if (path[path.length - 1]?.kind !== 'variable') {
             throw new Error('Cannot store into a target that is not a variable');
         }
-        this.pushWrite(ctx, path, value);
+        this.pushWrite(ctx, path, stored(this.readPath(ctx, path)));
     }
 
     /** 
@@ -997,6 +1019,7 @@ export class LangiumInterpreterService {
     private resolveCollectionHead(ctx: EvalContext, start: RefChainStart): AstNode | undefined {
         if (isLocationRefItem(start)) return start.val.val.ref;
         if (isQuestRefItem(start)) return start.val.val.ref;
+        if (isObjectiveRefItem(start)) return start.val.val.ref;
         if (isNpcRefItem(start)) return start.val.val.ref;
         if (isWorldRefItem(start)) return ctx.model?.World;
         if (isEnumRefItem(start)) return start.val.ref;

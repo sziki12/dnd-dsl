@@ -6,6 +6,7 @@ import { PREDEFINED_FUNCTIONS } from '@dnd-language/evaluation/dnd-dsl-predefine
 import {
     applyArithmetic,
     applyComparison,
+    applyIndex,
     applyLogical,
     negatableBool,
     signedInt,
@@ -135,12 +136,16 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
         case 'RefChain': {
             if (!options?.worldState) return undefined;
             try {
-                const target = resolveSerializedRefChain(options.worldState, expr as unknown as SerializedRefChain);
-                if (target.kind === 'location' || target.kind === 'entity') {
+                const chain = expr as unknown as SerializedRefChain;
+                const target = resolveSerializedRefChain(options.worldState, chain);
+                const value = target.kind === 'location' || target.kind === 'entity'
                     // Reuse the ObjectDeclaration case above rather than duplicating record-building.
-                    return evaluateExpression({ $type: 'ObjectDeclaration', variables: target.node.variables } as any, options);
-                }
-                return evaluateExpression(target.node.value, { variableName: target.node.target, worldState: options.worldState });
+                    ? evaluateExpression({ $type: 'ObjectDeclaration', variables: target.node.variables } as any, options)
+                    : evaluateExpression(target.node.value, { variableName: target.node.target, worldState: options.worldState });
+                return (chain.indexes ?? []).reduce<EvalResult | undefined>(
+                    (list, index) => applyIndex(list, evaluateExpression(index, options)) as EvalResult | undefined,
+                    value,
+                );
             } catch {
                 // Unresolved/unsupported chain (e.g. an event head - not implemented yet).
                 // This function runs eagerly during render (LocationView), so a throw here would crash the page
