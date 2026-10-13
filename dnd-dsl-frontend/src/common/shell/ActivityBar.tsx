@@ -4,6 +4,8 @@ import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
+import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
+import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
 import TerminalOutlinedIcon from '@mui/icons-material/TerminalOutlined';
 import { DslContext } from '../../contexts/DslContext';
 
@@ -38,6 +40,22 @@ export default function ActivityBar() {
       label: 'NPCs',
       active: pathname === '/npcs',
       onClick: () => navigate('/npcs'),
+      disabled: !worldState,
+    },
+    {
+      id: 'quests',
+      icon: <FlagOutlinedIcon />,
+      label: 'Quests',
+      active: pathname === '/quests' || pathname.startsWith('/quests/'),
+      onClick: () => navigate('/quests'),
+      disabled: !worldState,
+    },
+    {
+      id: 'events',
+      icon: <BoltOutlinedIcon />,
+      label: 'Events',
+      active: pathname === '/events' || pathname.startsWith('/events/'),
+      onClick: () => navigate('/events'),
       disabled: !worldState,
     },
     {

@@ -8,12 +8,16 @@ const MENU_ITEMS = ['File', 'Edit', 'View', 'Help'];
  *  now driving the browser tab title instead since there is no tab strip anymore. */
 function useViewName(): string {
   const { pathname } = useLocation();
-  const { locationName } = useParams();
+  const { locationName, questName, eventName } = useParams();
   const { worldState } = useContext(DslContext);
 
   if (pathname === '/') return 'Home';
   if (pathname.startsWith('/location/')) return locationName ?? worldState?.World?.locations[0]?.name ?? 'Location';
   if (pathname === '/npcs') return 'NPCs';
+  if (pathname === '/quests') return 'Quests';
+  if (pathname.startsWith('/quests/')) return questName ?? 'Quest';
+  if (pathname === '/events') return 'Events';
+  if (pathname.startsWith('/events/')) return eventName ?? 'Event';
   if (pathname === '/script') return 'Script';
   if (pathname === '/editor') return 'Editor';
   return 'DnD DSL';
@@ -21,7 +25,8 @@ function useViewName(): string {
 
 export default function TitleBar() {
   const { adventure, world } = useContext(DslContext);
-  const { locationName } = useParams();
+  const { locationName, questName, eventName } = useParams();
+  const entityName = locationName ?? questName ?? eventName;
   const viewName = useViewName();
 
   useEffect(() => {
@@ -42,10 +47,10 @@ export default function TitleBar() {
         <span>{adventure}</span>
         <span style={{ color: 'var(--fg-muted)' }}>&rsaquo;</span>
         <span>{world}</span>
-        {locationName && (
+        {entityName && (
           <>
             <span style={{ color: 'var(--fg-muted)' }}>&rsaquo;</span>
-            <span style={{ color: 'var(--fg-primary)' }}>{locationName}</span>
+            <span style={{ color: 'var(--fg-primary)' }}>{entityName}</span>
           </>
         )}
       </div>

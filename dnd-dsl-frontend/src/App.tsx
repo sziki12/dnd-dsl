@@ -1,6 +1,8 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import LocationView from './pages/LocationView';
 import NpcsView from './pages/NpcsView';
+import EventsView from './pages/EventsView';
+import QuestsView from './pages/QuestsView';
 import ScriptView from './pages/ScriptView';
 import { DslEditor } from './pages/DslEditor';
 import { ContextWrapper } from './contexts/ContextWrapper';
@@ -36,6 +38,10 @@ function App() {
           {createRoute({path:"/", element:<Home />})}
           {createRoute({path:"/location/:locationName", element:<LocationView />})}
           {createRoute({path:"/npcs", element:<NpcsView />})}
+          {createRoute({path:"/quests", element:<QuestsView />})}
+          {createRoute({path:"/quests/:questName", element:<QuestsView />})}
+          {createRoute({path:"/events", element:<EventsView />})}
+          {createRoute({path:"/events/:eventName", element:<EventsView />})}
           {createRoute({path:"/script", element:<ScriptView />})}
           {createRoute({path:"/editor", element:<DslEditor />})}
         </Routes>
