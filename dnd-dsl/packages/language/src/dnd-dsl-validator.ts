@@ -3,6 +3,7 @@ import {
     ChangeOccurrence,
     isBoolVal,
     isChangeOccurrence,
+    isChainTail,
     isCodeBlock,
 
     isEnumRefItem,
@@ -33,6 +34,8 @@ import {
     ParentRefItem,
     ThisRefItem,
     type DndDslAstType,
+    type ChainField,
+    type ChainTail,
     type Enum,
     type EnumValueDecl,
     type Event,
@@ -52,8 +55,10 @@ import {
     type VariableDeclaration,
     type World,
 } from './generated/ast.js';
-import { nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from './evaluation/dnd-dsl-state-path.js';
+import { lastChainSegment, nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from './evaluation/dnd-dsl-state-path.js';
 import { PREDEFINED_SIGNATURES, getPredefinedSignature, predefinedArity } from './evaluation/dnd-dsl-predefined-signatures.js';
+import { AstUtils } from 'langium';
+import { NAMED_COLLECTION_FIELDS } from './evaluation/dnd-dsl-expression-operations.js';
 import { OBJECTIVE_STATUSES, QUEST_STATUSES, STATUS_VARIABLE } from './evaluation/dnd-dsl-status.js';
 import { isBuiltInStatus } from './builtin-status.js';
 
@@ -120,7 +125,15 @@ const ENTITY_COLLECTION_KIND: Partial<Record<string, ObjectKind>> = {
     objectives: ObjectKind.Objective,
 };
 
-/** 
+/** A segment's field. The generated type of `ChainTail.field` says it is always set, which would narrow a falsiness test to `never`. */
+function fieldOf(segment: RefChain | ChainTail): ChainField | undefined {
+    return segment.field;
+}
+
+/** Every collection field name, whichever kind of entity has it. */
+const COLLECTION_FIELD_NAMES = new Set(Object.values(COLLECTION_FIELDS).flat());
+
+/**
  *  The ObjectKind a RefChainStart head resolves to, for COLLECTION_FIELDS/SIMPLE_FIELDS lookup 
  *  Exported (not a validator method) so the completion provider can offer the
  *  same field names it validates, off the same AST-only logic, no EvalContext needed. 
@@ -140,8 +153,9 @@ export function collectionHeadKind(head: RefChainStart): ObjectKind | undefined 
     if (isVariableRefItem(head)) {
         const decl = head.val.val.ref;
         const owner = decl?.$container;
-        if (decl && isForStatement(owner) && owner.loopVar === decl && owner.source.field) {
-            return ENTITY_COLLECTION_KIND[owner.source.field];
+        if (decl && isForStatement(owner) && owner.loopVar === decl) {
+            const last = lastChainSegment(owner.source);
+            if (last.field && last.indexes.length === 0) return ENTITY_COLLECTION_KIND[last.field];
         }
     }
     return undefined;
@@ -172,6 +186,7 @@ export function registerValidationChecks(services: DndDslServices) {
         IntToBoolExpression: validator.checkEnumComparison,
         RemindStatement: validator.checkRemindPlacement,
         RefChain: [validator.checkRefChainField, validator.checkRefChainIndexes],
+        ChainTail: validator.checkChainTail,
         ListLiteral: validator.checkListLiteral,
         FunctionCall: validator.checkPredefinedCall,
         ForStatement: validator.checkForSource,
@@ -329,7 +344,22 @@ export class DndDslValidator {
     }
 
     checkForSource(stmt: ForStatement, accept: ValidationAcceptor): void {
+        const last = lastChainSegment(stmt.source);
+        if (isChainTail(last)) {
+            // What the continuation hangs off is only known when the script runs, so only the shape is checked.
+            const lastField = fieldOf(last);
+            if (lastField && !COLLECTION_FIELD_NAMES.has(lastField) && last.indexes.length === 0) {
+                accept('error', `'${lastField}' is a single value, not a list - 'for ... in' needs something iterable.`, { node: stmt, property: 'source' });
+            } else if (lastField && last.indexes.length > 0) {
+                accept('error', `'for ... in' needs a list or a collection, not one item of it.`, { node: stmt, property: 'source' });
+            }
+            return;
+        }
         const field = stmt.source.field;
+        if (field && stmt.source.indexes.length > 0) {
+            accept('error', `'for ... in' needs a list or a collection, not one item of it.`, { node: stmt, property: 'source' });
+            return;
+        }
         if (field) {
             const kind = collectionHeadKind(stmt.source.first);
             if (kind && !COLLECTION_FIELDS[kind].includes(field)) {
@@ -346,7 +376,11 @@ export class DndDslValidator {
      *  be stored into or iterated from (`npc "X"` alone is an entity, not a variable). */
     private endsInVariable(node: AstNode | undefined): boolean {
         if (!isRefChain(node)) return false;
-        const chain: RefChain = node;
+        const last = lastChainSegment(node);
+        return isChainTail(last) ? !fieldOf(last) && last.rest.length > 0 : this.firstSegmentEndsInVariable(last);
+    }
+
+    private firstSegmentEndsInVariable(chain: RefChain): boolean {
         const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
         return isVariableRefItem(tail);
     }
@@ -394,7 +428,7 @@ export class DndDslValidator {
             return;
         }
         const c = chain.$container;
-        if ((isSetStatement(c) && c.target === chain) || (isChangeOccurrence(c) && c.target === chain)) {
+        if (chain.indexes.length === 0 && ((isSetStatement(c) && c.target === chain) || (isChangeOccurrence(c) && c.target === chain))) {
             accept('error', `'.${chain.field}' is read-only and can't be a 'set'/'on change' target.`, { node: chain, property: 'field' });
         }
     }
@@ -408,29 +442,94 @@ export class DndDslValidator {
         return locations.flatMap(l => [l, ...this.collectAllLocations(l.sublocations)]);
     }
 
-    /** `list[i]`: only a variable holding a list can be indexed, and only by a whole number. */
+    /**
+     *  `x[i]`: a variable holding a list is indexed by a whole number; a collection field is indexed by a
+     *  whole number or, for collections of named things, by a name. A literal that is certainly wrong is an
+     *  error here; anything computed is checked when it runs. Also where a chain may not appear at all.
+     **/
     checkRefChainIndexes(chain: RefChain, accept: ValidationAcceptor): void {
-        if (chain.indexes.length === 0) return;
-        if (chain.field) {
-            accept('error', `'.${chain.field}' cannot be indexed yet; loop over it with 'for ... in'.`, { node: chain, property: 'indexes' });
-            return;
-        }
-        if (!this.endsInVariable(chain)) {
-            accept('error', `Only a variable holding a list can be indexed, e.g. npc "X" . items[0].`, { node: chain, property: 'indexes' });
-            return;
-        }
-        for (const [i, index] of chain.indexes.entries()) {
-            const value = unwrapExpression(index);
-            if (isStringVal(value) || isBoolVal(value) || isListLiteral(value)) {
-                accept('error', `A list is indexed by a whole number.`, { node: chain, property: 'indexes', index: i });
+        if (chain.indexes.length > 0) {
+            const knownNames = chain.field ? this.knownChildNames(chain) : undefined;
+            this.checkSegmentIndexes(chain, accept, knownNames);
+            if (!chain.field && !this.firstSegmentEndsInVariable(chain)) {
+                accept('error', `Only a variable holding a list can be indexed, e.g. npc "X" . items[0].`, { node: chain, property: 'indexes' });
             }
         }
+        if ((chain.field && chain.indexes.length > 0) || chain.next) {
+            if (this.isInsideEntityVariable(chain)) {
+                accept('error', `Indexing a collection, or carrying on after an index, works in functions, events, handlers and scripts, not in a variable's value.`, { node: chain, property: 'indexes' });
+            }
+        }
+        const container = chain.$container;
+        if (chain.next && isSetStatement(container) && container.target === chain) {
+            const tail = chain.next;
+            const shapeOk = !!chain.field && chain.indexes.length > 0 && !fieldOf(tail) && !tail.next && tail.rest.length > 0;
+            if (!shapeOk) {
+                accept('error', `'set' through an indexed item needs the form <entity> . <collection>[i] . <variable>, e.g. set quest "Q" . objectives[0] . Status = "Failed".`, { node: chain, property: 'next' });
+            }
+        }
+    }
+
+    checkChainTail(tail: ChainTail, accept: ValidationAcceptor): void {
+        if (tail.indexes.length > 0) this.checkSegmentIndexes(tail, accept, undefined);
+    }
+
+    private checkSegmentIndexes(segment: RefChain | ChainTail, accept: ValidationAcceptor, knownNames: string[] | undefined): void {
+        const field = segment.field;
+        if (field && !COLLECTION_FIELD_NAMES.has(field)) {
+            accept('error', `'.${field}' is a single value, not a list, so it cannot be indexed.`, { node: segment, property: 'indexes' });
+            return;
+        }
+        for (const [i, index] of segment.indexes.entries()) {
+            const value = unwrapExpression(index);
+            if (isBoolVal(value) || isListLiteral(value)) {
+                accept('error', field ? `A collection is indexed by a whole number or a name.` : `A list is indexed by a whole number.`, { node: segment, property: 'indexes', index: i });
+            } else if (isStringVal(value)) {
+                if (!field || !NAMED_COLLECTION_FIELDS.has(field)) {
+                    accept('error', field ? `'.${field}' has no names to index by; use a whole number.` : `A list is indexed by a whole number.`, { node: segment, property: 'indexes', index: i });
+                } else if (knownNames && !knownNames.includes(value.val)) {
+                    accept('error', `No item named "${value.val}" in '.${field}'. Available: ${knownNames.length > 0 ? knownNames.join(', ') : '(none)'}.`, { node: segment, property: 'indexes', index: i });
+                }
+            }
+        }
+    }
+
+    /** The item names of `<head> . <field>` when the head is a fixed entity, else undefined (not knowable before the script runs). */
+    private knownChildNames(chain: RefChain): string[] | undefined {
+        const field = chain.field;
+        const head = chain.first;
+        if (isQuestRefItem(head) && field === 'objectives') return head.val.val.ref?.objectives.map(o => o.name);
+        if (isLocationRefItem(head) && field === 'sublocations') return head.val.val.ref?.sublocations.map(l => l.name);
+        if (isLocationRefItem(head) && field === 'exits') return head.val.val.ref?.exits.map(e => e.name);
+        if (isEnumRefItem(head) && field === 'values') return head.val.ref?.values.map(v => v.name);
+        if (isWorldRefItem(head)) {
+            const world = AstUtils.getContainerOfType(chain, isWorld);
+            // A `reference world` script holds none of the world's own items.
+            if (!world || world.isReference) return undefined;
+            const byField: Record<string, { name: string }[] | undefined> = {
+                locations: this.collectAllLocations(world.locations), npcs: world.npcs, quests: world.quests,
+                events: world.events, functions: world.functions, enums: world.enums,
+            };
+            return byField[field ?? '']?.map(n => n.name);
+        }
+        return undefined;
+    }
+
+    /** True for the value of a `let` declared on an entity (location, npc, quest, ...), which the served-state evaluators read too. */
+    private isInsideEntityVariable(node: AstNode): boolean {
+        let sawDeclaration = false;
+        for (let current = node.$container; current; current = current.$container) {
+            if (isCodeBlock(current) || isOnBlock(current)) return false;
+            if (isVariableDeclaration(current)) sawDeclaration = true;
+            if (isLocation(current) || isNpc(current) || isQuest(current) || isObjective(current) || isWorld(current)) return sawDeclaration;
+        }
+        return false;
     }
 
     checkChangeOccurrenceTarget(occ: ChangeOccurrence, accept: ValidationAcceptor): void {
         if (!this.endsInVariable(occ.target)) {
             accept('error', `'on change' must target a variable, e.g. 'on change npc "X" . mood do ... end'.`, { node: occ, property: 'target' });
-        } else if (occ.target.indexes.length > 0) {
+        } else if (occ.target.indexes.length > 0 || occ.target.next) {
             accept('error', `'on change' watches a whole variable, not one item of it.`, { node: occ, property: 'target' });
         }
     }

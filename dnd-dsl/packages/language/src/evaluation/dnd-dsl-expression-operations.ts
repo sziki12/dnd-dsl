@@ -121,3 +121,8 @@ export function replaceAtIndexes(list: unknown, indexes: readonly unknown[], val
     copy[position] = rest.length === 0 ? value : replaceAtIndexes(list[position], rest, value);
     return copy;
 }
+
+/** Collection fields whose items have a name, so `x . field["name"]` can pick one. */
+export const NAMED_COLLECTION_FIELDS: ReadonlySet<string> = new Set([
+    'npcs', 'locations', 'sublocations', 'quests', 'objectives', 'events', 'functions', 'enums', 'values', 'exits',
+]);

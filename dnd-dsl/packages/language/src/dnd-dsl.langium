@@ -249,15 +249,23 @@ Parameter infers VariableDeclaration:
     'param' name=ID;
 
 //References
+// `first` / `rest` / `field` / `indexes` are the chain's first segment. After at least one index the chain may
+// carry on through `next`, a segment of the same shape, because the indexed item is itself something with members:
+// `quest "Q" . objectives[0] . Status`, `world . quests["Rising Dead"] . objectives[1] . Status`.
 RefChain:
-    first=RefChainStart ('.' rest+=VariableRefItem)* ('.' field=(
-        //Collection fields
-        'locations' | 'npcs' | 'quests' | 'events' | 'functions'
-        | 'enums' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values'
-        //Single-value fields
-        | 'name' | 'description'
-        ))?
-    ('[' indexes+=Expression ']')*;
+    first=RefChainStart ('.' rest+=VariableRefItem)* ('.' field=ChainField)?
+    (('[' indexes+=Expression ']')+ next=ChainTail?)?;
+
+ChainTail:
+    ('.' rest+=VariableRefItem)+ ('.' field=ChainField)? (('[' indexes+=Expression ']')+ next=ChainTail?)?
+    | '.' field=ChainField (('[' indexes+=Expression ']')+ next=ChainTail?)?;
+
+ChainField returns string:
+    //Collection fields
+    'locations' | 'npcs' | 'quests' | 'events' | 'functions'
+    | 'enums' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values'
+    //Single-value fields
+    | 'name' | 'description';
 
 RefChainStart:
     VariableRefItem

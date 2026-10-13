@@ -2,6 +2,7 @@ import { AstUtils, DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream } from "l
 import type { AstNode, AstNodeDescription, ReferenceInfo, Scope } from "langium";
 import {
     type Enum,
+    isChainTail,
     isCodeBlock,
     isEnum,
     isEnumValueRef,
@@ -22,12 +23,18 @@ import {
     type RefChain,
     type VariableDeclaration,
 } from "./generated/ast.js";
-import { nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from "./evaluation/dnd-dsl-state-path.js";
+import { lastChainSegment, nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from "./evaluation/dnd-dsl-state-path.js";
 
 /** 
  * CollectionRef.field values whose elements are real named entities with their own `.variables` 
  **/
 const ENTITY_COLLECTION_FIELDS = new Set(['npcs', 'locations', 'quests', 'objectives', 'sublocations']);
+
+/** A `for` source that ends in a collection field itself, not in one item of it. */
+function isIteratedCollection(source: RefChain): boolean {
+    const last = lastChainSegment(source);
+    return !!last.field && last.indexes.length === 0;
+}
 
 export class DndScopeProvider extends DefaultScopeProvider
 {
@@ -45,6 +52,16 @@ export class DndScopeProvider extends DefaultScopeProvider
                 item.$containerProperty === "rest")
             {
                 return this.getMemberScope(item.$container, item.$containerIndex ?? 0);
+            }
+
+            // `... [i] . b` - what follows an index is whatever item the index picks at run
+            // time, so there is nothing to enumerate: any name links, the interpreter reads it
+            // off the real item.
+            if (isVariableRefItem(item) &&
+                isChainTail(item.$container) &&
+                item.$containerProperty === "rest")
+            {
+                return this.dynamicMemberScope(item.$container);
             }
 
             // `let x = <expr>` - the variable's own value expression is scoped to the
@@ -192,7 +209,7 @@ export class DndScopeProvider extends DefaultScopeProvider
     {
         const owner = decl.$container;
         return isForStatement(owner) && owner.loopVar === decl
-            && !!owner.source && !!owner.source.field && ENTITY_COLLECTION_FIELDS.has(owner.source.field);
+            && !!owner.source && isIteratedCollection(owner.source) && ENTITY_COLLECTION_FIELDS.has(lastChainSegment(owner.source).field!);
     }
 
     /** True for a `for x in <list variable> do ... end` loop variable. The elements
@@ -213,7 +230,7 @@ export class DndScopeProvider extends DefaultScopeProvider
      *  real information beyond the requested name - only ever used to avoid a linking
      *  error, never dereferenced by identity. getAllElements stays empty deliberately:
      *  completion for a loop variable's members isn't offered yet (fast-follow). */
-    private dynamicMemberScope(chain: RefChain): Scope
+    private dynamicMemberScope(chain: AstNode): Scope
     {
         const documentUri = AstUtils.getDocument(chain).uri;
         // Hung under the chain so the JSON serializer, which asks a reference's target for its

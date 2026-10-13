@@ -10,6 +10,7 @@ import {
     isQuest,
     isVariableDeclaration,
     isWorld,
+    type ChainTail,
     type Event,
     type Location,
     type Model,
@@ -18,6 +19,7 @@ import {
     type Objective,
     type Party,
     type Quest,
+    type RefChain,
     type VariableDeclaration,
     type World,
 } from "../generated/ast.js";
@@ -235,6 +237,13 @@ export function resolveVariableContainer(model: Model, path: StatePath): { varia
  *  parses `Resources.value` as a stack of `Expression` wrappers around the real
  *  `ObjectDeclaration` node, not the ObjectDeclaration directly. Same unwrap
  *  `LangiumInterpreterService.evaluateExpression` already does for the same reason. */
+/** The last segment of a chain: the chain itself, or the innermost `next` that follows an index. */
+export function lastChainSegment(chain: RefChain): RefChain | ChainTail {
+    let segment: RefChain | ChainTail = chain;
+    while (segment.next) segment = segment.next;
+    return segment;
+}
+
 export function unwrapExpression(node: AstNode | undefined): AstNode | undefined {
     while (node && node.$type === 'Expression') {
         node = (node as unknown as { exp?: AstNode }).exp;

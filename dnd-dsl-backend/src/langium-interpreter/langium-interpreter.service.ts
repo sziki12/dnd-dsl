@@ -4,6 +4,7 @@ import {
     ChangeOccurrence,
     Code,
     CodeBlock,
+    ChainTail,
     ConditionalBlock,
     ConstantExpression,
     EnumValueDecl,
@@ -65,7 +66,7 @@ import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefi
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
-import { applyArithmetic, applyComparison, applyIndex, applyLogical, negatableBool, replaceAtIndexes, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
+import { applyArithmetic, applyComparison, applyIndex, applyLogical, NAMED_COLLECTION_FIELDS, negatableBool, replaceAtIndexes, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
 import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import { assertValidStatusWrite, objectiveStatusPath, questStatusPath, STATUS_VARIABLE, statusBlockFor, statusExpressionHolds, statusOrDefault, statusTransition, type StatusAction, type StatusBlock, type StatusKind } from '@dnd-language/evaluation/dnd-dsl-status.js';
 
@@ -263,10 +264,101 @@ export class LangiumInterpreterService {
 
     }
 
-    /** The chain's value, then each `[index]` applied in turn (a list of lists takes several). */
+    /** The chain's value: its first segment, then each segment that follows an index. */
     private evaluateRefChain(ctx: EvalContext, chain: RefChain): any {
-        const value = this.evaluateRefChainBase(ctx, chain);
-        return chain.indexes.reduce((list, index) => applyIndex(list, this.evaluateExpression(ctx, index)), value);
+        let value = this.evaluateFirstSegment(ctx, chain);
+        for (let tail = chain.next; tail; tail = tail.next) value = this.evaluateTail(ctx, value, tail);
+        // A bare entity item (`quest "Q" . objectives[0]`) reads as that entity's variables, as `quest "Q"` does.
+        return isLoopEntityHandle(value) ? this.readPath(ctx, value.path) : value;
+    }
+
+    /** The head, members and field, then the indexes that follow them. */
+    private evaluateFirstSegment(ctx: EvalContext, chain: RefChain): unknown {
+        return this.applyIndexes(ctx, this.evaluateRefChainBase(ctx, chain), chain.indexes, chain.field);
+    }
+
+    /** One segment after an index: members read off the item, a field of it, then more indexes. */
+    private evaluateTail(ctx: EvalContext, item: unknown, tail: ChainTail): unknown {
+        const field: string | undefined = tail.field;
+        let value = item;
+        if (tail.rest.length > 0) value = this.readMembers(ctx, value, tail.rest.map(member => member.val.val.$refText));
+        if (field) value = this.readField(ctx, value, field);
+        return this.applyIndexes(ctx, value, tail.indexes, field);
+    }
+
+    /** `.a . b` off an item: an entity's variables by their address, or a plain record's properties. */
+    private readMembers(ctx: EvalContext, item: unknown, names: string[]): unknown {
+        if (isLoopEntityHandle(item)) {
+            const path: StatePath = [...item.path, ...names.map(target => ({ kind: 'variable' as const, target }))];
+            const value = this.readPath(ctx, path);
+            if (value === undefined && !statePathToNode(ctx.worldState as unknown as Model, path)) {
+                throw new Error(`'${names.join('.')}' is not a variable of ${this.describeEntity(item)}.`);
+            }
+            return value;
+        }
+        let current = item;
+        for (const name of names) {
+            if (typeof current !== 'object' || current === null) {
+                throw new Error(`Cannot read '.${name}' of ${this.describeItem(current)}.`);
+            }
+            current = (current as Record<string, unknown>)[name];
+        }
+        return current;
+    }
+
+    /** `. field` off an entity item (`.name`, `.objectives`, ...). */
+    private readField(ctx: EvalContext, item: unknown, field: string): unknown {
+        if (!isLoopEntityHandle(item)) throw new Error(`'.${field}' can only be read off an entity, not ${this.describeItem(item)}.`);
+        const node = ctx.model ? statePathToNode(ctx.model, item.path) : undefined;
+        if (!node) throw new Error(`Cannot find ${this.describeEntity(item)} to read '.${field}' from.`);
+        return this.fieldValueOf(ctx, node as AstNode, field);
+    }
+
+    /** Each `[index]` in turn. Only the first can follow a collection field, so only it may pick by name. */
+    private applyIndexes(ctx: EvalContext, value: unknown, indexes: Expression[], field?: string): unknown {
+        let current = value;
+        indexes.forEach((expression, position) => {
+            current = this.indexInto(current, this.evaluateExpression(ctx, expression), position === 0 ? field : undefined);
+        });
+        return current;
+    }
+
+    private indexInto(list: unknown, index: unknown, field: string | undefined): unknown {
+        if (typeof index === 'string' && field && NAMED_COLLECTION_FIELDS.has(field)) {
+            return this.itemByName(list, index, field);
+        }
+        return applyIndex(list, index);
+    }
+
+    /** A missing name is nearly always a typo, so unlike a position past the end it is an error, not nothing. */
+    private itemByName(items: unknown, name: string, field: string): unknown {
+        if (!Array.isArray(items)) throw new Error(`Only a collection can be indexed by name, not ${this.describeItem(items)}.`);
+        const found = items.find(item => this.itemName(item) === name);
+        if (found === undefined) {
+            const available = items.map(item => this.itemName(item)).filter((n): n is string => n !== undefined);
+            throw new Error(`There is no item named "${name}" in '.${field}'. Available: ${available.length > 0 ? available.join(', ') : '(none)'}.`);
+        }
+        return found;
+    }
+
+    private itemName(item: unknown): string | undefined {
+        if (typeof item === 'string') return item;
+        if (isLoopEntityHandle(item)) {
+            const last = item.path[item.path.length - 1];
+            return last && 'name' in last ? last.name : undefined;
+        }
+        const name = (item as { name?: unknown } | null)?.name;
+        return typeof name === 'string' ? name : undefined;
+    }
+
+    private describeEntity(handle: LoopEntityHandle): string {
+        const last = handle.path[handle.path.length - 1];
+        return last && 'name' in last ? `${last.kind} "${last.name}"` : 'that entity';
+    }
+
+    private describeItem(value: unknown): string {
+        if (value === undefined || value === null) return 'nothing';
+        return typeof value === 'string' ? JSON.stringify(value) : Array.isArray(value) ? 'a list' : typeof value === 'object' ? 'a record' : String(value);
     }
 
     private evaluateRefChainBase(ctx: EvalContext, chain: RefChain): any {
@@ -504,16 +596,10 @@ export class LangiumInterpreterService {
             case 'SetStatement': {
                 const c = code as unknown as SetStatement;
                 const value = this.evaluateExpression(ctx, c.value);
-                let path: StatePath;
-                try {
-                    path = this.resolveRefChainToStatePath(ctx, c.target);
-                } catch {
-                    path = [];
-                }
+                const { path, indexes } = this.resolveSetTarget(ctx, c.target);
                 if (path[path.length - 1]?.kind !== 'variable') {
                     throw new Error('`set` needs an entity variable target, e.g. `set npc "X" . mood = ...`');
                 }
-                const indexes = c.target.indexes.map(index => this.evaluateExpression(ctx, index));
                 if (indexes.length > 0) {
                     this.pushWrite(ctx, path, replaceAtIndexes(this.readPath(ctx, path), indexes, value));
                     break;
@@ -576,7 +662,7 @@ export class LangiumInterpreterService {
             case 'ForStatement': {
                 const c = code as unknown as ForStatement;
                 const loopVarName = c.loopVar.name ?? '';
-                const values = c.source.field ? this.resolveFieldValue(ctx, c.source) as unknown[] : this.resolveListSource(ctx, c.source);
+                const values = this.iterationValues(ctx, c.source);
                 for (const value of values) {
                     ctx.scope[loopVarName] = value;
                     for (const block of c.body) {
@@ -825,6 +911,7 @@ export class LangiumInterpreterService {
      *  Used by RemindStatement's `show on <chain>` pin and by `set <chain> = <expr>`.
      **/
     private resolveRefChainToStatePath(ctx: EvalContext, chain: RefChain): StatePath {
+        if (this.isItemChain(chain)) return this.resolveItemTarget(ctx, chain).path;
         // A for-loop-bound entity - same shortcut evaluateRefChain's fallback uses.
         if (isVariableRefItem(chain.first)) {
             const headDecl = chain.first.val.val.ref;
@@ -848,6 +935,52 @@ export class LangiumInterpreterService {
             return path;
         }
         return this.resolveStaticRefChainToStatePath(chain);
+    }
+
+    /** A chain that picks an item of an entity collection, or carries on after an index: its address is only known when it runs. */
+    private isItemChain(chain: RefChain): boolean {
+        return !!chain.next || (!!chain.field && chain.indexes.length > 0);
+    }
+
+    /** Where `set` stores: the variable's address, plus the list indexes (`Items[1]`) when it replaces one item of a list. */
+    private resolveSetTarget(ctx: EvalContext, chain: RefChain): { path: StatePath; indexes: unknown[] } {
+        if (this.isItemChain(chain)) return this.resolveItemTarget(ctx, chain);
+        let path: StatePath;
+        try {
+            path = this.resolveRefChainToStatePath(ctx, chain);
+        } catch {
+            path = [];
+        }
+        return { path, indexes: chain.indexes.map(index => this.evaluateExpression(ctx, index)) };
+    }
+
+    /**
+     *  The address a chain through an indexed entity item names (`quest "Q" . objectives[0] . Status`), found by
+     *  walking to the item at run time, then appending the members after it. Any indexes on that last segment
+     *  are returned, not applied: they pick an item of the list the variable holds.
+     **/
+    private resolveItemTarget(ctx: EvalContext, chain: RefChain): { path: StatePath; indexes: unknown[] } {
+        let item = this.evaluateFirstSegment(ctx, chain);
+        let tail = chain.next;
+        if (!tail) {
+            if (!isLoopEntityHandle(item)) throw new Error(`Expected an entity item, not ${this.describeItem(item)}.`);
+            return { path: item.path, indexes: [] };
+        }
+        while (tail.next) {
+            item = this.evaluateTail(ctx, item, tail);
+            tail = tail.next;
+        }
+        if (!isLoopEntityHandle(item)) throw new Error(`Cannot store through ${this.describeItem(item)}; it needs an item of a collection of entities.`);
+        const field: string | undefined = tail.field;
+        if (field) throw new Error(`'.${field}' is read-only.`);
+        const members: StatePath = tail.rest.map(member => ({ kind: 'variable' as const, target: member.val.val.$refText }));
+        return { path: [...item.path, ...members], indexes: tail.indexes.map(index => this.evaluateExpression(ctx, index)) };
+    }
+
+    /** What a `for` iterates: a collection field straight off its head, or any chain that evaluates to a list. */
+    private iterationValues(ctx: EvalContext, source: RefChain): unknown[] {
+        if (source.field && source.indexes.length === 0 && !source.next) return this.resolveFieldValue(ctx, source) as unknown[];
+        return this.resolveListSource(ctx, source);
     }
 
     /** 
@@ -942,6 +1075,12 @@ export class LangiumInterpreterService {
      *  pending overlay write for the caller to flush. 
      **/
     private writeValue(ctx: EvalContext, chain: RefChain, value: unknown): void {
+        if (this.isItemChain(chain)) {
+            const { path, indexes } = this.resolveItemTarget(ctx, chain);
+            if (path[path.length - 1]?.kind !== 'variable') throw new Error('Cannot store into a target that is not a variable');
+            this.pushWrite(ctx, path, indexes.length === 0 ? value : replaceAtIndexes(this.readPath(ctx, path), indexes, value));
+            return;
+        }
         const indexes = chain.indexes.map(index => this.evaluateExpression(ctx, index));
         // With `[i]` the value replaces one item of the list the variable holds, not the variable.
         const stored = (whole: unknown) => indexes.length === 0 ? value : replaceAtIndexes(whole, indexes, value);
@@ -974,15 +1113,19 @@ export class LangiumInterpreterService {
     private resolveFieldValue(ctx: EvalContext, chain: RefChain): unknown {
         const head = this.resolveCollectionHead(ctx, chain.first);
         if (!head) throw new Error(`Unresolved collection head: ${chain.first.$type}`);
+        return this.fieldValueOf(ctx, head, chain.field!);
+    }
 
+    /** What `<entity> . <field>` is: a scalar read straight off the node, or the collection with each item as its runtime shape. */
+    private fieldValueOf(ctx: EvalContext, head: AstNode, field: string): unknown {
         // Scalar fields read straight off the entity node.
-        if (chain.field === 'name' || chain.field === 'description') {
-            return (head as unknown as Record<string, unknown>)[chain.field];
+        if (field === 'name' || field === 'description') {
+            return (head as unknown as Record<string, unknown>)[field];
         }
 
-        const items = (head as unknown as Record<string, unknown>)[chain.field!];
-        if (!Array.isArray(items)) throw new Error(`'${chain.field}' is not a collection on ${head.$type}`);
-        switch (chain.field) {
+        const items = (head as unknown as Record<string, unknown>)[field];
+        if (!Array.isArray(items)) throw new Error(`'${field}' is not a collection on ${head.$type}`);
+        switch (field) {
             // Entities with their own `.variables` - bind a live handle so `x.member`
             // reads/writes persist through the entity's real StatePath.
             case 'npcs': case 'locations': case 'quests': case 'objectives': case 'sublocations':
@@ -1004,7 +1147,7 @@ export class LangiumInterpreterService {
             case 'variables':
                 return (items as VariableDeclaration[]).map(v => v.value ? this.evaluateExpression(ctx, v.value) : undefined);
             default:
-                throw new Error(`Unsupported collection field: ${chain.field}`);
+                throw new Error(`Unsupported collection field: ${field}`);
         }
     }
 
