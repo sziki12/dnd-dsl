@@ -1,4 +1,3 @@
-import type { SerializedModel, SerializedVariableDecl } from "./dnd-dsl-serialized-types.js";
 import type { StatePath } from "./dnd-dsl-state-path.js";
 
 /** 
@@ -14,31 +13,6 @@ export type ObjectiveStatusValue = (typeof OBJECTIVE_STATUSES)[number];
 
 export const DEFAULT_QUEST_STATUS: QuestStatusValue = "Unavailable";
 export const DEFAULT_OBJECTIVE_STATUS: ObjectiveStatusValue = "Incomplete";
-
-/**
- * Gives every quest and objective a `Status` variable at its default value, unless it already has a variable of that name.
- *
- * Runs on the served worldState only, before the overlay is applied. Never on the overlay itself. 
- * That keeps the defaults derived rather than stored. 
- * A later overlay write to the same path then splices into this entry like any other variable.
- */
-export function seedStatusDefaults(model: SerializedModel): void {
-    for (const quest of model.World?.quests ?? []) {
-        quest.variables ??= [];
-        ensureStatus(quest.variables, DEFAULT_QUEST_STATUS);
-        for (const objective of quest.objectives ?? []) {
-            objective.variables ??= [];
-            ensureStatus(objective.variables, DEFAULT_OBJECTIVE_STATUS);
-        }
-    }
-}
-
-function ensureStatus(variables: SerializedVariableDecl[], defaultValue: string): void {
-    if (variables.some(v => (v.target ?? v.name) === STATUS_VARIABLE)) return;
-    // A raw value rather than an Expression node, the same shape
-    // WorldStateService.spliceOverlayValue already pushes for an overlay-created variable.
-    variables.push({ $type: "VariableDeclaration", target: STATUS_VARIABLE, value: defaultValue } as unknown as SerializedVariableDecl);
-}
 
 /** Built from names only, so it works for the live AST and the serialized worldState alike. */
 export function questStatusPath(questName: string): StatePath {
@@ -111,4 +85,30 @@ export function statusTransition(kind: StatusKind, action: StatusAction, current
     const rule = (kind === "quest" ? QUEST_RULES : OBJECTIVE_RULES)[action];
     if (!rule || rule.from !== statusOrDefault(kind, current)) return undefined;
     return { to: rule.to, runs: rule.runs };
+}
+
+/**
+ * The block a quest or objective runs on arriving at `status`: `on completed` for Succeeded
+ * (quest) or Completed (objective), `on failed` for Failed, none for the rest. The same
+ * outcome whether it got there by a statement, the automatic pass, or `set`.
+ */
+export function statusBlockFor(kind: StatusKind, status: string): StatusBlock | undefined {
+    const rules: Partial<Record<StatusAction, Rule<string>>> = kind === "quest" ? QUEST_RULES : OBJECTIVE_RULES;
+    return Object.values(rules).find(rule => rule?.to === status && rule.runs)?.runs;
+}
+
+/**
+ * Throws when `value` is not a legal status for the quest or objective `path` addresses, and does
+ * nothing for any other path. Every write goes through this (the interpreter's `set`, a UI
+ * assignment), so an out-of-range value can never be stored: the transition rules read it as
+ * "from nothing", which would leave the quest stuck.
+ */
+export function assertValidStatusWrite(path: StatePath, value: unknown): void {
+    const [owner, variable] = path;
+    if (path.length !== 2 || variable.kind !== "variable" || variable.target !== STATUS_VARIABLE) return;
+    if (owner.kind !== "quest" && owner.kind !== "objective") return;
+
+    const allowed: readonly string[] = owner.kind === "quest" ? QUEST_STATUSES : OBJECTIVE_STATUSES;
+    if (typeof value === "string" && allowed.includes(value)) return;
+    throw new Error(`${JSON.stringify(value)} is not a ${owner.kind} status. Use one of: ${allowed.join(", ")}.`);
 }

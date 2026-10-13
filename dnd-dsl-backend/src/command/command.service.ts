@@ -6,6 +6,7 @@ import { StateSyncGateway } from '../state-sync/state-sync.gateway.js';
 import { isVariableDeclaration, type Model } from '@dnd-language/index.js';
 import { encodeStatePath, resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
+import { assertValidStatusWrite } from '@dnd-language/evaluation/dnd-dsl-status.js';
 import { resolveRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import {
   AckReminderCommand,
@@ -352,6 +353,7 @@ export class CommandService {
       throw new Error(`Unresolved state path for ASSIGN_VARIABLE: ${JSON.stringify(cmd.path)}`);
     }
 
+    assertValidStatusWrite(cmd.path, cmd.newValue);
     this.worldStateService.setOverlayEntry(cmd.path, cmd.newValue);
   }
 

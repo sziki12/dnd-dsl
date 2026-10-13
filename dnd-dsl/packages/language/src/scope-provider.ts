@@ -211,8 +211,10 @@ export class DndScopeProvider extends DefaultScopeProvider
     private dynamicMemberScope(chain: RefChain): Scope
     {
         const documentUri = AstUtils.getDocument(chain).uri;
+        // Hung under the chain so the JSON serializer, which asks a reference's target for its
+        // document, can find one; without a container it throws and the world cannot be served.
         const describe = (name: string): AstNodeDescription => ({
-            node: { $type: 'DynamicMember' } as unknown as AstNode,
+            node: { $type: 'DynamicMember', $container: chain, $containerProperty: 'rest', $containerIndex: 0 } as unknown as AstNode,
             name,
             type: 'DynamicMember',
             documentUri,

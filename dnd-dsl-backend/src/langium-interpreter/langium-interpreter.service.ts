@@ -66,9 +66,12 @@ import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialize
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
 import { applyArithmetic, applyComparison, applyLogical, negatableBool, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
 import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
-import { objectiveStatusPath, questStatusPath, statusExpressionHolds, statusOrDefault, statusTransition, type StatusAction, type StatusKind } from '@dnd-language/evaluation/dnd-dsl-status.js';
+import { assertValidStatusWrite, objectiveStatusPath, questStatusPath, STATUS_VARIABLE, statusBlockFor, statusExpressionHolds, statusOrDefault, statusTransition, type StatusAction, type StatusBlock, type StatusKind } from '@dnd-language/evaluation/dnd-dsl-status.js';
 
 type RuntimeScope = Record<string, any>;
+
+/** How many handler / quest-block frames may nest before it is treated as a loop. */
+const MAX_CASCADE_DEPTH = 50;
 
 /** 
  * A `print` or a persistent write, recorded in `EvalContext.events` in the order it ran
@@ -498,7 +501,9 @@ export class LangiumInterpreterService {
                 if (path[path.length - 1]?.kind !== 'variable') {
                     throw new Error('`set` needs an entity variable target, e.g. `set npc "X" . mood = ...`');
                 }
-                this.pushWrite(ctx, path, value);
+                const statusOwner = this.statusOwner(ctx, path);
+                if (statusOwner) this.setStatus(ctx, statusOwner, value);
+                else this.pushWrite(ctx, path, value);
                 break;
             }
             case 'FunctionCall': {
@@ -633,6 +638,9 @@ export class LangiumInterpreterService {
      *  quest or objective's `on completed` / `on failed` blocks.
      **/
     private runInFrame(ctx: EvalContext, owner: OwningObject, label: string, run: () => void): void {
+        if ((ctx.handlerDepth ?? 0) >= MAX_CASCADE_DEPTH) {
+            throw new Error(`Handlers and quest blocks are nested more than ${MAX_CASCADE_DEPTH} deep; they probably set each other off in a loop.`);
+        }
         ctx.handlerDepth = (ctx.handlerDepth ?? 0) + 1;
         const previousThis = ctx.thisEntity;
         const previousParent = ctx.parentEntity;
@@ -657,18 +665,43 @@ export class LangiumInterpreterService {
      *  which also stops a block from re-firing its own transition.
      **/
     applyStatusAction(ctx: EvalContext, entity: Quest | Objective, action: StatusAction): boolean {
-        const path = this.statusPathOf(entity);
-        const transition = statusTransition(this.statusKindOf(entity), action, this.readPath(ctx, path));
+        const transition = statusTransition(this.statusKindOf(entity), action, this.readPath(ctx, this.statusPathOf(entity)));
         if (!transition) return false;
 
-        this.pushWrite(ctx, path, transition.to);
-        const blocks = transition.runs ? entity[transition.runs] : [];
+        this.enterStatus(ctx, entity, transition.to, transition.runs);
+        return true;
+    }
+
+    /**
+     *  `set quest "X" . Status = ...`. Unlike the statements it does not check the transition
+     *  rules, so it can jump anywhere and move backwards, but arriving at Succeeded/Completed
+     *  or Failed runs the matching block just like `complete` / `fail` would. Setting the
+     *  status it already has runs nothing, so a block that sets its own quest does not loop.
+     **/
+    private setStatus(ctx: EvalContext, entity: Quest | Objective, value: unknown): void {
+        const arrived = typeof value === 'string' && value !== this.statusOf(ctx, entity);
+        const runs = arrived ? statusBlockFor(this.statusKindOf(entity), value) : undefined;
+        this.enterStatus(ctx, entity, value as string, runs);
+    }
+
+    /** Writes the new status first, then runs the block it triggers, so both already see it. */
+    private enterStatus(ctx: EvalContext, entity: Quest | Objective, to: string, runs: StatusBlock | undefined): void {
+        this.pushWrite(ctx, this.statusPathOf(entity), to);
+        const blocks = runs ? entity[runs] : [];
         if (blocks.length > 0) {
-            this.runInFrame(ctx, entity, `on ${transition.runs} ${this.statusKindOf(entity)} "${entity.name}"`, () => {
+            this.runInFrame(ctx, entity, `on ${runs} ${this.statusKindOf(entity)} "${entity.name}"`, () => {
                 for (const block of blocks) this.runCodeBlock(ctx, block);
             });
         }
-        return true;
+    }
+
+    /** The quest or objective `path` is the Status of, or undefined for any other path. */
+    private statusOwner(ctx: EvalContext, path: StatePath): Quest | Objective | undefined {
+        const [owner, variable] = path;
+        if (path.length !== 2 || variable.kind !== 'variable' || variable.target !== STATUS_VARIABLE) return undefined;
+        if (owner.kind !== 'quest' && owner.kind !== 'objective') return undefined;
+        const node = ctx.model && statePathToNode(ctx.model, [owner]);
+        return isQuest(node) || isObjective(node) ? node : undefined;
     }
 
     private statusKindOf(entity: Quest | Objective): StatusKind {
@@ -841,6 +874,7 @@ export class LangiumInterpreterService {
      *  and writes can be rendered interleaved instead of grouped by kind. 
      **/
     private pushWrite(ctx: EvalContext, path: StatePath, value: unknown): void {
+        assertValidStatusWrite(path, value);
         const before = this.readPath(ctx, path);
         (ctx.pendingOverlayWrites ??= []).push({ path, value });
         ctx.events?.push({ kind: 'write', path, value, depth: this.cascadeDepth(ctx) });

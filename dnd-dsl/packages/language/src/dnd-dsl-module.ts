@@ -1,4 +1,4 @@
-import { type Module, inject } from 'langium';
+import { type Module, createLangiumParser, inject } from 'langium';
 import { createDefaultModule, createDefaultSharedModule, type DefaultSharedModuleContext, type LangiumServices, type LangiumSharedServices, type PartialLangiumServices } from 'langium/lsp';
 import { DndDslGeneratedModule, DndDslGeneratedSharedModule } from './generated/module.js';
 import { DndDslValidator, registerValidationChecks } from './dnd-dsl-validator.js';
@@ -6,6 +6,7 @@ import { DndScopeProvider } from './scope-provider.js';
 import { DndScopeComputation } from './scope-computation.js';
 import { DndCompletionProvider } from './completion-provider.js';
 import { DndHoverProvider } from './hover-provider.js';
+import { withBuiltInStatus } from './builtin-status.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -30,6 +31,9 @@ export type DndDslServices = LangiumServices & DndDslAddedServices
 export const DndDslModule: Module<DndDslServices, PartialLangiumServices & DndDslAddedServices> = {
     validation: {
         DndDslValidator: () => new DndDslValidator()
+    },
+    parser: {
+        LangiumParser: (services) => withBuiltInStatus(createLangiumParser(services))
     },
     references: {
         ScopeProvider: (services) => new DndScopeProvider(services),

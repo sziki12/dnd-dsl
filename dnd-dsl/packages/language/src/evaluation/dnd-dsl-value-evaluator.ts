@@ -97,7 +97,7 @@ export function buildVariablesRecord(model: SerializedModel, variables: Serializ
 /**
  * `quest completed "A"` and the other four status forms, against a served worldState. The
  * status is read from the target's `Status` variable, so it is the overlay-applied value
- * (seedStatusDefaults has already given every quest/objective one); a target with none yet
+ * (every quest/objective has one, see builtin-status.ts); a target with none yet
  * counts as its default.
  */
 export function evaluateStatusExpression(model: SerializedModel, expr: { $type: StatusExpressionType; target: { val: SerializedRef } }): boolean {

@@ -84,6 +84,10 @@ and its `<world>.state.json` sidecar. The frontend loads a world with
     `npc "…"`, …) completion that Langium's built-in cross-ref completion misses in this
     grammar; also declares `.` / `"` as completion trigger characters.
   - `DndDslValidator` — uniqueness, enum-value checks, `remind` placement, etc.
+- Every quest and objective has a built-in `let Status` variable, added to the parsed model right after
+  each parse by `builtin-status.ts` (a parser wrapper in `dnd-dsl-module.ts`); its rules live in
+  `evaluation/dnd-dsl-status.ts`. It is a normal variable for linking, `set` and `on change`, so code
+  that reads a variable's `value` must evaluate it, not assume a string.
 - `packages/cli/src/main.ts` exports `parseModel()` and `DndDslParseError` (used by the backend).
 
 ### Three expression evaluators (intentional parallel implementations)
@@ -125,7 +129,8 @@ service is active for editor features. The frontend connects a `monaco-languagec
 `ws://localhost:3000/ls` in `src/MonacoInit.ts` (a module-level singleton).
 
 ### Frontend
-- Routes (`App.tsx`): `/`, `/location/:locationName`, `/npcs`, `/script`, `/editor`.
+- Routes (`App.tsx`): `/`, `/location/:locationName`, `/npcs`, `/quests`, `/quests/:questName`,
+  `/events`, `/events/:eventName`, `/script`, `/editor`.
 - `contexts/DslContext.tsx` is the state hub — loads the world, holds `worldState`, exposes
   `execute` / `undo` / `redo` / `runScript`, and applies each `CommandResponse` (updating
   `worldState`, undo/redo availability, reminder toasts).

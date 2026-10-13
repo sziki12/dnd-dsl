@@ -47,11 +47,14 @@ import {
     type RefChain,
     type RefChainStart,
     type RemindStatement,
+    type SetStatement,
     type VariableDeclaration,
     type World,
 } from './generated/ast.js';
 import { nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from './evaluation/dnd-dsl-state-path.js';
 import { PREDEFINED_SIGNATURES, getPredefinedSignature, predefinedArity } from './evaluation/dnd-dsl-predefined-signatures.js';
+import { OBJECTIVE_STATUSES, QUEST_STATUSES, STATUS_VARIABLE } from './evaluation/dnd-dsl-status.js';
+import { isBuiltInStatus } from './builtin-status.js';
 
 type NamedNode = Enum | EnumValueDecl | Event | FunctionDeclaration | Location | Npc | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
@@ -162,7 +165,8 @@ export function registerValidationChecks(services: DndDslServices) {
     const checks: ValidationChecks<DndDslAstType> = {
         World: validator.checkUniqueNames,
         Enum: validator.checkUniqueEnumValues,
-        VariableDeclaration: validator.checkEnumValue,
+        VariableDeclaration: [validator.checkEnumValue, validator.checkStatusDeclaration],
+        SetStatement: validator.checkStatusAssignment,
         IntToBoolExpression: validator.checkEnumComparison,
         RemindStatement: validator.checkRemindPlacement,
         RefChain: validator.checkRefChainField,
@@ -195,6 +199,29 @@ export class DndDslValidator {
 
     checkUniqueEnumValues(e: Enum, accept: ValidationAcceptor): void {
         this.checkUnique(e.values, accept, 'enum value');
+    }
+
+    checkStatusDeclaration(decl: VariableDeclaration, accept: ValidationAcceptor): void {
+        if (decl.target !== STATUS_VARIABLE || isBuiltInStatus(decl)) return;
+        if (!isQuest(decl.$container) && !isObjective(decl.$container)) return;
+        accept('error', `'${STATUS_VARIABLE}' is built into every quest and objective and cannot be declared again.`, { node: decl, property: 'target' });
+    }
+
+    /** `set quest "X" . Status = "Bogus"` is caught here when the value is a literal or an enum value; any other expression is checked when it runs. */
+    checkStatusAssignment(stmt: SetStatement, accept: ValidationAcceptor): void {
+        const chain = stmt.target;
+        const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chain.first;
+        const decl = isVariableRefItem(tail) ? tail.val.val.ref : undefined;
+        if (!decl || !isBuiltInStatus(decl)) return;
+
+        const owner = isQuest(decl.$container) ? 'quest' : 'objective';
+        const allowed: readonly string[] = owner === 'quest' ? QUEST_STATUSES : OBJECTIVE_STATUSES;
+        const value = unwrapExpression(stmt.value);
+        const given = isStringVal(value) ? value.val
+            : isEnumValueRef(value) ? (value.value.ref?.name ?? value.value.$refText)
+            : undefined;
+        if (given === undefined || allowed.includes(given)) return;
+        accept('error', `'${given}' is not a ${owner} status. Use one of: ${allowed.join(', ')}.`, { node: stmt, property: 'value' });
     }
 
     checkEnumValue(decl: VariableDeclaration, accept: ValidationAcceptor): void {
