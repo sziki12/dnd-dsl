@@ -27,6 +27,7 @@ import { MapViewContext } from './MapViewContext';
 import { assignParallelSlots } from '../edges/edge-geometry';
 import { effectiveNodeScale, settingsToClasses, settingsToCssVars, type MapViewSettings } from './map-view-settings';
 import { useMapViewSettings } from './useMapViewSettings';
+import { useMapImage, type MapImage } from './useMapImage';
 import { fitViewport, mapRectFor, normalizedToPixel, paddedRect, pixelToNormalized, resizedViewport, zoomLimits, type Size, type Viewport } from './map-coords';
 
 const LocationView = () => {
@@ -38,6 +39,8 @@ const LocationView = () => {
   const [viewMode, setViewMode] = useState<'map' | 'tree'>('map')
   // Live view settings of the map: per location, saved on the server, applied as they change.
   const [viewSettings, setViewSettings, settingsReady] = useMapViewSettings(adventure, world, locationName ?? '')
+  // The location's background image, and the means to replace it (from the settings panel).
+  const mapImage = useMapImage(adventure, locationName ?? '')
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // What the doc panel below the tree currently shows - `path` is a dot-joined name
@@ -256,11 +259,17 @@ const LocationView = () => {
 
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           <ReactFlowProvider>
-            <MapFlow location={locationData} mode={viewMode} settings={viewSettings} settingsReady={settingsReady} />
+            <MapFlow location={locationData} mode={viewMode} settings={viewSettings} settingsReady={settingsReady} mapImage={mapImage.image} />
           </ReactFlowProvider>
           {/* Outside ReactFlow: its scroll prevention would otherwise swallow the wheel over the panel. */}
           {settingsOpen && (
-            <MapSettingsPanel settings={viewSettings} mode={viewMode} onChange={setViewSettings} onClose={() => setSettingsOpen(false)} />
+            <MapSettingsPanel
+              settings={viewSettings}
+              mode={viewMode}
+              image={{ hasImage: mapImage.image !== null, busy: mapImage.busy, error: mapImage.error, onReplace: mapImage.replace }}
+              onChange={setViewSettings}
+              onClose={() => setSettingsOpen(false)}
+            />
           )}
         </div>
       </div>
@@ -300,12 +309,11 @@ function sanitizeLayout(raw: Record<string, NormPos> | null | undefined): Record
   return out;
 }
 
-const MapFlow = ({location, mode, settings, settingsReady}: { location: SerializedLocation | undefined, mode: 'map' | 'tree', settings: MapViewSettings, settingsReady: boolean }) => {
+const MapFlow = ({location, mode, settings, settingsReady, mapImage}: { location: SerializedLocation | undefined, mode: 'map' | 'tree', settings: MapViewSettings, settingsReady: boolean, mapImage: MapImage | null }) => {
 const navigate = useNavigate();
 const containerRef = useRef<HTMLDivElement>(null);
 let { getByReference, adventure, world } = useContext(DslContext)
 const [containerSize, setContainerSize] = useState<Size>({ width: 0, height: 0 });
-const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(null);
   // Saved layout for this location, normalized fractions, cleared on navigation.
   const [savedLayout, setSavedLayout] = useState<Record<string, NormPos>>({});
   // False until this location's layout fetch has settled - keeps Map mode from
@@ -481,39 +489,6 @@ const [mapImage, setMapImage] = useState<{ url: string; natural: Size } | null>(
 
     return () => resizeObserver.disconnect();
   }, []);
-
-  // Resolve this location's map image (if any). Falls back to no image (dot-grid
-  // background) on any failure - a location without a Maps.json entry is the
-  // normal case today, not an error state the user should see.
-  useEffect(() => {
-    // Clear immediately so a location without a map does not inherit the previous
-    // location's letterbox rect while its 404 is in flight.
-    setMapImage(null);
-    if (!location) return;
-    let cancelled = false;
-    let objectUrl: string | null = null;
-
-    fetch(`${BackendURL}/image/load?adventure=${adventure}&location=${encodeURIComponent(location.name)}`)
-      .then(res => { if (!res.ok) throw new Error('no map image'); return res.blob(); })
-      .then(blob => new Promise<{ url: string; natural: Size }>((resolve, reject) => {
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => resolve({ url, natural: { width: img.naturalWidth, height: img.naturalHeight } });
-        img.onerror = () => reject(new Error('failed to decode map image'));
-        img.src = url;
-      }))
-      .then(result => {
-        if (cancelled) { URL.revokeObjectURL(result.url); return; }
-        objectUrl = result.url;
-        setMapImage(result);
-      })
-      .catch(() => { if (!cancelled) setMapImage(null); });
-
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [location?.name, adventure]);
 
   // Load this location's saved Map layout once per location (normalized fractions;
   // legacy pixel entries are dropped). Also resets the live positions.

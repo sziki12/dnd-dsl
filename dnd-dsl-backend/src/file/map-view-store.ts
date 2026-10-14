@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import fs from 'fs';
+import { isSafeSegment } from '../common/safe-segment.js';
 
 // Per-location map view settings (colours, labels, node size, ...) live in one JSON file per world:
 // { "<location name>": { ...settings } }. The frontend owns the shape and sanitises it on load, so this
@@ -15,10 +16,7 @@ const hasOwn = (target: object, key: string) => Object.prototype.hasOwnProperty.
 const isPlainObject = (value: unknown): value is MapViewEntry =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** A path segment (adventure or world name) that cannot leave its folder. */
-export function isSafeSegment(value: unknown): value is string {
-    return typeof value === 'string' && value.length > 0 && value !== '.' && value !== '..' && !/[\\/\0]/.test(value);
-}
+export { isSafeSegment };
 
 function readAll(filePath: string): Record<string, unknown> {
     if (!fs.existsSync(filePath)) return {};

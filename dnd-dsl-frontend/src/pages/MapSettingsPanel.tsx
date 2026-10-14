@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined';
+import { IMAGE_ACCEPT, validateImageFile } from './map-image';
 import {
   DEFAULT_COLORS,
   defaultSettings,
@@ -74,13 +75,23 @@ function SliderRow({ label, value, min, max, step, suffix, disabled, onChange }:
  * Live view settings for the map. Every change calls onChange straight away, and MapFlow turns it into CSS
  * variables and classes, so the map updates as a slider moves or a colour is dragged.
  */
-export default function MapSettingsPanel({ settings, mode, onChange, onClose }: {
+export default function MapSettingsPanel({ settings, mode, image, onChange, onClose }: {
   settings: MapViewSettings;
   mode: ViewMode;
+  image: { hasImage: boolean; busy: boolean; error: string | null; onReplace: (file: File) => void };
   onChange: (next: MapViewSettings) => void;
   onClose: () => void;
 }) {
+  const fileInput = useRef<HTMLInputElement>(null);
   const treeMode = mode !== 'map';
+
+  const chooseFile = (file: File | undefined) => {
+    if (!file) return;
+    // A file that cannot be used is reported by the upload itself, without asking about the old image first.
+    if (image.hasImage && validateImageFile(file) === undefined
+      && !window.confirm(`Replace this location's map image with "${file.name}"? The current image file is deleted.`)) return;
+    image.onReplace(file);
+  };
   const patchNodes = (patch: Partial<MapViewSettings['nodes']>) => onChange({ ...settings, nodes: { ...settings.nodes, ...patch } });
 
   return (
@@ -91,6 +102,27 @@ export default function MapSettingsPanel({ settings, mode, onChange, onClose }: 
           <CloseOutlinedIcon style={{ fontSize: 16 }} />
         </button>
       </div>
+
+      <Section title="Map image">
+        <div className="ms-row">
+          <button type="button" className="ms-reset" disabled={image.busy} onClick={() => fileInput.current?.click()}>
+            {image.busy ? 'Uploading...' : image.hasImage ? 'Replace image...' : 'Upload image...'}
+          </button>
+        </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept={IMAGE_ACCEPT}
+          hidden
+          onChange={e => {
+            const file = e.target.files?.[0];
+            e.target.value = ''; // so choosing the same file again still counts
+            chooseFile(file);
+          }}
+        />
+        {image.error && <p className="ms-note ms-error">{image.error}</p>}
+        <p className="ms-note">PNG, JPEG, WebP or GIF, up to 25 MB. Replacing deletes the old file.</p>
+      </Section>
 
       <Section title="Edges">
         <CheckRow label="Show exit names" checked={settings.labels} onChange={labels => onChange({ ...settings, labels })} />

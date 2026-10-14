@@ -401,3 +401,5 @@
   cursor: pointer;
 }
 .ms-reset:hover { background: var(--bg-hover); }
+.ms-error { color: #f48771; }
+.ms-reset:disabled { opacity: .5; cursor: default; }
