@@ -16,7 +16,10 @@ export function toMonacoUri(path: string): string {
         .replace(/ /g, '%20');          // encode spaces only
 }
 
-const BACKEND_PATH = 'C:/Users/Szikszai Levente/Documents/GitHub/dnd-dsl/dnd-dsl-backend';
+export const VIEW_LANGUAGE_ID = 'dnd-dsl-view';
+export const VIEW_FILE_EXTENSION = '.dndstate';
+
+const BACKEND_PATH ='C:/Users/Szikszai Levente/Documents/GitHub/dnd-dsl/dnd-dsl-backend';
 const WORKSPACE_URI = Uri.file(BACKEND_PATH);
 export const FILE_URI = Uri.file(`${BACKEND_PATH}/test_file.dnd`);
 
@@ -68,9 +71,19 @@ const vscodeApiConfig: MonacoVscodeApiConfig = {
                 id: 'dnd-dsl',
                 extensions: ['.dnd'],
                 aliases: ['DnD DSL']
+                }, {
+                // Same grammar, but outside the language client's documentSelector: the
+                // read-only "world with state" view is highlighted without reaching the LSP.
+                id: VIEW_LANGUAGE_ID,
+                extensions: [VIEW_FILE_EXTENSION],
+                aliases: ['DnD DSL (state view)']
                 }],
                 grammars: [{
                 language: 'dnd-dsl',
+                scopeName: 'source.dnd-dsl',
+                path: './syntaxes/dnd-dsl.tmLanguage.json'
+                }, {
+                language: VIEW_LANGUAGE_ID,
                 scopeName: 'source.dnd-dsl',
                 path: './syntaxes/dnd-dsl.tmLanguage.json'
                 }]
