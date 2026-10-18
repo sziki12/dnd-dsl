@@ -57,6 +57,11 @@ export class AppController {
     return this.worldStateService.getWorldState()
   }
 
+  @Get('/world/render')
+  async getRenderedWorld() {
+    return this.worldStateService.getRenderedWorld().text
+  }
+
   @Get('/world/functions')
   getFunctions() {
     return this.worldStateService.getFunctions()

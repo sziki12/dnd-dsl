@@ -25,6 +25,7 @@ import { LangiumInterpreterService } from '../langium-interpreter/langium-interp
 import { predefinedFunctions, predefinedFunctionsAsMap } from '../predefined/predefined-functions.js';
 import { type StateOverlayFile } from './state-overlay.types.js';
 import * as fs from 'fs';
+import { renderSourceWithState, StateSourceView } from '@dnd-language/evaluation/dnd-dsl-state-source.js';
 
 export type FunctionSummary = {
   name: string;
@@ -150,6 +151,13 @@ export class WorldStateService {
     await ws.LangiumDocuments.deleteDocument(scriptUri);
 
     return { codeBlock: errors.length ? undefined : scriptWorld?.script, errors };
+  }
+
+  getRenderedWorld(): StateSourceView  {
+    if (!this._model) return { text: '', changes: [], stale: [] } ;
+    const modelText = stringifyNode(this._model);
+    const overlayText = JSON.stringify(this._overlay, null, 2);
+    return renderSourceWithState(this._model, this._worldSource, this._overlay);
   }
 
   /** 

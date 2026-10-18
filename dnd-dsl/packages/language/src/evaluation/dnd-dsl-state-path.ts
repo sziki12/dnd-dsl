@@ -89,6 +89,8 @@ export type StatePathSegment =
 
 export type StatePath = StatePathSegment[];
 
+//TODO create a StatePath namespace with encode/decode, nodeToStatePath, statePathToNode, resolveVariableContainer, etc.
+
 /**
  * Canonical string key for a StatePath, for use as a JSON object key (state overlay
  * file, Map key, etc). Location/Quest/Event names are free-text STRINGs that may
