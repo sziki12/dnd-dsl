@@ -28,6 +28,7 @@ import { assignParallelSlots } from '../edges/edge-geometry';
 import { effectiveNodeScale, settingsToClasses, settingsToCssVars, type MapViewSettings } from './map-view-settings';
 import { useMapViewSettings } from './useMapViewSettings';
 import { useMapImage, type MapImage } from './useMapImage';
+import { arrowMarkerId, collectExitTags, exitTags, markerColors } from './exit-tags';
 import { fitViewport, mapRectFor, normalizedToPixel, paddedRect, pixelToNormalized, resizedViewport, zoomLimits, type Size, type Viewport } from './map-coords';
 
 const LocationView = () => {
@@ -41,6 +42,8 @@ const LocationView = () => {
   const [viewSettings, setViewSettings, settingsReady] = useMapViewSettings(adventure, world, locationName ?? '')
   // The location's background image, and the means to replace it (from the settings panel).
   const mapImage = useMapImage(adventure, locationName ?? '')
+  // The tags the exits shown on the map carry, so the settings panel can offer a style for each.
+  const exitTagList = useMemo(() => collectExitTags(locationData), [locationData])
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // What the doc panel below the tree currently shows - `path` is a dot-joined name
@@ -267,6 +270,7 @@ const LocationView = () => {
               settings={viewSettings}
               mode={viewMode}
               image={{ hasImage: mapImage.image !== null, busy: mapImage.busy, error: mapImage.error, onReplace: mapImage.replace }}
+              exitTags={exitTagList}
               onChange={setViewSettings}
               onClose={() => setSettingsOpen(false)}
             />
@@ -582,18 +586,21 @@ const [containerSize, setContainerSize] = useState<Size>({ width: 0, height: 0 }
         ...settingsToCssVars(settings, mode),
       } as React.CSSProperties}
     >
-      {/* The arrowhead every exit edge points with; its colour follows the exit colour setting. */}
+      {/* The arrowheads exit edges point with: one that follows the exit colour setting, and one per colour a tag rule
+          uses. userSpaceOnUse keeps the size the same whatever width a tag rule gives the line. */}
       <svg width={0} height={0} style={{ position: 'absolute' }} aria-hidden="true">
         <defs>
-          <marker
-            id="map-arrow" className="react-flow__arrowhead" markerWidth="50" markerHeight="50" viewBox="-10 -10 20 20"
-            markerUnits="strokeWidth" orient="auto-start-reverse" refX="0" refY="0"
-          >
-            <polyline
-              style={{ stroke: 'var(--map-color-exit, #cccccc)', fill: 'var(--map-color-exit, #cccccc)', strokeWidth: 1 }}
-              strokeLinecap="round" strokeLinejoin="round" points="-5,-4 0,0 -5,4 -5,-4"
-            />
-          </marker>
+          {[{ id: 'map-arrow', color: 'var(--map-color-exit, #cccccc)' }, ...markerColors(settings.tagRules).map(hex => ({ id: arrowMarkerId(hex), color: `#${hex}` }))].map(({ id, color }) => (
+            <marker
+              key={id} id={id} className="react-flow__arrowhead" markerWidth="50" markerHeight="50" viewBox="-10 -10 20 20"
+              markerUnits="userSpaceOnUse" orient="auto-start-reverse" refX="0" refY="0"
+            >
+              <polyline
+                style={{ stroke: color, fill: color, strokeWidth: 1 }}
+                strokeLinecap="round" strokeLinejoin="round" points="-5,-4 0,0 -5,4 -5,-4"
+              />
+            </marker>
+          ))}
         </defs>
       </svg>
       {measured &&
@@ -718,7 +725,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
         target: targetName,
         label: exit.name,
         type: 'floating',
-        data: { identifiers: exit.identifiers, kind: 'exit', arrow: true },
+        data: { identifiers: exit.identifiers, tags: exitTags(exit.identifiers), kind: 'exit', arrow: true },
         style: { strokeWidth: 1 },
       });
   }
@@ -769,7 +776,7 @@ function buildGraphFromLocation(location: SerializedLocation, getByReference: <T
         target: targetName,
         label: exit.name,
         type: 'floating',
-        data: { identifiers: exit.identifiers, kind: 'exit', arrow: true },
+        data: { identifiers: exit.identifiers, tags: exitTags(exit.identifiers), kind: 'exit', arrow: true },
         style: { strokeWidth: 1 },
       });
     }

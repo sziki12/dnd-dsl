@@ -1,6 +1,8 @@
 import { useRef, type ReactNode } from 'react';
 import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined';
 import { IMAGE_ACCEPT, validateImageFile } from './map-image';
+import ExitTagStyles from './ExitTagStyles';
+import type { ExitTag } from './exit-tags';
 import {
   DEFAULT_COLORS,
   defaultSettings,
@@ -75,9 +77,11 @@ function SliderRow({ label, value, min, max, step, suffix, disabled, onChange }:
  * Live view settings for the map. Every change calls onChange straight away, and MapFlow turns it into CSS
  * variables and classes, so the map updates as a slider moves or a colour is dragged.
  */
-export default function MapSettingsPanel({ settings, mode, image, onChange, onClose }: {
+export default function MapSettingsPanel({ settings, mode, image, exitTags, onChange, onClose }: {
   settings: MapViewSettings;
   mode: ViewMode;
+  /** Every tag the exits of this location carry, for the exit styles. */
+  exitTags: ExitTag[];
   image: { hasImage: boolean; busy: boolean; error: string | null; onReplace: (file: File) => void };
   onChange: (next: MapViewSettings) => void;
   onClose: () => void;
@@ -127,6 +131,10 @@ export default function MapSettingsPanel({ settings, mode, image, onChange, onCl
       <Section title="Edges">
         <CheckRow label="Show exit names" checked={settings.labels} onChange={labels => onChange({ ...settings, labels })} />
         <CheckRow label="Show edges" checked={settings.edges.visible} onChange={visible => onChange({ ...settings, edges: { visible } })} />
+      </Section>
+
+      <Section title="Exit tags">
+        <ExitTagStyles seen={exitTags} rules={settings.tagRules} onChange={tagRules => onChange({ ...settings, tagRules })} />
       </Section>
 
       <Section title="Nodes">

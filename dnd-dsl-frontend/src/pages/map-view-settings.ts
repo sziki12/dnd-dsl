@@ -5,6 +5,8 @@
 // rebuilding the graph and losing positions. The only numeric exception is the node size, which
 // the edge component reads to find where a line meets a scaled node (effectiveNodeScale).
 
+import { sanitizeTagRules, type TagRule } from './exit-tags';
+
 export type NodeKind = 'root' | 'sub' | 'entry' | 'external';
 export type EdgeKind = 'exit' | 'sublocation';
 export type StyleKind = NodeKind | EdgeKind;
@@ -40,6 +42,8 @@ export interface MapViewSettings {
   edges: { visible: boolean };
   /** Only the scopes the user has set; the rest fall back to the theme. */
   colors: Partial<Record<ColorScope, string>>;
+  /** How exits with certain tags look, in order; later rules win. */
+  tagRules: TagRule[];
 }
 
 /** What each kind looks like with no custom colour. Used to show something in the pickers; the real fallback is CSS. */
@@ -59,6 +63,7 @@ export function defaultSettings(): MapViewSettings {
     nodes: { visible: true, opacity: 1, sizeMode: 'map', size: 1 },
     edges: { visible: true },
     colors: {},
+    tagRules: [],
   };
 }
 
@@ -101,6 +106,7 @@ export function sanitizeSettings(raw: unknown): MapViewSettings {
     },
     edges: { visible: bool(edges.visible, base.edges.visible) },
     colors: cleanColors,
+    tagRules: sanitizeTagRules(r.tagRules),
   };
 }
 

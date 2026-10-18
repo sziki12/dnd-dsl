@@ -4,11 +4,15 @@ import { getEdgeParams } from './initialElements';
 import { labelPosition, scaledBox, type ParallelSlot } from './edge-geometry';
 import { MapViewContext } from '../pages/MapViewContext';
 import { effectiveNodeScale } from '../pages/map-view-settings';
+import { arrowMarkerId, resolveTagStyle, type ExitTag } from '../pages/exit-tags';
 
 /** Distance between the labels of edges that join the same pair of nodes, in map units at node scale 1. */
 const LABEL_SPACING = 18;
 
-type EdgeData = { kind?: string; arrow?: boolean; slot?: ParallelSlot } | undefined;
+type EdgeData = { kind?: string; arrow?: boolean; slot?: ParallelSlot; tags?: ExitTag[] } | undefined;
+
+/** Dash pattern of a tag rule that asks for a dashed exit. */
+const DASH = '6 4';
 
 // ReactFlow measures a node's unscaled card, but the card is drawn at the node-size scale, so a line has to
 // meet the scaled box (about the node's top-centre anchor) to touch the visible border.
@@ -58,7 +62,17 @@ function FloatingEdge({ id, source, target, label, data, style }: {
   }
 
   const [edgePath] = getStraightPath({ sourceX: sx, sourceY: sy, targetX: tx, targetY: ty });
-  const text = typeof label === 'string' || typeof label === 'number' ? String(label) : '';
+  // How the exit's tags make it look (colour, width, dash, opacity, a suffix after its name), see exit-tags.ts.
+  const look = resolveTagStyle(settings.tagRules, data?.tags ?? []);
+  const pathStyle: CSSProperties = {
+    ...style,
+    ...(look.color !== undefined && { stroke: look.color }),
+    ...(look.width !== undefined && { strokeWidth: look.width }),
+    ...(look.dash !== undefined && { strokeDasharray: look.dash ? DASH : 'none' }),
+    ...(look.opacity !== undefined && { opacity: look.opacity }),
+  };
+  const name = typeof label === 'string' || typeof label === 'number' ? String(label) : '';
+  const text = look.suffix ? `${name} ${look.suffix}`.trim() : name;
   const slot = data?.slot ?? { index: 0, count: 1, flip: false };
   const at = labelPosition({ x: sx, y: sy }, { x: tx, y: ty }, slot, LABEL_SPACING * scale);
 
@@ -68,8 +82,8 @@ function FloatingEdge({ id, source, target, label, data, style }: {
         id={id}
         className={`react-flow__edge-path map-edge${data?.kind ? ` map-edge-${data.kind}` : ''}`}
         d={edgePath}
-        markerEnd={data?.arrow ? 'url(#map-arrow)' : undefined}
-        style={style}
+        markerEnd={data?.arrow ? `url(#${look.color ? arrowMarkerId(look.color.slice(1)) : 'map-arrow'})` : undefined}
+        style={pathStyle}
       />
       {text && (
         <EdgeLabelRenderer>
@@ -78,6 +92,7 @@ function FloatingEdge({ id, source, target, label, data, style }: {
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${at.x}px, ${at.y}px) scale(var(--map-node-scale, 1))`,
+              ...(look.opacity !== undefined && { opacity: look.opacity }),
             }}
           >
             {text}
