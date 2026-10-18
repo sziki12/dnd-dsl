@@ -1,0 +1,17 @@
+services:
+  ignis:
+    image: nobbe/ignis:latest
+    ports:
+      - "8080:8080"
+    environment:
+      # match these to your host user (run: id)
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./vaults:/vaults
+      - ./data:/app/data
+      - obsidian-app:/app/obsidian-app
+    restart: unless-stopped
+
+volumes:
+  obsidian-app:
