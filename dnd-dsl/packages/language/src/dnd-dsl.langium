@@ -13,7 +13,8 @@ World:
     | (npcs+=Npc)+
     | (enums+=Enum)+
     | (variables+=VariableDeclaration)+
-    | (onBlocks+=OnBlock)+)*
+    | (onBlocks+=OnBlock)+
+    | (parties+=Party)+)*
   | isReference?='reference' 'world' name=STRING (script=CodeBlock)?;
 
 Enum:
@@ -27,7 +28,6 @@ Npc:
     (variables+=VariableDeclaration)*
     (onBlocks+=OnBlock)*;
 
-//TODO Party ref
 Party:
     'party' name=STRING
     (Description)?
@@ -282,6 +282,7 @@ ChainField returns string:
     //Single-value fields
     | 'name' | 'description';
 
+//QuestRefItem and LocationRefItem handled by RefChain directly
 RefChainHead infers RefChainStart:
     VariableRefItem
     | ObjectiveRefItem
@@ -290,7 +291,8 @@ RefChainHead infers RefChainStart:
     | WorldRefItem
     | EnumRefItem
     | ThisRefItem
-    | ParentRefItem;
+    | ParentRefItem
+    | PartyRefItem;
 
 VariableRefItem:
     val=VariableRef;
@@ -321,6 +323,8 @@ ThisRefItem:
     isThis='this';
 ParentRefItem:
     isParent='parent';
+PartyRefItem:
+    isParty='party' name?=STRING;
 
 //val is declared, property is generated
 VariableRef:        
