@@ -1,6 +1,4 @@
-import { isObjective, isQuest, isVariableDeclaration, Model, Objective, Quest, VariableDeclaration } from "../generated/ast.js";
-import { isBuiltInStatus } from "../builtin-status.js";
-import { objectiveStatusPath, questStatusPath } from "./dnd-dsl-status.js";
+import { isObjective, isQuest, isVariableDeclaration, Model, Objective, Quest } from "../generated/ast.js";
 import { decodeStatePath, StatePath, statePathToNode } from "./dnd-dsl-state-path.js";
 import { CstNode, GrammarUtils } from "langium";
 

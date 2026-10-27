@@ -1,9 +1,7 @@
 import { Fragment, useContext } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DslContext } from '../contexts/DslContext';
-import { evaluateExpression, inferKind } from '../common/expression-evaluator';
-import { renderValueToken } from '../common/ValueToken';
-import EnumValueSelect from '../common/EnumValueSelect';
+import VariableEditor from '../common/VariableEditor';
 import EntityLink from '../common/EntityLink';
 import StatusBadge from '../common/StatusBadge';
 import { questDependencies, statusOf, type QuestDependency } from '@dnd-language/evaluation/dnd-dsl-world-graph.js';
@@ -14,29 +12,15 @@ import type { SerializedModel, SerializedQuest, SerializedVariableDecl } from '@
 const PAGE_STYLE = { height: '100%', overflow: 'auto', background: 'var(--bg-editor)', color: 'var(--fg-primary)' } as const;
 
 /** An entity's own variables, as the NPCs page lays them out. `Status` is shown as a badge instead. */
-function VariableRows({ variables, owner, worldState }: {
+function VariableRows({ variables, owner }: {
   variables: SerializedVariableDecl[];
   owner: StatePathSegment;
-  worldState: SerializedModel;
 }) {
   return variables
     .filter(variable => (variable.target ?? variable.name) !== STATUS_VARIABLE)
-    .map((variable, i) => {
-      const value = evaluateExpression(variable.value, { variableName: variable.target, worldState });
-      const kind = inferKind(value);
-      return (
-        <div key={variable.target} className="var-row">
-          <div className="gutter">{i + 1}</div>
-          <div className="declaration">
-            <span className="tok-keyword">{kind === 'unknown' ? 'let' : kind}</span>
-            <span className="tok-variable">{variable.target}</span>
-            <span className="tok-operator">=</span>
-            {renderValueToken(value)}
-            <EnumValueSelect variable={variable} owner={owner} currentValue={value} />
-          </div>
-        </div>
-      );
-    });
+    .map((variable, i) => (
+      <VariableEditor key={variable.target} variable={variable} owner={[owner]} index={i + 1} />
+    ));
 }
 
 function Dependencies({ label, dependencies }: { label: string; dependencies: QuestDependency[] }) {
@@ -69,7 +53,7 @@ function QuestBlock({ quest, worldState, detailed }: { quest: SerializedQuest; w
       <Dependencies label="Unlock waits on" dependencies={questDependencies(worldState, quest.enabled)} />
       <Dependencies label="Completion waits on" dependencies={questDependencies(worldState, quest.requierement)} />
 
-      {detailed && <VariableRows variables={quest.variables} owner={{ kind: 'quest', name: quest.name }} worldState={worldState} />}
+      {detailed && <VariableRows variables={quest.variables} owner={{ kind: 'quest', name: quest.name }} />}
 
       <div className="objective-list">
         {quest.objectives.map(objective => (
@@ -83,7 +67,6 @@ function QuestBlock({ quest, worldState, detailed }: { quest: SerializedQuest; w
               <VariableRows
                 variables={objective.variables}
                 owner={{ kind: 'objective', questName: quest.name, name: objective.name }}
-                worldState={worldState}
               />
             )}
           </div>

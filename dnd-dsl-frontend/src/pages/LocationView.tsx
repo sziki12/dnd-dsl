@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, useRef, useEffect, useContext } from 'react';
 
 import { addEdge, Background, BackgroundVariant, MarkerType, Panel, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow, ViewportPortal, type Connection, type Edge, type Node } from '@xyflow/react';
-import { evaluateExpression, inferKind, isObjectResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
+import { evaluateExpression, isObjectResult, type SerialisedObjectDeclaration } from '../common/expression-evaluator';
 import { renderValueToken } from '../common/ValueToken';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
@@ -20,7 +20,7 @@ import FloatingEdge from '../edges/FloatingEdge.js';
 import FloatingConnectionLine from '../edges/FloatingConnectionLine.js';
 import type { SerializedModel, SerializedLocation, SerializedVariableDecl, SerializedAstNode, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { findLocation } from '../common/location-tree';
-import EnumValueSelect from '../common/EnumValueSelect';
+import VariableEditor from '../common/VariableEditor';
 import { layoutAsTree } from './tree-layout';
 import MapSettingsPanel from './MapSettingsPanel';
 import { MapViewContext } from './MapViewContext';
@@ -137,7 +137,7 @@ const LocationView = () => {
                 <h1>{locationName}</h1>
               </div>
               <div style={{ padding: '8px 0' }}>
-                {locationData?.variables.map((variable: SerializedVariableDecl, i: number) => {
+                {locationData && locationData.variables.map((variable: SerializedVariableDecl, i: number) => {
                   const isComputed = variable.isComputed === 'computed'
                   const path = variable.target ?? ''
                   const isSelected = selectedVariable?.path === path
@@ -172,48 +172,14 @@ const LocationView = () => {
                     )
                   }
 
-                  const value = evaluateExpression(variable.value, { variableName: variable.target, worldState })
-                  if (isObjectResult(value)) {
-                    const obj = value as SerialisedObjectDeclaration
-                    return (
-                      <div key={variable.target}>
-                        <div
-                          className={"var-row " + (isSelected ? 'selected' : '')}
-                          onClick={() => toggleSelected(path, variable)}
-                        >
-                          <div className="gutter">{i + 1}</div>
-                          <div className="declaration">
-                            <span className="tok-keyword">object</span>
-                            <span className="tok-variable">{variable.target}</span>
-                          </div>
-                        </div>
-                        {renderObjectProps(obj, path)}
-                      </div>
-                    )
-                  }
-
-                  const kind = inferKind(value)
                   return (
-                    <div
+                    <VariableEditor
                       key={variable.target}
-                      className={"var-row " + (isSelected ? 'selected' : '')}
-                      onClick={() => toggleSelected(path, variable)}
-                    >
-                      <div className="gutter">{i + 1}</div>
-                      <div className="declaration">
-                        <span className="tok-keyword">{kind === 'unknown' ? 'let' : kind}</span>
-                        <span className="tok-variable">{variable.target}</span>
-                        <span className="tok-operator">=</span>
-                        {renderValueToken(value)}
-                        {locationData && (
-                          <EnumValueSelect
-                            variable={variable}
-                            owner={{ kind: 'location', name: locationData.name }}
-                            currentValue={value}
-                          />
-                        )}
-                      </div>
-                    </div>
+                      variable={variable}
+                      owner={[{ kind: 'location', name: locationData.name }]}
+                      index={i + 1}
+                      selection={{ selected: selectedVariable?.path ?? null, toggle: toggleSelected }}
+                    />
                   )
                 })}
               </div>

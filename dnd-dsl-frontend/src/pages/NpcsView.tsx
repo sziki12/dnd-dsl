@@ -1,8 +1,6 @@
 import { useContext } from 'react';
 import { DslContext } from '../contexts/DslContext';
-import { evaluateExpression, inferKind } from '../common/expression-evaluator';
-import { renderValueToken } from '../common/ValueToken';
-import EnumValueSelect from '../common/EnumValueSelect';
+import VariableEditor from '../common/VariableEditor';
 import type { SerializedNpc, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 export default function NpcsView() {
@@ -23,26 +21,14 @@ export default function NpcsView() {
           {npc.description && (
             <div style={{ padding: '0 12px 6px', color: 'var(--fg-secondary)', fontSize: 12 }}>{npc.description}</div>
           )}
-          {npc.variables.map((variable: SerializedVariableDecl, i: number) => {
-            const value = evaluateExpression(variable.value, { variableName: variable.target, worldState });
-            const kind = inferKind(value);
-            return (
-              <div key={variable.target} className="var-row">
-                <div className="gutter">{i + 1}</div>
-                <div className="declaration">
-                  <span className="tok-keyword">{kind === 'unknown' ? 'let' : kind}</span>
-                  <span className="tok-variable">{variable.target}</span>
-                  <span className="tok-operator">=</span>
-                  {renderValueToken(value)}
-                  <EnumValueSelect
-                    variable={variable}
-                    owner={{ kind: 'npc', name: npc.name }}
-                    currentValue={value}
-                  />
-                </div>
-              </div>
-            );
-          })}
+          {npc.variables.map((variable: SerializedVariableDecl, i: number) => (
+            <VariableEditor
+              key={variable.target}
+              variable={variable}
+              owner={[{ kind: 'npc', name: npc.name }]}
+              index={i + 1}
+            />
+          ))}
         </div>
       ))}
     </div>
