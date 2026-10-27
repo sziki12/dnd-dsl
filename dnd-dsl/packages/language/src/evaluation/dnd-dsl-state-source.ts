@@ -1,6 +1,6 @@
 import { AstUtils, GrammarUtils, type AstNode, type CstNode } from "langium";
 import {
-    isLocation, isNpc, isObjective, isObjectDeclaration, isParty, isQuest, isVariableDeclaration,
+    isFaction, isLocation, isNpc, isObjective, isObjectDeclaration, isParty, isQuest, isVariableDeclaration,
     type Model, type StringVal, type VariableDeclaration,
 } from "../generated/ast.js";
 import {
@@ -139,7 +139,7 @@ function insertionAnchor(owner: AstNode): { node: CstNode; isHeader: boolean } |
     if (isLocation(owner)) {
         if (owner.entry?.$cstNode) members.push(owner.entry.$cstNode);
         for (const exit of owner.exits) if (exit.$cstNode) members.push(exit.$cstNode);
-    } else if (isQuest(owner) || isObjective(owner) || isNpc(owner) || isParty(owner)) {
+    } else if (isQuest(owner) || isObjective(owner) || isNpc(owner) || isFaction(owner) || isParty(owner)) {
         const description = GrammarUtils.findNodeForProperty(cst, "description");
         if (description) members.push(description);
     }

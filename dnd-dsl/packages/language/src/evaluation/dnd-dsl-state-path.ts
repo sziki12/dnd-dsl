@@ -1,6 +1,7 @@
 import { AstUtils, type AstNode } from "langium";
 import {
     isEvent,
+    isFaction,
     isFunctionDeclaration,
     isLocation,
     isNpc,
@@ -12,6 +13,7 @@ import {
     isWorld,
     type ChainTail,
     type Event,
+    type Faction,
     type Location,
     type Model,
     type Npc,
@@ -27,10 +29,10 @@ import {
 // All Langium imports above are used only for their exported type guards / type
 // annotations — no LSP-only services are touched — so this file is safe to import
 // in both the Node.js backend and the browser frontend, same as dnd-dsl-reference.ts.
-export type OwningObject = ObjectDeclaration | Npc | Party | Location | Quest | Objective | Event | World;
+export type OwningObject = ObjectDeclaration | Npc | Party | Faction | Location | Quest | Objective | Event | World;
 
 function isOwningObject(node: AstNode): node is OwningObject {
-    return isObjectDeclaration(node) || isNpc(node) || isParty(node) || isLocation(node)
+    return isObjectDeclaration(node) || isNpc(node) || isParty(node) || isFaction(node) || isLocation(node)
         || isQuest(node) || isObjective(node) || isEvent(node) || isWorld(node);
 }
 
@@ -84,6 +86,7 @@ export type StatePathSegment =
     | { kind: 'event'; name: string }
     | { kind: 'function'; name: string }
     | { kind: 'npc'; name: string }
+    | { kind: 'faction'; name: string }
     | { kind: 'world' }
     | { kind: 'variable'; target: string };
 
@@ -124,7 +127,7 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
             // is not, so bail out rather than returning a bogus path.
             const container = current.$container;
             if (!container || !(isLocation(container) || isObjectDeclaration(container)
-                || isNpc(container) || isQuest(container) || isObjective(container) || isWorld(container))) {
+                || isNpc(container) || isFaction(container) || isQuest(container) || isObjective(container) || isWorld(container))) {
                 return undefined;
             }
             segments.unshift({ kind: 'variable', target: current.target ?? current.name ?? '' });
@@ -133,6 +136,9 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
             return segments;
         } else if (isNpc(current)) {
             segments.unshift({ kind: 'npc', name: current.name });
+            return segments;
+        } else if (isFaction(current)) {
+            segments.unshift({ kind: 'faction', name: current.name });
             return segments;
         } else if (isObjective(current)) {
             segments.unshift({ kind: 'objective', questName: current.$container.name, name: current.name });
@@ -188,6 +194,9 @@ export function statePathToNode(model: Model, path: StatePath): AstNode | undefi
             break;
         case 'npc':
             root = model.World.npcs.find(n => n.name === head.name);
+            break;
+        case 'faction':
+            root = model.World.factions.find(f => f.name === head.name);
             break;
         case 'world':
             root = model.World;
@@ -279,6 +288,7 @@ function getVariablesArray(node: AstNode): VariableDeclaration[] | undefined {
     if (isLocation(node)) return node.variables;
     if (isObjectDeclaration(node)) return node.variables;
     if (isNpc(node)) return node.variables;
+    if (isFaction(node)) return node.variables;
     if (isQuest(node)) return node.variables;
     if (isObjective(node)) return node.variables;
     if (isWorld(node)) return node.variables;

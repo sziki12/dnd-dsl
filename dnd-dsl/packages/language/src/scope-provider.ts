@@ -12,6 +12,7 @@ import {
     isLocationEntry,
     isLocationRef,
     isLocationRefItem,
+    isFactionRefItem,
     isNpcRefItem,
     isObjectDeclaration,
     isObjectiveRef,
@@ -36,7 +37,7 @@ import { chainHead, lastChainSegment, nearestOwningObject, parentOwningObject, u
 /** 
  * CollectionRef.field values whose elements are real named entities with their own `.variables` 
  **/
-const ENTITY_COLLECTION_FIELDS = new Set(['npcs', 'locations', 'quests', 'objectives', 'sublocations']);
+const ENTITY_COLLECTION_FIELDS = new Set(['npcs', 'factions', 'locations', 'quests', 'objectives', 'sublocations']);
 
 /** The head a step starts from: the step before it in the chain, or the chain's own head for the first step. */
 function stepBase(step: AstNode): AstNode | undefined
@@ -201,6 +202,10 @@ export class DndScopeProvider extends DefaultScopeProvider
         {
             members = prev.val.val.ref?.variables;
         }
+        else if (isFactionRefItem(prev))
+        {
+            members = prev.val.val.ref?.variables;
+        }
         else if (isWorldRefItem(prev))
         {
             members = this.worldVariables(prev, context);
@@ -280,7 +285,7 @@ export class DndScopeProvider extends DefaultScopeProvider
     {
         if (chain.rest.length > 0) return undefined;
         const head = chainHead(chain);
-        if (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head))
+        if (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head))
         {
             return head.val.val.ref?.variables;
         }

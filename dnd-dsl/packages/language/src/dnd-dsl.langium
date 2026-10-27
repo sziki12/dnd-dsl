@@ -14,7 +14,8 @@ World:
     | (enums+=Enum)+
     | (variables+=VariableDeclaration)+
     | (onBlocks+=OnBlock)+
-    | (parties+=Party)+)*
+    | (parties+=Party)+
+    | (factions+=Faction)+)*
   | isReference?='reference' 'world' name=STRING (script=CodeBlock)?;
 
 Enum:
@@ -30,6 +31,12 @@ Npc:
 
 Party:
     'party' name=STRING
+    (Description)?
+    (variables+=VariableDeclaration)*
+    (onBlocks+=OnBlock)*;
+
+Faction:
+    'faction' name=STRING
     (Description)?
     (variables+=VariableDeclaration)*
     (onBlocks+=OnBlock)*;
@@ -277,7 +284,7 @@ ChainTail:
 
 ChainField returns string:
     //Collection fields
-    'locations' | 'npcs' | 'quests' | 'events' | 'functions'
+    'locations' | 'npcs' | 'factions' | 'quests' | 'events' | 'functions'
     | 'enums' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values'
     //Single-value fields
     | 'name' | 'description';
@@ -288,6 +295,7 @@ RefChainHead infers RefChainStart:
     | ObjectiveRefItem
     | EventRefItem
     | NpcRefItem
+    | FactionRefItem
     | WorldRefItem
     | EnumRefItem
     | ThisRefItem
@@ -309,6 +317,8 @@ EventRefItem:
     isEvent='event' val=EventRef;
 NpcRefItem:
     isNpc='npc' val=NpcRef;
+FactionRefItem:
+    isFaction='faction' val=FactionRef;
 // Only one World per document, so a bare keyword is enough - no cross-reference to
 // resolve. Exists so `world . npcs` etc. can be written as a CollectionRef head.
 WorldRefItem:
@@ -339,6 +349,8 @@ EventRef:
     val=[Event:STRING];
 NpcRef:
     val=[Npc:STRING];
+FactionRef:
+    val=[Faction:STRING];
 FunctionRef:
     val=[FunctionDeclaration:ID];
 

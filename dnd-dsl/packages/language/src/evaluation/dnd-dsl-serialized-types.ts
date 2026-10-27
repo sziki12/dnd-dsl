@@ -2,7 +2,7 @@ import type * as ast from '../generated/ast.js';
 import type { Reference, AstNode } from 'langium';
 
 /** A Langium cross-reference after JSON serialization: { "$ref": "#/World/locations@0" } */
-export type SerializedRef = { $ref: string };
+export type SerializedRef = { $ref: string; $refText?: string };
 
 // Langium node fields that are not emitted by JsonSerializer
 type LangiumInternals = '$container' | '$document' | '$cstNode' | '$range' | '$path';
@@ -28,6 +28,7 @@ export type SerializedQuest          = SerializedNode<ast.Quest>;
 export type SerializedObjective      = SerializedNode<ast.Objective>;
 export type SerializedEvent          = SerializedNode<ast.Event>;
 export type SerializedNpc            = SerializedNode<ast.Npc>;
+export type SerializedFaction        = SerializedNode<ast.Faction>;
 export type SerializedEnum           = SerializedNode<ast.Enum>;
 export type SerializedEnumValueDecl  = SerializedNode<ast.EnumValueDecl>;
 export type SerializedEnumValueRef   = SerializedNode<ast.EnumValueRef>;

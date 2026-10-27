@@ -16,6 +16,7 @@ const PREDEFINED_SLOT = new RegExp(`\\b${CALL_KEYWORD}[ \\t]+${PREDEFINED_KEYWOR
 const ENTITY_TYPE: Record<string, ObjectKind> = {
     location: ObjectKind.Location,
     npc: ObjectKind.Npc,
+    faction: ObjectKind.Faction,
     quest: ObjectKind.Quest,
     objective: ObjectKind.Objective,
     event: ObjectKind.Event,

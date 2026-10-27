@@ -27,6 +27,8 @@ import {
     isListLiteral,
     isLocation,
     isLocationRefItem,
+    isFaction,
+    isFactionRefItem,
     isNpc,
     isNpcRefItem,
     isObjectDeclaration,
@@ -198,7 +200,7 @@ export class LangiumInterpreterService {
             throw new Error(`Cannot resolve a '${head.$type}' reference to a StatePath`);
         }
         if (chain.rest.length === 0
-            && (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head))) {
+            && (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head))) {
             const node = head.val.val.ref;
             if (!node) throw new Error(`Unresolved ref: ${head.val.val.$refText}`);
             return nodeToStatePath(node)!;
@@ -392,6 +394,11 @@ export class LangiumInterpreterService {
                 if (!n) throw new Error(`Unresolved npc ref: ${head.val.val.$refText}`);
                 return this.readPath(ctx, [{ kind: 'npc', name: n.name }]);
             }
+            if (isFactionRefItem(head)) {
+                const f = head.val.val.ref;
+                if (!f) throw new Error(`Unresolved faction ref: ${head.val.val.$refText}`);
+                return this.readPath(ctx, [{ kind: 'faction', name: f.name }]);
+            }
             if (isThisRefItem(head)) {
                 if (!ctx.thisEntity) throw new Error(`'this' is not available here`);
                 if (isEvent(ctx.thisEntity)) throw new Error(`Cannot read 'this' as a value when it refers to an Event`);
@@ -420,7 +427,9 @@ export class LangiumInterpreterService {
         const decl = tail.val.val.ref;
         if (!decl) throw new Error(`Unresolved variable ref in chain: ${tail.val.val.$refText}`);
 
-        const path = nodeToStatePath(decl);
+        // A loop variable's member links to a placeholder, not a declaration: walking up from it would end at the
+        // enclosing event and read that, so it is read through the loop variable's own value below.
+        const path = (decl.$type as string) === 'DynamicMember' ? undefined : nodeToStatePath(decl);
         if (path) return this.readPath(ctx, path);
 
         // Local/function-scoped - nodeToStatePath only returns a path for a
@@ -498,7 +507,7 @@ export class LangiumInterpreterService {
     private readPersistentValue(worldState: SerializedModel, path: StatePath): any {
         const node = statePathToNode(worldState as unknown as Model, path) as any;
         if (!node) return undefined; // renamed/removed since linking - soft-fail
-        if (isLocation(node) || isObjectDeclaration(node) || isNpc(node) || isQuest(node) || isObjective(node) || isWorld(node)) {
+        if (isLocation(node) || isObjectDeclaration(node) || isNpc(node) || isFaction(node) || isQuest(node) || isObjective(node) || isWorld(node)) {
             return buildVariablesRecord(worldState, node.variables as any);
         }
         return evaluateSerializedExpression(worldState, node.value);
@@ -1153,7 +1162,7 @@ export class LangiumInterpreterService {
         switch (field) {
             // Entities with their own `.variables` - bind a live handle so `x.member`
             // reads/writes persist through the entity's real StatePath.
-            case 'npcs': case 'locations': case 'quests': case 'objectives': case 'sublocations':
+            case 'npcs': case 'factions': case 'locations': case 'quests': case 'objectives': case 'sublocations':
                 return (items as AstNode[])
                     .map(node => this.makeEntityHandle(node))
                     .filter((handle): handle is LoopEntityHandle => handle !== undefined);
@@ -1182,7 +1191,7 @@ export class LangiumInterpreterService {
 
     /** 
      *  Resolves a CollectionRef's head to the concrete node its field is read off.
-     *  Location/Quest/Npc reuse their existing cross-reference; World has none 
+     *  Location/Quest/Npc/Faction reuse their existing cross-reference; World has none 
      *  (only one per document); Enum's is a direct [Enum:ID] reference 
      *  (see the grammar comment on EnumRefItem) resolved by Langium's own default scoping.
      *  A VariableRefItem head is only meaningful here when it's a `for`-loop variable
@@ -1193,6 +1202,7 @@ export class LangiumInterpreterService {
         if (isQuestRefItem(start)) return start.val.val.ref;
         if (isObjectiveRefItem(start)) return start.val.val.ref;
         if (isNpcRefItem(start)) return start.val.val.ref;
+        if (isFactionRefItem(start)) return start.val.val.ref;
         if (isWorldRefItem(start)) return ctx.model?.World;
         if (isEnumRefItem(start)) return start.val.ref;
         if (isThisRefItem(start)) return ctx.thisEntity;

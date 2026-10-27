@@ -35,7 +35,9 @@ export const stringifyNode = (node: AstNode, paramServices: DndDslServices | und
     const services = paramServices || createDndDslServices(NodeFileSystem).DndDsl;
 
     const jsonSerializer = services.serializer.JsonSerializer;
-    const serializedModel = jsonSerializer.serialize(node);
+    // refText keeps a reference's name in the JSON, which is the only way to name a target in another document
+    // (a built-in enum or relation type): its $ref points into that document, not into this model.
+    const serializedModel = jsonSerializer.serialize(node, { refText: true });
     return serializedModel;
 }
 

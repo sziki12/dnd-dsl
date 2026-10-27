@@ -9,6 +9,8 @@ import {
     isEnumRefItem,
     isEnumValueRef,
     isEvent,
+    isFaction,
+    isFactionRefItem,
     isForStatement,
     isIntVal,
     isListLiteral,
@@ -39,6 +41,7 @@ import {
     type Enum,
     type EnumValueDecl,
     type Event,
+    type Faction,
     type ForStatement,
     type FunctionCall,
     type FunctionDeclaration,
@@ -61,7 +64,7 @@ import { NAMED_COLLECTION_FIELDS } from './evaluation/dnd-dsl-expression-operati
 import { OBJECTIVE_STATUSES, QUEST_STATUSES, STATUS_VARIABLE } from './evaluation/dnd-dsl-status.js';
 import { isBuiltInStatus } from './builtin-status.js';
 
-type NamedNode = Enum | EnumValueDecl | Event | FunctionDeclaration | Location | Npc | Objective | Quest;
+type NamedNode = Enum | EnumValueDecl | Event | Faction | FunctionDeclaration | Location | Npc | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
 
 /** 
@@ -71,6 +74,7 @@ export enum ObjectKind {
     World = 'World',
     Location = 'Location',
     Npc = 'Npc',
+    Faction = 'Faction',
     Quest = 'Quest',
     Objective = 'Objective',
     Enum = 'Enum',
@@ -80,12 +84,13 @@ export enum ObjectKind {
     FunctionDeclaration = 'FunctionDeclaration',
 }
 export const COLLECTION_FIELDS: Record<ObjectKind, string[]> = {
-    [ObjectKind.World]: ['locations', 'npcs', 'quests', 'events', 'functions', 'enums', 'variables'],
+    [ObjectKind.World]: ['locations', 'npcs', 'factions', 'quests', 'events', 'functions', 'enums', 'variables'],
     [ObjectKind.Location]: ['sublocations', 'exits', 'variables'],
     [ObjectKind.Exit]: ['identifiers'],
     [ObjectKind.Quest]: ['objectives', 'variables'],
     [ObjectKind.Objective]: [],
     [ObjectKind.Npc]: ['variables'],
+    [ObjectKind.Faction]: ['variables'],
     [ObjectKind.Enum]: ['values'],
     [ObjectKind.VariableDeclaration]: [],
     [ObjectKind.FunctionDeclaration]: [],
@@ -99,6 +104,7 @@ export const SIMPLE_FIELDS: Record<ObjectKind, string[]> = {
     [ObjectKind.Quest]: ['name', 'description'],
     [ObjectKind.Objective]: ['name', 'description'],
     [ObjectKind.Npc]: ['name', 'description'],
+    [ObjectKind.Faction]: ['name', 'description'],
     [ObjectKind.Enum]: [],
     [ObjectKind.VariableDeclaration]: ['name', 'value'],
     [ObjectKind.FunctionDeclaration]: [],
@@ -118,6 +124,7 @@ export enum STATEMENT_KIND {
  **/
 const ENTITY_COLLECTION_KIND: Partial<Record<string, ObjectKind>> = {
     npcs: ObjectKind.Npc,
+    factions: ObjectKind.Faction,
     locations: ObjectKind.Location,
     sublocations: ObjectKind.Location,
     quests: ObjectKind.Quest,
@@ -143,6 +150,7 @@ export function collectionHeadKind(head: ChainHead): ObjectKind | undefined {
     if (isQuestRefItem(head)) return ObjectKind.Quest;
     if (isObjectiveRefItem(head)) return ObjectKind.Objective;
     if (isNpcRefItem(head)) return ObjectKind.Npc;
+    if (isFactionRefItem(head)) return ObjectKind.Faction;
     if (isEnumRefItem(head)) return ObjectKind.Enum;
     if (isThisRefItem(head)) return owningObjectKind(nearestOwningObject(head));
     if (isParentRefItem(head)) {
@@ -166,6 +174,7 @@ function owningObjectKind(owner: OwningObject | undefined): ObjectKind | undefin
     if (isLocation(owner)) return ObjectKind.Location;
     if (isQuest(owner)) return ObjectKind.Quest;
     if (isNpc(owner)) return ObjectKind.Npc;
+    if (isFaction(owner)) return ObjectKind.Faction;
     if (isObjective(owner)) return ObjectKind.Objective;
     if (isEvent(owner)) return ObjectKind.Event;
     return undefined; // ObjectDeclaration has no ObjectKind of its own
@@ -210,6 +219,7 @@ export class DndDslValidator {
         this.checkUnique(world.events, accept, 'Event');
         this.checkUnique(world.functions, accept, 'Function');
         this.checkUnique(world.npcs, accept, 'Npc');
+        this.checkUnique(world.factions, accept, 'Faction');
         this.checkUnique(world.enums, accept, 'Enum');
     }
 
@@ -506,7 +516,7 @@ export class DndDslValidator {
             // A `reference world` script holds none of the world's own items.
             if (!world || world.isReference) return undefined;
             const byField: Record<string, { name: string }[] | undefined> = {
-                locations: this.collectAllLocations(world.locations), npcs: world.npcs, quests: world.quests,
+                locations: this.collectAllLocations(world.locations), npcs: world.npcs, factions: world.factions, quests: world.quests,
                 events: world.events, functions: world.functions, enums: world.enums,
             };
             return byField[field ?? '']?.map(n => n.name);
@@ -520,7 +530,7 @@ export class DndDslValidator {
         for (let current = node.$container; current; current = current.$container) {
             if (isCodeBlock(current) || isOnBlock(current)) return false;
             if (isVariableDeclaration(current)) sawDeclaration = true;
-            if (isLocation(current) || isNpc(current) || isQuest(current) || isObjective(current) || isWorld(current)) return sawDeclaration;
+            if (isLocation(current) || isNpc(current) || isFaction(current) || isQuest(current) || isObjective(current) || isWorld(current)) return sawDeclaration;
         }
         return false;
     }

@@ -15,7 +15,19 @@ export function parseReferenceFromSerializedModel<T extends SerializedAstNode>(m
     return resolveReference(model, reference);
 }
 
+/**
+ * The name a serialized reference points at. Its own text first, because that is the only thing that names a
+ * target in another document (a built-in enum or relation type: `memory://builtin/...#/World/...`), which
+ * `parseReferenceFromSerializedModel` cannot walk; then the model itself, for JSON serialized without `refText`.
+ */
+export function serializedRefName(model: SerializedModel, reference: SerializedRef | undefined): string | undefined {
+    if (!reference) return undefined;
+    return reference.$refText ?? resolveReference<{ name?: string }>(model, reference)?.name;
+}
+
 function resolveReference<T>(model: any, reference: SerializedRef): T | undefined {
+    // A reference into another document (`uri#/World/...`) names a node this model does not hold.
+    if (typeof reference?.$ref !== 'string' || reference.$ref.indexOf('#') > 0) return undefined;
     // Strip leading '#' then the '/World/' prefix emitted by Langium's AstNodeLocator
     const raw = reference.$ref.startsWith('#') ? reference.$ref.slice(1) : reference.$ref;
     const stripped = raw.startsWith('/World/') ? raw.slice('/World/'.length) : raw.replace(/^\//, '');

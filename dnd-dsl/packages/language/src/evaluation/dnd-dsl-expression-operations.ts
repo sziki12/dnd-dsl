@@ -124,5 +124,5 @@ export function replaceAtIndexes(list: unknown, indexes: readonly unknown[], val
 
 /** Collection fields whose items have a name, so `x . field["name"]` can pick one. */
 export const NAMED_COLLECTION_FIELDS: ReadonlySet<string> = new Set([
-    'npcs', 'locations', 'sublocations', 'quests', 'objectives', 'events', 'functions', 'enums', 'values', 'exits',
+    'npcs', 'factions', 'locations', 'sublocations', 'quests', 'objectives', 'events', 'functions', 'enums', 'values', 'exits',
 ]);
