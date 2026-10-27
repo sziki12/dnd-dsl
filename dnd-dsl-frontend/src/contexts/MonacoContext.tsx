@@ -5,9 +5,19 @@ import * as vscode from 'vscode';
 import { FILE_URI, getMonacoInit, toMonacoUri, VIEW_FILE_EXTENSION } from '../MonacoInit';
 import { FileContext } from './FileContext';
 import { DslContext } from './DslContext';
+import type { EntityRef } from '../common/entity-at-cursor';
+
+/** What the editor needs from the page to offer "Open View" on a named object in the world. */
+export type EntityActions = {
+    /** The entity at a 1-based column of a line of text, if there is one. */
+    find: (line: string, column: number) => EntityRef | undefined,
+    open: (entity: EntityRef) => void,
+}
 
 type MonacoContext = {
-    startEditor: (element: HTMLDivElement) => Promise<void>,
+    startEditor: (element: HTMLDivElement, entityActions?: EntityActions) => Promise<void>,
+    /** True when the source model has edits that were neither loaded from nor saved to the file. */
+    hasUnsavedChanges: () => boolean,
     disposeEditor: () => Promise<void>,
     saveFile: () => Promise<{ ok: boolean; errors?: string[] }>,
     /** Swaps the editor to a read-only, highlighted model holding `text` (the world with its state merged in). */
@@ -73,7 +83,43 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
 
     let editorAppConfig = getEditorConfig("//Initial content")
 
-    const startEditor = async (element: HTMLDivElement) => {
+    const savedVersionRef = useRef<number | undefined>(undefined);
+
+    const markSaved = () => {
+        savedVersionRef.current = editorAppRef.current?.getTextModels().modified?.getAlternativeVersionId();
+    };
+
+    const hasUnsavedChanges = () => {
+        const model = editorAppRef.current?.getTextModels().modified;
+        return !!model && savedVersionRef.current !== undefined && model.getAlternativeVersionId() !== savedVersionRef.current;
+    };
+
+    // The right-click item is shown only when the cursor is on the name of something the world declares.
+    const registerEntityAction = (editor: NonNullable<ReturnType<EditorApp['getEditor']>>, actions: EntityActions) => {
+        const entityAtCursor = () => {
+            const position = editor.getPosition();
+            const model = editor.getModel();
+            return position && model ? actions.find(model.getLineContent(position.lineNumber), position.column) : undefined;
+        };
+        const onEntity = editor.createContextKey<boolean>('dndEntityUnderCursor', false);
+        const refresh = () => onEntity.set(entityAtCursor() !== undefined);
+        editor.onDidChangeCursorPosition(refresh);
+        editor.onDidChangeModel(refresh);
+
+        editor.addAction({
+            id: 'dnd.openEntityView',
+            label: 'Open View',
+            precondition: 'dndEntityUnderCursor',
+            contextMenuGroupId: 'navigation',
+            contextMenuOrder: 1,
+            run: () => {
+                const entity = entityAtCursor();
+                if (entity) actions.open(entity);
+            },
+        });
+    };
+
+    const startEditor = async (element: HTMLDivElement, entityActions?: EntityActions) => {
         await getMonacoInit()
         .then(() => console.log('MonacoContext: init complete'))
         .catch((e: any) => console.error('MonacoContext: init failed', e));
@@ -87,6 +133,9 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
 
         editorAppRef.current = app;
         await app.start(element);
+        const editor = app.getEditor();
+        if (editor && entityActions) registerEntityAction(editor, entityActions);
+        markSaved();
         viewModeRef.current = 'source';
         restoreScroll('source');
         if (pendingMergedRef.current !== null) await showMergedView(pendingMergedRef.current);
@@ -175,6 +224,7 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         if (!content) return { ok: false, errors: ['Nothing to save.'] };
 
         await fileContext?.saveFile({identifier: {adventure: dlsContext.adventure, world:dlsContext.world}, content: content})
+        markSaved();
         return await dlsContext.reloadWorld();
     };
 
@@ -183,14 +233,15 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
             return
 
         fileContext.loadFile(dlsContext.adventure, dlsContext.world).then(file => {
-            editorAppRef.current?.updateCode({modified:file.content})
+            // The text the file holds is the saved baseline, whenever updateCode finishes applying it.
+            Promise.resolve(editorAppRef.current?.updateCode({modified:file.content})).then(markSaved)
             if (viewModeRef.current === 'source') restoreScroll('source')
             editorAppConfig = getEditorConfig(file.content)
         });
     },[fileContext.loaded])
 
     return (
-        <MonacoContext.Provider value={{ startEditor, disposeEditor, saveFile, showMergedView, showSourceView }}>
+        <MonacoContext.Provider value={{ startEditor, hasUnsavedChanges, disposeEditor, saveFile, showMergedView, showSourceView }}>
             {children}
         </MonacoContext.Provider>
     );
