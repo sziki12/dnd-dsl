@@ -14,10 +14,14 @@ import { OBJECTIVE_STATUSES, QUEST_STATUSES } from './evaluation/dnd-dsl-status.
  * machines (see QUEST_STATUS_IMPLEMENTATION.md) and mixing their values into one enum
  * would let a Quest compare against Incomplete/Completed, which is meaningless for it.
  */
+export const BUILTIN_WORLD_NAME = '__builtin__';
+
 export const BUILTIN_SOURCE = [
-    'world "__builtin__"',
+    `world "${BUILTIN_WORLD_NAME}"`,
     `enum QuestStatus { ${QUEST_STATUSES.join(', ')} }`,
     `enum ObjectiveStatus { ${OBJECTIVE_STATUSES.join(', ')} }`,
+    // Relation types live here too, so a fact like `"Member of" faction "Guards"` links in every world.
+    'relation "Member of" from npc to faction',
 ].join('\n');
 
 export const BUILTIN_URI = 'memory://builtin/status.dnd';

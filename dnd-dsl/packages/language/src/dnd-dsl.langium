@@ -15,7 +15,8 @@ World:
     | (variables+=VariableDeclaration)+
     | (onBlocks+=OnBlock)+
     | (parties+=Party)+
-    | (factions+=Faction)+)*
+    | (factions+=Faction)+
+    | (relationTypes+=RelationType)+)*
   | isReference?='reference' 'world' name=STRING (script=CodeBlock)?;
 
 Enum:
@@ -27,7 +28,8 @@ Npc:
     'npc' name=STRING
     (Description)?
     (variables+=VariableDeclaration)*
-    (onBlocks+=OnBlock)*;
+    (onBlocks+=OnBlock)*
+    (relations+=Relation)*;
 
 Party:
     'party' name=STRING
@@ -39,7 +41,30 @@ Faction:
     'faction' name=STRING
     (Description)?
     (variables+=VariableDeclaration)*
+    (onBlocks+=OnBlock)*
+    (relations+=Relation)*;
+
+// A relation type: which kinds of entity it may start from and point at. Only the built-in ones exist for now
+// (see BUILTIN_SOURCE); the validator rejects a declaration in a world.
+RelationType:
+    'relation' name=STRING
+    (Description)?
+    'from' sources+=RelationKind (',' sources+=RelationKind)*
+    'to' targets+=RelationKind (',' targets+=RelationKind)*;
+
+RelationKind returns string:
+    'faction' | 'npc' | 'party' | 'location' | 'quest';
+
+// A fact, written inside the entity it starts from: `"Member of" faction "Guards"`. Its own variables and `on` blocks
+// follow it, so the host's own `let`s and `on`s must be written before its first fact.
+Relation:
+    predicate=[RelationType:STRING] target=RelationEndpoint
+    (variables+=VariableDeclaration)*
     (onBlocks+=OnBlock)*;
+
+// Literal kind-keyword references only, so `this`, variables, `world`, `enum` and `event` cannot be a fact's target.
+RelationEndpoint:
+    FactionRefItem | NpcRefItem;
 
 //Location
 Location:

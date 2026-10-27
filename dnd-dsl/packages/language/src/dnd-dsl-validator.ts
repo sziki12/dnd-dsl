@@ -52,6 +52,7 @@ import {
     type Objective,
     type Quest,
     type RefChain,
+    type Relation,
     type RemindStatement,
     type SetStatement,
     type VariableDeclaration,
@@ -63,6 +64,8 @@ import { AstUtils } from 'langium';
 import { NAMED_COLLECTION_FIELDS } from './evaluation/dnd-dsl-expression-operations.js';
 import { OBJECTIVE_STATUSES, QUEST_STATUSES, STATUS_VARIABLE } from './evaluation/dnd-dsl-status.js';
 import { isBuiltInStatus } from './builtin-status.js';
+import { BUILTIN_WORLD_NAME } from './builtin-documents.js';
+import { ENDPOINT_KIND, HOST_KIND } from './evaluation/dnd-dsl-relations.js';
 
 type NamedNode = Enum | EnumValueDecl | Event | Faction | FunctionDeclaration | Location | Npc | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
@@ -187,7 +190,8 @@ export function registerValidationChecks(services: DndDslServices) {
     const registry = services.validation.ValidationRegistry;
     const validator = services.validation.DndDslValidator;
     const checks: ValidationChecks<DndDslAstType> = {
-        World: validator.checkUniqueNames,
+        World: [validator.checkUniqueNames, validator.checkRelationTypes],
+        Relation: validator.checkRelation,
         Enum: validator.checkUniqueEnumValues,
         VariableDeclaration: [validator.checkEnumValue, validator.checkStatusDeclaration],
         SetStatement: validator.checkStatusAssignment,
@@ -221,6 +225,45 @@ export class DndDslValidator {
         this.checkUnique(world.npcs, accept, 'Npc');
         this.checkUnique(world.factions, accept, 'Faction');
         this.checkUnique(world.enums, accept, 'Enum');
+    }
+
+    /** Only the built-in relation types exist for now: a world cannot declare its own, which would also shadow a built-in one of the same name. */
+    checkRelationTypes(world: World, accept: ValidationAcceptor): void {
+        if (world.name === BUILTIN_WORLD_NAME) return;
+        for (const type of world.relationTypes) {
+            accept('error', `Relation types cannot be declared yet; only the built-in ones exist.`, { node: type, property: 'name' });
+        }
+    }
+
+    /**
+     * A fact must start from a kind its type lists in `from`, point at a kind it lists in `to`, and not repeat an
+     * earlier fact of the host. An unresolved type name is already a linking error, so it is skipped here.
+     */
+    checkRelation(fact: Relation, accept: ValidationAcceptor): void {
+        const type = fact.predicate.ref;
+        if (!type) return;
+
+        const hostKind = HOST_KIND[fact.$container.$type];
+        if (hostKind && !(type.sources as string[]).includes(hostKind)) {
+            accept('error', `'${type.name}' cannot start from a ${hostKind}; it starts from: ${type.sources.join(', ')}.`, { node: fact, property: 'predicate' });
+        }
+
+        const targetKind = ENDPOINT_KIND[fact.target.$type];
+        if (targetKind && !(type.targets as string[]).includes(targetKind)) {
+            accept('error', `'${type.name}' cannot point at a ${targetKind}; it points at: ${type.targets.join(', ')}.`, { node: fact, property: 'target' });
+        }
+
+        const key = this.relationKey(fact);
+        const earlier = fact.$container.relations.slice(0, fact.$containerIndex ?? 0);
+        if (earlier.some(other => this.relationKey(other) === key)) {
+            accept('error', `Duplicate relation '${type.name}' to ${targetKind} "${fact.target.val.val.$refText}" in ${hostKind} "${fact.$container.name}".`, { node: fact });
+        }
+    }
+
+    /** What makes a fact the same fact: its type, the kind of its target and the target's name. */
+    private relationKey(fact: Relation): string {
+        const type = fact.predicate.ref?.name ?? fact.predicate.$refText;
+        return `${type}\u0000${ENDPOINT_KIND[fact.target.$type]}\u0000${fact.target.val.val.$refText}`;
     }
 
     checkUniqueEnumValues(e: Enum, accept: ValidationAcceptor): void {

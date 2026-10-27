@@ -9,6 +9,7 @@ import {
     isObjective,
     isParty,
     isQuest,
+    isRelation,
     isVariableDeclaration,
     isWorld,
     type ChainTail,
@@ -22,6 +23,7 @@ import {
     type Party,
     type Quest,
     type RefChain,
+    type Relation,
     type VariableDeclaration,
     type World,
 } from "../generated/ast.js";
@@ -29,10 +31,10 @@ import {
 // All Langium imports above are used only for their exported type guards / type
 // annotations — no LSP-only services are touched — so this file is safe to import
 // in both the Node.js backend and the browser frontend, same as dnd-dsl-reference.ts.
-export type OwningObject = ObjectDeclaration | Npc | Party | Faction | Location | Quest | Objective | Event | World;
+export type OwningObject = ObjectDeclaration | Npc | Party | Faction | Relation | Location | Quest | Objective | Event | World;
 
 function isOwningObject(node: AstNode): node is OwningObject {
-    return isObjectDeclaration(node) || isNpc(node) || isParty(node) || isFaction(node) || isLocation(node)
+    return isObjectDeclaration(node) || isNpc(node) || isParty(node) || isFaction(node) || isRelation(node) || isLocation(node)
         || isQuest(node) || isObjective(node) || isEvent(node) || isWorld(node);
 }
 
@@ -52,7 +54,8 @@ export function nearestOwningObject(node: AstNode): OwningObject | undefined {
 /** The object one level further out than `owner` - what `parent` refers to. Per
  *  container kind: a nested object's parent is whatever declares the variable that
  *  holds it; a sublocation's parent is its containing Location; an Objective's
- *  parent is its owning Quest; anything else (Npc, a top-level Location/Quest, an
+ *  parent is its owning Quest; a relation fact's parent is the entity it is written in;
+ *  anything else (Npc, a top-level Location/Quest, an
  *  Event, or World itself) defaults to World. */
 export function parentOwningObject(owner: OwningObject): OwningObject {
     if (isObjectDeclaration(owner)) {
@@ -66,7 +69,7 @@ export function parentOwningObject(owner: OwningObject): OwningObject {
     if (isLocation(owner) && isLocation(owner.$container)) {
         return owner.$container;
     }
-    if (isObjective(owner)) {
+    if (isObjective(owner) || isRelation(owner)) {
         return owner.$container;
     }
     return AstUtils.getContainerOfType(owner, isWorld)!;
