@@ -24,6 +24,7 @@ import {
     isVariableRef,
     isVariableRefItem,
     isWorld,
+    isWorldRefItem,
     type Location,
     type Objective,
     type Quest,
@@ -104,7 +105,7 @@ export class DndScopeProvider extends DefaultScopeProvider
                 isRefChain(item.$container) &&
                 item.$containerProperty === "rest")
             {
-                return this.getMemberScope(item.$container, item.$containerIndex ?? 0);
+                return this.getMemberScope(item.$container, item.$containerIndex ?? 0, context);
             }
 
             // `... [i] . b` - what follows an index is whatever item the index picks at run
@@ -177,7 +178,7 @@ export class DndScopeProvider extends DefaultScopeProvider
      * MVP scope: Location.variables, and the variables of an `object`-valued declaration.
      * QuestRefItem / EventRefItem synthetic members (status, fired) land here later.
      */
-    private getMemberScope(chain: RefChain, restIndex: number): Scope
+    private getMemberScope(chain: RefChain, restIndex: number, context: ReferenceInfo): Scope
     {
         const prev = restIndex === 0 ? chainHead(chain) : chain.rest[restIndex - 1];
 
@@ -199,6 +200,10 @@ export class DndScopeProvider extends DefaultScopeProvider
         else if (isNpcRefItem(prev))
         {
             members = prev.val.val.ref?.variables;
+        }
+        else if (isWorldRefItem(prev))
+        {
+            members = this.worldVariables(prev, context);
         }
         else if (isVariableRefItem(prev))
         {
@@ -246,6 +251,23 @@ export class DndScopeProvider extends DefaultScopeProvider
         return new MapScope(
             stream(members).map(d => this.descriptions.createDescription(d, d.target ?? d.name ?? ""))
         );
+    }
+
+    /**
+     * The variables declared directly on the world a `world` head names: the enclosing world, or, in a
+     * `reference world` script (which declares none of its own), the loaded world of that name.
+     */
+    private worldVariables(head: AstNode, context: ReferenceInfo): VariableDeclaration[] | undefined
+    {
+        const own = AstUtils.getContainerOfType(head, isWorld);
+        if (!own || !own.isReference) return own?.variables;
+
+        for (const description of this.getGlobalScope("World", context).getElements(own.name))
+        {
+            const node = description.node;
+            if (isWorld(node) && !node.isReference) return node.variables;
+        }
+        return undefined;
     }
 
     /** `chain` is a variable's own value expression. If it's a bare `location "X"` /
