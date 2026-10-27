@@ -20,6 +20,7 @@ import {
   statePathToNode,
   type StatePath,
 } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { FiredReminder, ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 import { predefinedFunctions, predefinedFunctionsAsMap } from '../predefined/predefined-functions.js';
@@ -153,11 +154,20 @@ export class WorldStateService {
     return { codeBlock: errors.length ? undefined : scriptWorld?.script, errors };
   }
 
-  getRenderedWorld(): StateSourceView  {
-    if (!this._model) return { text: '', changes: [], stale: [] } ;
-    const modelText = stringifyNode(this._model);
-    const overlayText = JSON.stringify(this._overlay, null, 2);
-    return renderSourceWithState(this._model, this._worldSource, this._overlay);
+  getRenderedWorld(): StateSourceView {
+    if (!this._model) return { text: '', changes: [], stale: [] };
+    const state = this.getWorldState();
+    return renderSourceWithState(this._model, this._worldSource, this._overlay, path => this.computedValueAt(state, path));
+  }
+
+  /** The current value of a computed variable, read off the served state; undefined when it cannot be evaluated. */
+  private computedValueAt(state: any, path: StatePath): unknown {
+    try {
+      const node = statePathToNode(state, path);
+      return evaluateSerializedExpression(state, isVariableDeclaration(node) ? node.value : node);
+    } catch {
+      return undefined;
+    }
   }
 
   /** 

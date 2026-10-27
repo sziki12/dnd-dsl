@@ -1,5 +1,7 @@
-import React, { useContext, useEffect, useRef, useState } from 'react';
-import { MonacoContext } from '../contexts/MonacoContext';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { MonacoContext, type EntityActions } from '../contexts/MonacoContext';
+import { collectEntityNames, entityAt, entityRoute } from '../common/entity-at-cursor';
 import { FileContext } from '../contexts/FileContext';
 import { DslContext } from '../contexts/DslContext';
 import { BackendURL } from '../contexts/BackendContext';
@@ -11,6 +13,24 @@ export const DslEditor = () => {
   const monacoContext = useContext(MonacoContext);
   const fileContext = useContext(FileContext);
   const dslContext = useContext(DslContext);
+  const navigate = useNavigate();
+
+  // The right-click "Open View" item is registered once per editor start, so it reads the current
+  // names and handlers through a ref instead of the values of the render it was created in.
+  const entityNames = useMemo(() => collectEntityNames(dslContext.worldState), [dslContext.worldState]);
+  const latest = useRef({ entityNames, navigate, hasUnsavedChanges: monacoContext.hasUnsavedChanges });
+  useEffect(() => {
+    latest.current = { entityNames, navigate, hasUnsavedChanges: monacoContext.hasUnsavedChanges };
+  });
+  const entityActions = useRef<EntityActions>({
+    find: (line, column) => entityAt(line, column, latest.current.entityNames),
+    open: entity => {
+      // Leaving the page disposes the editor, so unsaved text would be lost.
+      if (latest.current.hasUnsavedChanges() && !window.confirm('The editor has unsaved changes. Open the view and discard them?')) return;
+      latest.current.navigate(entityRoute(entity));
+    },
+  }).current;
+
   // Swaps the editor to a read-only model of the world with its runtime state merged in
   // (GET /world/render). The source model stays alive, so toggling back keeps its cursor,
   // undo stack and unsaved edits; each mode remembers its own scroll position.
@@ -73,7 +93,7 @@ export const DslEditor = () => {
       return
 
     if (containerRef.current) {
-        monacoContext.startEditor(containerRef.current);
+        monacoContext.startEditor(containerRef.current, entityActions);
     }
     console.log('Editor handleKeyDown registered');
     const handleKeyDown = (e: KeyboardEvent) => {

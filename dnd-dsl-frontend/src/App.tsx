@@ -9,6 +9,7 @@ import { ContextWrapper } from './contexts/ContextWrapper';
 import type { JSX, ReactNode } from 'react';
 import PageWrapper from './common/PageWrapper';
 import ReminderToast from './common/ReminderToast';
+import CommandErrorToast from './common/CommandErrorToast';
 
 //import '@xyflow/react/dist/style.css';
 
@@ -47,6 +48,7 @@ function App() {
         </Routes>
       </BrowserRouter>
       <ReminderToast />
+      <CommandErrorToast />
     </ContextWrapper>
   );
 }

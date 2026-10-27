@@ -1,4 +1,4 @@
-import { createContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useEffect, useState } from 'react';
 import { BackendURL } from './BackendContext';
 import type { Command, CommandResponse, ScriptEvent } from '@dnd-language/evaluation/dnd-dsl-commands';
 import type { SerializedAstNode, SerializedModel, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types';
@@ -23,6 +23,9 @@ type DslContext = {
   canRedo: boolean;
   firedReminders: FiredReminder[];
   clearFiredReminder: (id: string) => void;
+  /** Why the last command, undo or redo was rejected, or null. The world state is left as it was. */
+  commandError: string | null;
+  clearCommandError: () => void;
   /** Whether THIS page currently holds control of the shared undo/redo history. 
    *  Other connected pages can still execute commands regardless of this. */
   isController: boolean;
@@ -40,6 +43,14 @@ export type ScriptRunResult = {
 
 export const DslContext = createContext<DslContext>({} as DslContext);
 
+/** The backend's rejection text: Nest's `message` is a string, or a list for validation errors. */
+function describeCommandError(body: unknown, status: number): string {
+  const message = (body as { message?: unknown } | null)?.message;
+  if (typeof message === 'string') return message;
+  if (Array.isArray(message)) return message.join(', ');
+  return message === undefined ? `Request failed (${status})` : JSON.stringify(message);
+}
+
 export function DslContextNode({ children }: { children: React.ReactNode }) {
   const [world, setWorld] = useState('World');
   const [adventure, setAdventure] = useState('Adventure');
@@ -47,6 +58,8 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [firedReminders, setFiredReminders] = useState<FiredReminder[]>([]);
+  const [commandError, setCommandError] = useState<string | null>(null);
+  const clearCommandError = useCallback(() => setCommandError(null), []);
 
   const stateEndpoint = `${BackendURL}`;
 
@@ -103,14 +116,30 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   // one from this page's own request; reloadWorld catches up on anything missed while this page was disconnected.
   const { isController, controllerName, claimControl, clientId } = useStateSync(applyCommandResponse, reloadWorld);
 
-  const execute = async (cmd: Command): Promise<void> => {
-    const response = await fetch(`${BackendURL}/command/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cmd),
-    });
-    applyCommandResponse(await response.json());
+  // A rejected command (HTTP 400) carries `{ message }` instead of a CommandResponse. Applying it would
+  // replace the world state with undefined and blank every page, so it is shown as an error instead
+  // and the last good state stays.
+  const sendCommand = async (path: string, init: RequestInit): Promise<void> => {
+    let response: Response;
+    try {
+      response = await fetch(`${BackendURL}/command/${path}`, { method: 'POST', ...init });
+    } catch {
+      setCommandError('Could not reach the server.');
+      return;
+    }
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      setCommandError(describeCommandError(body, response.status));
+      return;
+    }
+    setCommandError(null);
+    applyCommandResponse(body);
   };
+
+  const execute = (cmd: Command): Promise<void> => sendCommand('execute', {
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cmd),
+  });
 
   const runScript = async (source: string): Promise<ScriptRunResult> => {
     const response = await fetch(`${BackendURL}/command/execute`, {
@@ -131,15 +160,9 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     };
   };
 
-  const undo = async (): Promise<void> => {
-    const response = await fetch(`${BackendURL}/command/undo`, { method: 'POST', headers: { 'X-Client-Id': clientId } });
-    applyCommandResponse(await response.json());
-  };
+  const undo = (): Promise<void> => sendCommand('undo', { headers: { 'X-Client-Id': clientId } });
 
-  const redo = async (): Promise<void> => {
-    const response = await fetch(`${BackendURL}/command/redo`, { method: 'POST', headers: { 'X-Client-Id': clientId } });
-    applyCommandResponse(await response.json());
-  };
+  const redo = (): Promise<void> => sendCommand('redo', { headers: { 'X-Client-Id': clientId } });
 
   const updateWorld = async (newWorld: string) => setWorld(newWorld);
   const updateAdventure = async (newAdventure: string) => setAdventure(newAdventure);
@@ -175,6 +198,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
       getByReference,
       execute, runScript, undo, redo, canUndo, canRedo,
       firedReminders, clearFiredReminder,
+      commandError, clearCommandError,
       isController, controllerName, claimControl,
     }}>
       {children}
