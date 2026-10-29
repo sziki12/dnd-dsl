@@ -53,6 +53,9 @@ import {
     Objective,
     OnBlock,
     RelationRefItem,
+    RelationVarEnd,
+    Npc,
+    Faction,
     PrintStatement,
     Quest,
     QuestStatements,
@@ -65,7 +68,7 @@ import {
 } from '@dnd-language/index.js';
 import { Injectable } from '@nestjs/common';
 import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
-import { ENDPOINT_KIND, findRelation } from '@dnd-language/evaluation/dnd-dsl-relations.js';
+import { findRelation, queryEnd, refName, relationTarget } from '@dnd-language/evaluation/dnd-dsl-relations.js';
 import { chainHead, encodeStatePath, nodeToStatePath, parentOwningObject, statePathToNode, unwrapExpression, type ChainHead, type OwningObject, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefined-signatures.js';
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
@@ -420,6 +423,10 @@ export class LangiumInterpreterService {
             }
         }
 
+        if (isRelationRefItem(head) && chain.rest.length === 1 && this.hasVariableEnd(head)) {
+            return this.readPath(ctx, [...this.relationFactPath(ctx, head), { kind: 'variable', target: chain.rest[0].val.val.$refText }]);
+        }
+
         // Every remaining shape ends in a VariableRefItem - either head itself
         // (a bare or location-qualified-with-rest variable chain) or the last chain.rest
         // item. Once scoping links each segment directly to its target, no per-segment
@@ -471,13 +478,119 @@ export class LangiumInterpreterService {
 
     /** Whether the fact a `relation ...` head names is written in the world. Facts are source, so the live model answers. */
     private relationExists(ctx: EvalContext, head: RelationRefItem): boolean {
-        const host = head.subject.val.val.ref;
-        const target = head.target.val.val.ref;
+        const { host, targetKind, targetName, type } = this.relationEnds(ctx, head);
+        return findRelation(ctx.model, host, type, targetKind, targetName) !== undefined;
+    }
+
+    /** A head with a variable end: the member after it is read off the fact the variables pick, so its address is only known now. */
+    private hasVariableEnd(head: RelationRefItem): boolean {
+        return head.subject.$type === 'RelationVarEnd' || head.target.$type === 'RelationVarEnd';
+    }
+
+    /** The two ends of a closed query, each resolved to a node in the live model, and the relation type's name. */
+    private relationEnds(ctx: EvalContext, head: RelationRefItem) {
         const type = head.predicate.ref;
-        if (!host) throw new Error(`Unresolved ref: ${head.subject.val.val.$refText}`);
-        if (!target) throw new Error(`Unresolved ref: ${head.target.val.val.$refText}`);
         if (!type) throw new Error(`Unresolved relation type: ${head.predicate.$refText}`);
-        return findRelation(ctx.model, host, type.name, ENDPOINT_KIND[head.target.$type], target.name) !== undefined;
+        const subject = this.resolveQueryEnd(ctx, head.subject);
+        const target = this.resolveQueryEnd(ctx, head.target);
+        if (!subject || !target) throw new Error(`A query with an open end can only be iterated with 'for'`);
+        const host = this.hostNode(ctx, subject.kind, subject.name);
+        return { host, hostKind: subject.kind, hostName: subject.name, targetKind: target.kind, targetName: target.name, type: type.name };
+    }
+
+    private hostNode(ctx: EvalContext, kind: string, name: string): Npc | Faction {
+        const nodes: (Npc | Faction)[] | undefined = kind === 'npc' ? ctx.model?.World.npcs : kind === 'faction' ? ctx.model?.World.factions : undefined;
+        const node = nodes?.find(candidate => candidate.name === name);
+        if (!node) throw new Error(`No ${kind} named "${name}"`);
+        return node;
+    }
+
+    /**
+     *  A query end as the (kind, name) it names right now: a written name as is, a variable through what it holds.
+     *  An open end is undefined. A loop variable holds a handle to the npc or faction; an alias
+     *  (`let n = npc "X"`) is the entity its own value names.
+     **/
+    private resolveQueryEnd(ctx: EvalContext, end: RelationRefItem['subject']): { kind: string; name: string } | undefined {
+        const resolved = queryEnd(ctx.model, end);
+        if (!resolved || resolved.form === 'open') return undefined;
+        if (resolved.form === 'named') return { kind: resolved.kind, name: resolved.name };
+
+        const decl = (end as RelationVarEnd).var.val.ref;
+        if (!decl) throw new Error(`Unresolved variable: ${resolved.variable}`);
+        const held = ctx.scope[decl.target ?? decl.name ?? ''];
+        if (isLoopEntityHandle(held)) {
+            const only = held.path.length === 1 ? held.path[0] : undefined;
+            if (only && only.kind === resolved.kind && 'name' in only) return { kind: resolved.kind, name: only.name };
+            throw new Error(`'${resolved.variable}' does not hold a ${resolved.kind}`);
+        }
+        const value = unwrapExpression(decl.value);
+        const named = isRefChain(value) && value.rest.length === 0 ? chainHead(value) : undefined;
+        if ((isNpcRefItem(named) || isFactionRefItem(named)) && named.val.val.ref && queryEnd(ctx.model, named)?.kind === resolved.kind) {
+            return { kind: resolved.kind, name: named.val.val.ref.name };
+        }
+        throw new Error(`'${resolved.variable}' does not hold a ${resolved.kind}`);
+    }
+
+    /** The address of the fact a closed query with a variable end picks; it has to be written, since its variables live on it. */
+    private relationFactPath(ctx: EvalContext, head: RelationRefItem): StatePath {
+        const { host, hostKind, hostName, targetKind, targetName, type } = this.relationEnds(ctx, head);
+        if (!findRelation(ctx.model, host, type, targetKind, targetName)) {
+            throw new Error(`No "${type}" relation from ${hostKind} "${hostName}" to ${targetKind} "${targetName}"`);
+        }
+        return [{ kind: hostKind as 'npc' | 'faction', name: hostName }, { kind: 'relation', predicate: type, targetKind, targetName }];
+    }
+
+    /**
+     *  The name of the entity a printed expression is, when it is nothing but an entity: a written `npc "X"`, `this`,
+     *  `parent`, a loop variable bound to one, or a variable whose value is one of those. Anything with a member,
+     *  field or index after it is a value, not the entity, and has no name to show.
+     **/
+    private entityNameOf(ctx: EvalContext, expression: Expression, depth = 0): string | undefined {
+        const chain = unwrapExpression(expression);
+        if (!isRefChain(chain) || chain.rest.length > 0 || chain.field || chain.indexes.length > 0 || chain.next || depth > 4) return undefined;
+        const head = chainHead(chain);
+        if (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head)) {
+            return head.val.val.ref?.name;
+        }
+        const named = (node: AstNode | undefined) => node && !isEvent(node) ? (node as { name?: string }).name : undefined;
+        if (isThisRefItem(head)) return named(ctx.thisEntity);
+        if (isParentRefItem(head)) return named(ctx.parentEntity);
+        if (!isVariableRefItem(head)) return undefined;
+
+        const decl = head.val.val.ref;
+        if (!decl) return undefined;
+        const held = ctx.scope[decl.target ?? decl.name ?? ''];
+        if (isLoopEntityHandle(held)) return named(ctx.model ? statePathToNode(ctx.model, held.path) as AstNode | undefined : undefined);
+        return decl.value ? this.entityNameOf(ctx, decl.value, depth + 1) : undefined;
+    }
+
+    /** What `for x in relation ...` iterates: the npcs or factions on the open side, as entity handles. */
+    private relationMatches(ctx: EvalContext, head: RelationRefItem): LoopEntityHandle[] {
+        const type = head.predicate.ref;
+        if (!type) throw new Error(`Unresolved relation type: ${head.predicate.$refText}`);
+        const subject = this.resolveQueryEnd(ctx, head.subject);
+        const target = this.resolveQueryEnd(ctx, head.target);
+        const nodes: AstNode[] = [];
+
+        if (subject && !target) {
+            const host = this.hostNode(ctx, subject.kind, subject.name);
+            for (const fact of host.relations) {
+                const to = relationTarget(ctx.model, fact);
+                if (refName(ctx.model, fact.predicate) === type.name && to?.kind === queryEnd(ctx.model, head.target)?.kind) {
+                    const node = (fact.target as { val: { val: { ref?: AstNode } } }).val.val.ref;
+                    if (node) nodes.push(node);
+                }
+            }
+        } else if (target && !subject) {
+            const kind = queryEnd(ctx.model, head.subject)!.kind;
+            const hosts: (Npc | Faction)[] = (kind === 'npc' ? ctx.model?.World.npcs : ctx.model?.World.factions) ?? [];
+            for (const host of hosts) {
+                if (findRelation(ctx.model, host, type.name, target.kind, target.name)) nodes.push(host);
+            }
+        } else {
+            throw new Error(`'for ... in' over a relation needs exactly one open end`);
+        }
+        return nodes.map(node => this.makeEntityHandle(node)).filter((handle): handle is LoopEntityHandle => handle !== undefined);
     }
 
     /** A persistent read that sees this run's own not-yet-flushed writes: the newest
@@ -660,7 +773,9 @@ export class LangiumInterpreterService {
             }
             case 'PrintStatement': {
                 const c = code as unknown as PrintStatement;
-                const value = this.evaluateExpression(ctx, c.value);
+                const evaluated = this.evaluateExpression(ctx, c.value);
+                const name = typeof evaluated === 'object' && evaluated !== null && !Array.isArray(evaluated) ? this.entityNameOf(ctx, c.value) : undefined;
+                const value = name === undefined ? evaluated : { name, ...evaluated };
                 console.log('[script print]', value);
                 ctx.events?.push({ kind: 'print', value, depth: this.cascadeDepth(ctx) });
                 break;
@@ -973,6 +1088,9 @@ export class LangiumInterpreterService {
             if (!path) throw new Error(`'parent' has no persistent address here`);
             return path;
         }
+        if (isRelationRefItem(head) && chain.rest.length === 1 && this.hasVariableEnd(head)) {
+            return [...this.relationFactPath(ctx, head), { kind: 'variable', target: chain.rest[0].val.val.$refText }];
+        }
         return this.resolveStaticRefChainToStatePath(chain);
     }
 
@@ -1026,6 +1144,8 @@ export class LangiumInterpreterService {
 
     /** What a `for` iterates: a collection field straight off its head, or any chain that evaluates to a list. */
     private iterationValues(ctx: EvalContext, source: RefChain): unknown[] {
+        const head = chainHead(source);
+        if (isRelationRefItem(head)) return this.relationMatches(ctx, head);
         if (source.field && source.indexes.length === 0 && !source.next) return this.resolveFieldValue(ctx, source) as unknown[];
         return this.resolveListSource(ctx, source);
     }

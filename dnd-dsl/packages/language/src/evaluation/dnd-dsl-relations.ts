@@ -39,6 +39,24 @@ export function relationTarget(model: Model | undefined, fact: Relation): { kind
     return kind && name !== undefined ? { kind, name } : undefined;
 }
 
+/** One end of a `relation ...` query: a written name, a variable that is bound when the script runs, or an open end. */
+export type QueryEnd =
+    | { form: 'named'; kind: string; name: string }
+    | { form: 'variable'; kind: string; variable: string }
+    | { form: 'open'; kind: string };
+
+type AnyQueryEnd = { $type?: string; kind?: string; var?: { val?: { $refText?: string } }; val?: { val?: AnyRef } } | undefined;
+
+/** A query end in either shape; undefined when a written name does not resolve. */
+export function queryEnd(model: Model | undefined, end: AnyQueryEnd): QueryEnd | undefined {
+    if (!end) return undefined;
+    if (end.$type === 'RelationAnyEnd') return { form: 'open', kind: end.kind! };
+    if (end.$type === 'RelationVarEnd') return { form: 'variable', kind: end.kind!, variable: end.var?.val?.$refText ?? '' };
+    const kind = ENDPOINT_KIND[end.$type!];
+    const name = refName(model, end.val?.val);
+    return kind && name !== undefined ? { form: 'named', kind, name } : undefined;
+}
+
 /** The fact on `host` with this type and target, if it is written there. */
 export function findRelation(model: Model | undefined, host: FactHost, predicate: string, targetKind: string, targetName: string): Relation | undefined {
     return host.relations?.find(fact => {

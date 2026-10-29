@@ -352,8 +352,24 @@ NpcRefItem:
 FactionRefItem:
     isFaction='faction' val=FactionRef;
 // `relation npc "Ann" "Member of" faction "Guards"`: whether that fact is written, or with `. Var` one of its variables.
+// An end may also be a variable (`npc n`, a `for` loop variable) or a bare kind (`npc`) that leaves that side open:
+// `for f in relation npc "Ann" "Member of" faction do` iterates what Ann is a member of.
+// The subject's three forms are alternatives here, not inside one sub-rule: `npc "Member of" faction` only parses as an
+// open subject once the parser can see the kind keyword after the string, and a sub-rule's choice cannot see past its end.
 RelationRefItem:
-    isRelation='relation' subject=RelationEndpoint predicate=[RelationType:STRING] target=RelationEndpoint;
+    isRelation='relation' (
+          subject=RelationEndpoint predicate=[RelationType:STRING] target=RelationQueryEnd
+        | subject=RelationVarEnd predicate=[RelationType:STRING] target=RelationQueryEnd
+        | subject=RelationAnyEnd predicate=[RelationType:STRING] target=RelationQueryEnd
+    );
+RelationQueryEnd:
+    RelationEndpoint | RelationVarEnd | RelationAnyEnd;
+RelationVarEnd:
+    kind=RelationEndKind var=VariableRef;
+RelationAnyEnd:
+    kind=RelationEndKind;
+RelationEndKind returns string:
+    'npc' | 'faction';
 // Only one World per document, so a bare keyword is enough - no cross-reference to
 // resolve. Exists so `world . npcs` etc. can be written as a CollectionRef head.
 WorldRefItem:

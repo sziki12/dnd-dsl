@@ -93,11 +93,14 @@ export function resolveSerializedRefChain(model: SerializedModel, chain: Seriali
 export function evaluateRelationQuery(model: SerializedModel, chain: SerializedRefChain): boolean | undefined {
     const head = chainHead(chain) as unknown as {
         $type: string;
-        subject: { $type: string; val: { val: SerializedRef } };
+        subject: { $type: string; val?: { val: SerializedRef } };
         predicate: SerializedRef;
-        target: { $type: string; val: { val: SerializedRef } };
+        target: { $type: string; val?: { val: SerializedRef } };
     };
     if (head.$type !== 'RelationRefItem' || chain.rest.length > 0) return undefined;
+
+    // A variable or open end is only bound while a script runs, which this pure evaluator never sees.
+    if (!head.subject.val || !head.target.val) return undefined;
 
     const live = model as unknown as Model;
     const host = parseReferenceFromSerializedModel<SerializedNpc | SerializedFaction>(model, head.subject.val.val);

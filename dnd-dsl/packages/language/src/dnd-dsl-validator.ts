@@ -26,6 +26,8 @@ import {
     isQuest,
     isQuestRefItem,
     isRefChain,
+    isRelationRefItem,
+    isRelationVarEnd,
     isSetStatement,
     isStringVal,
     isThisRefItem,
@@ -54,6 +56,7 @@ import {
     type RefChain,
     type Relation,
     type RelationRefItem,
+    type RelationVarEnd,
     type RemindStatement,
     type SetStatement,
     type VariableDeclaration,
@@ -66,7 +69,7 @@ import { NAMED_COLLECTION_FIELDS } from './evaluation/dnd-dsl-expression-operati
 import { OBJECTIVE_STATUSES, QUEST_STATUSES, STATUS_VARIABLE } from './evaluation/dnd-dsl-status.js';
 import { isBuiltInStatus } from './builtin-status.js';
 import { BUILTIN_WORLD_NAME } from './builtin-documents.js';
-import { ENDPOINT_KIND, HOST_KIND } from './evaluation/dnd-dsl-relations.js';
+import { ENDPOINT_KIND, HOST_KIND, queryEnd } from './evaluation/dnd-dsl-relations.js';
 
 type NamedNode = State | StateValueDecl | Event | Faction | FunctionDeclaration | Location | Npc | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
@@ -165,11 +168,21 @@ export function collectionHeadKind(head: ChainHead): ObjectKind | undefined {
         const decl = head.val.val.ref;
         const owner = decl?.$container;
         if (decl && isForStatement(owner) && owner.loopVar === decl) {
+            const sourceHead = chainHead(owner.source);
+            if (isRelationRefItem(sourceHead)) {
+                const kind = openEndKind(sourceHead);
+                return kind === 'npc' ? ObjectKind.Npc : kind === 'faction' ? ObjectKind.Faction : undefined;
+            }
             const last = lastChainSegment(owner.source);
             if (last.field && last.indexes.length === 0) return ENTITY_COLLECTION_KIND[last.field];
         }
     }
     return undefined;
+}
+
+/** The kind a `for` over a relation binds its variable to: whichever end of the query is left open. */
+function openEndKind(query: RelationRefItem): string | undefined {
+    return [queryEnd(undefined, query.subject), queryEnd(undefined, query.target)].find(end => end?.form === 'open')?.kind;
 }
 
 function owningObjectKind(owner: OwningObject | undefined): ObjectKind | undefined {
@@ -264,18 +277,60 @@ export class DndDslValidator {
 
     /** `relation npc "A" "T" faction "F"` is a question, so a fact that is not written is fine; only a kind the type cannot join is wrong. */
     checkRelationQuery(query: RelationRefItem, accept: ValidationAcceptor): void {
-        const type = query.predicate.ref;
+        const subject = queryEnd(undefined, query.subject);
+        const target = queryEnd(undefined, query.target);
+        const open = [subject, target].filter(end => end?.form === 'open').length;
+        if (open === 2) {
+            accept('error', `Name at least one end of the query; leaving both open would list every fact.`, { node: query });
+        } else if (open === 1 && !this.isIterationSource(query)) {
+            accept('error', `A query with an open end lists several things, so it can only be the source of a 'for ... in'.`, { node: query });
+        }
+
+        for (const [end, property] of [[query.subject, 'subject'], [query.target, 'target']] as const) {
+            if (isRelationVarEnd(end)) this.checkQueryVariable(end, property, accept);
+        }
+
+        const type = query.predicate?.ref;
         if (!type) return;
 
-        const subjectKind = ENDPOINT_KIND[query.subject.$type];
-        if (subjectKind && !(type.sources as string[]).includes(subjectKind)) {
-            accept('error', `'${type.name}' cannot start from a ${subjectKind}; it starts from: ${type.sources.join(', ')}.`, { node: query, property: 'subject' });
+        if (subject && !(type.sources as string[]).includes(subject.kind)) {
+            accept('error', `'${type.name}' cannot start from a ${subject.kind}; it starts from: ${type.sources.join(', ')}.`, { node: query, property: 'subject' });
         }
 
-        const targetKind = ENDPOINT_KIND[query.target.$type];
-        if (targetKind && !(type.targets as string[]).includes(targetKind)) {
-            accept('error', `'${type.name}' cannot point at a ${targetKind}; it points at: ${type.targets.join(', ')}.`, { node: query, property: 'target' });
+        if (target && !(type.targets as string[]).includes(target.kind)) {
+            accept('error', `'${type.name}' cannot point at a ${target.kind}; it points at: ${type.targets.join(', ')}.`, { node: query, property: 'target' });
         }
+    }
+
+    /** The query is, on its own, what a `for` iterates: no member or index after it. */
+    private isIterationSource(query: RelationRefItem): boolean {
+        const chain = query.$container;
+        return isRefChain(chain) && isForStatement(chain.$container) && chain.$containerProperty === 'source'
+            && chain.rest.length === 0 && !chain.field && chain.indexes.length === 0;
+    }
+
+    /** `npc n` needs `n` to hold an npc when the script runs; a handler's target is fixed when the world is parsed, so it cannot name one. */
+    private checkQueryVariable(end: RelationVarEnd, property: 'subject' | 'target', accept: ValidationAcceptor): void {
+        const query = end.$container;
+        const occurrence = AstUtils.getContainerOfType(query, isChangeOccurrence);
+        if (occurrence && AstUtils.streamAllContents(occurrence.target).some(node => node === query)) {
+            accept('error', `A handler's target is fixed when the world is parsed, so it cannot name '${end.var.val.$refText}'.`, { node: query, property });
+            return;
+        }
+        const decl = end.var.val.ref;
+        const loop = decl && isForStatement(decl.$container) && decl.$container.loopVar === decl ? decl.$container : undefined;
+        const held = loop && this.loopElementKind(loop);
+        if (held && held !== end.kind) {
+            accept('error', `'${end.var.val.$refText}' holds a ${held}, not a ${end.kind}.`, { node: end });
+        }
+    }
+
+    /** What a `for` loop variable is bound to, when the source says: the open end of a relation query, or a collection of one kind. */
+    private loopElementKind(loop: ForStatement): string | undefined {
+        const head = chainHead(loop.source);
+        if (isRelationRefItem(head)) return openEndKind(head);
+        const kinds: Record<string, string> = { npcs: 'npc', factions: 'faction' };
+        return loop.source.field ? kinds[loop.source.field] : undefined;
     }
 
     /** What makes a fact the same fact: its type, the kind of its target and the target's name. */
@@ -414,6 +469,13 @@ export class DndDslValidator {
     }
 
     checkForSource(stmt: ForStatement, accept: ValidationAcceptor): void {
+        const sourceHead = chainHead(stmt.source);
+        if (isRelationRefItem(sourceHead)) {
+            if (this.loopElementKind(stmt) === undefined) {
+                accept('error', `'for ... in' over a relation needs one end left open, e.g. relation npc "Member of" faction "Guards".`, { node: stmt, property: 'source' });
+            }
+            return;
+        }
         const last = lastChainSegment(stmt.source);
         if (isChainTail(last)) {
             // What the continuation hangs off is only known when the script runs, so only the shape is checked.

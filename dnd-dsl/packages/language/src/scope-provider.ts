@@ -211,11 +211,15 @@ export class DndScopeProvider extends DefaultScopeProvider
         else if (isRelationRefItem(prev))
         {
             // `relation npc "Ann" "Member of" faction "Guards" . Standing` -> that fact's own variables, if it is written
-            const host = prev.subject.val.val.ref;
+            const { subject, target } = prev;
+            // An end that is a variable is only bound when the script runs, so which fact it is is unknown here:
+            // any name links and the interpreter reads it off the real fact.
+            if (subject.$type === 'RelationVarEnd' || target.$type === 'RelationVarEnd') return this.dynamicMemberScope(chain);
+            const host = isNpcRefItem(subject) || isFactionRefItem(subject) ? subject.val.val.ref : undefined;
+            const targetNode = isNpcRefItem(target) || isFactionRefItem(target) ? target.val.val.ref : undefined;
             const type = prev.predicate.ref;
-            const target = prev.target.val.val.ref;
-            const kind = ENDPOINT_KIND[prev.target.$type];
-            members = host && type && target && kind ? findRelation(undefined, host, type.name, kind, target.name)?.variables : undefined;
+            const kind = ENDPOINT_KIND[target.$type];
+            members = host && type && targetNode && kind ? findRelation(undefined, host, type.name, kind, targetNode.name)?.variables : undefined;
         }
         else if (isWorldRefItem(prev))
         {

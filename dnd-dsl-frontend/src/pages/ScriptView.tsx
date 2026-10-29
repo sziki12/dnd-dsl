@@ -298,12 +298,27 @@ function buildEventTree(events: ScriptEvent[]): EventNode[] {
  *  cascade, expanded by default. */
 function EventRow({ node }: { node: EventNode }) {
   const [expanded, setExpanded] = useState(true);
+  const [pretty, setPretty] = useState(false);
 
   if (node.kind === 'print') {
+    const expandable = typeof node.value === 'object' && node.value !== null && Object.keys(node.value).length > 0;
     return (
       <div>
-        <span style={{ color: 'var(--fg-secondary)' }}>print </span>
-        <span className="tok-number">{JSON.stringify(node.value)}</span>
+        <div
+          onClick={() => expandable && setPretty(v => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: expandable ? 'pointer' : 'default' }}
+        >
+          <span style={{ color: 'var(--fg-secondary)', fontSize: 10, width: 10, display: 'inline-block' }}>
+            {expandable ? (pretty ? '▾' : '▸') : ''}
+          </span>
+          <span style={{ color: 'var(--fg-secondary)' }}>print </span>
+          {!pretty && <span className="tok-number">{JSON.stringify(node.value)}</span>}
+        </div>
+        {pretty && (
+          <pre className="tok-number" style={{ margin: '2px 0 4px 14px', fontFamily: 'inherit', fontSize: 'inherit' }}>
+            {JSON.stringify(node.value, null, 2)}
+          </pre>
+        )}
       </div>
     );
   }

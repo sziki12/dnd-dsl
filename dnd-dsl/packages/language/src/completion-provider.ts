@@ -46,6 +46,8 @@ const ENTRY_SLOT = /(?:^|[^\w"])entry[ \t]+"([^"\n]*)$/;
  */
 const FACT_SLOT = /^[ \t]*"([^"\n]*)$/;
 const QUERY_SLOT = /\brelation[ \t]+(npc|faction)[ \t]+"[^"\n]*"[ \t]+("?)([^"\n]*)$/;
+// `relation npc "Mem`: the string is a name, or the relation type of an open subject.
+const OPEN_QUERY_SLOT = /\brelation[ \t]+(npc|faction)[ \t]+"([^"\n]*)$/;
 
 export class DndCompletionProvider extends DefaultCompletionProvider {
     //We would like completion for:
@@ -317,11 +319,16 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         let hasOpenQuote: boolean;
 
         const query = QUERY_SLOT.exec(line);
-        const fact = query ? undefined : FACT_SLOT.exec(line);
+        const open = query ? undefined : OPEN_QUERY_SLOT.exec(line);
+        const fact = query || open ? undefined : FACT_SLOT.exec(line);
         if (query) {
             hostKind = query[1];
             hasOpenQuote = query[2] === '"';
             partial = query[3];
+        } else if (open) {
+            hostKind = open[1];
+            partial = open[2];
+            hasOpenQuote = true;
         } else if (fact) {
             partial = fact[1];
             hasOpenQuote = true;
@@ -338,7 +345,8 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             if (type && hostKind && !(type.sources as string[]).includes(hostKind)) continue;
             names.push(description.name);
         }
-        return this.nameItems(document, params, partial, hasOpenQuote, "RelationType", names);
+        const types = this.nameItems(document, params, partial, hasOpenQuote, "RelationType", names);
+        return open ? [...types, ...this.entityNameCompletions(document, params)] : types;
     }
 
     private findByName(type: ObjectKind, name: string): AstNode | undefined {
