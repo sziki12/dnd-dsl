@@ -17,7 +17,7 @@ export function parseReferenceFromSerializedModel<T extends SerializedAstNode>(m
 
 /**
  * The name a serialized reference points at. Its own text first, because that is the only thing that names a
- * target in another document (a built-in enum or relation type: `memory://builtin/...#/World/...`), which
+ * target in another document (a built-in state or relation type: `memory://builtin/...#/World/...`), which
  * `parseReferenceFromSerializedModel` cannot walk; then the model itself, for JSON serialized without `refText`.
  */
 export function serializedRefName(model: SerializedModel, reference: SerializedRef | undefined): string | undefined {

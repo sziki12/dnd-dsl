@@ -6,8 +6,8 @@ import {
     isChainTail,
     isCodeBlock,
 
-    isEnumRefItem,
-    isEnumValueRef,
+    isStateRefItem,
+    isStateValueRef,
     isEvent,
     isFaction,
     isFactionRefItem,
@@ -38,8 +38,8 @@ import {
     type DndDslAstType,
     type ChainField,
     type ChainTail,
-    type Enum,
-    type EnumValueDecl,
+    type State,
+    type StateValueDecl,
     type Event,
     type Faction,
     type ForStatement,
@@ -68,7 +68,7 @@ import { isBuiltInStatus } from './builtin-status.js';
 import { BUILTIN_WORLD_NAME } from './builtin-documents.js';
 import { ENDPOINT_KIND, HOST_KIND } from './evaluation/dnd-dsl-relations.js';
 
-type NamedNode = Enum | EnumValueDecl | Event | Faction | FunctionDeclaration | Location | Npc | Objective | Quest;
+type NamedNode = State | StateValueDecl | Event | Faction | FunctionDeclaration | Location | Npc | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
 
 /** 
@@ -81,21 +81,21 @@ export enum ObjectKind {
     Faction = 'Faction',
     Quest = 'Quest',
     Objective = 'Objective',
-    Enum = 'Enum',
+    State = 'State',
     Exit = 'Exit',
     Event = 'Event',
     VariableDeclaration = 'VariableDeclaration',
     FunctionDeclaration = 'FunctionDeclaration',
 }
 export const COLLECTION_FIELDS: Record<ObjectKind, string[]> = {
-    [ObjectKind.World]: ['locations', 'npcs', 'factions', 'quests', 'events', 'functions', 'enums', 'variables'],
+    [ObjectKind.World]: ['locations', 'npcs', 'factions', 'quests', 'events', 'functions', 'states', 'variables'],
     [ObjectKind.Location]: ['sublocations', 'exits', 'variables'],
     [ObjectKind.Exit]: ['identifiers'],
     [ObjectKind.Quest]: ['objectives', 'variables'],
     [ObjectKind.Objective]: [],
     [ObjectKind.Npc]: ['variables'],
     [ObjectKind.Faction]: ['variables'],
-    [ObjectKind.Enum]: ['values'],
+    [ObjectKind.State]: ['values'],
     [ObjectKind.VariableDeclaration]: [],
     [ObjectKind.FunctionDeclaration]: [],
     [ObjectKind.Event]: []
@@ -109,7 +109,7 @@ export const SIMPLE_FIELDS: Record<ObjectKind, string[]> = {
     [ObjectKind.Objective]: ['name', 'description'],
     [ObjectKind.Npc]: ['name', 'description'],
     [ObjectKind.Faction]: ['name', 'description'],
-    [ObjectKind.Enum]: [],
+    [ObjectKind.State]: [],
     [ObjectKind.VariableDeclaration]: ['name', 'value'],
     [ObjectKind.FunctionDeclaration]: [],
     [ObjectKind.Event]: ['name', 'description']
@@ -155,7 +155,7 @@ export function collectionHeadKind(head: ChainHead): ObjectKind | undefined {
     if (isObjectiveRefItem(head)) return ObjectKind.Objective;
     if (isNpcRefItem(head)) return ObjectKind.Npc;
     if (isFactionRefItem(head)) return ObjectKind.Faction;
-    if (isEnumRefItem(head)) return ObjectKind.Enum;
+    if (isStateRefItem(head)) return ObjectKind.State;
     if (isThisRefItem(head)) return owningObjectKind(nearestOwningObject(head));
     if (isParentRefItem(head)) {
         const owner = nearestOwningObject(head);
@@ -194,10 +194,10 @@ export function registerValidationChecks(services: DndDslServices) {
         World: [validator.checkUniqueNames, validator.checkRelationTypes],
         Relation: validator.checkRelation,
         RelationRefItem: validator.checkRelationQuery,
-        Enum: validator.checkUniqueEnumValues,
-        VariableDeclaration: [validator.checkEnumValue, validator.checkStatusDeclaration],
+        State: validator.checkUniqueStateValues,
+        VariableDeclaration: [validator.checkStateValue, validator.checkStatusDeclaration],
         SetStatement: validator.checkStatusAssignment,
-        IntToBoolExpression: validator.checkEnumComparison,
+        IntToBoolExpression: validator.checkStateComparison,
         RemindStatement: validator.checkRemindPlacement,
         RefChain: [validator.checkRefChainField, validator.checkRefChainIndexes],
         ChainTail: validator.checkChainTail,
@@ -226,7 +226,7 @@ export class DndDslValidator {
         this.checkUnique(world.functions, accept, 'Function');
         this.checkUnique(world.npcs, accept, 'Npc');
         this.checkUnique(world.factions, accept, 'Faction');
-        this.checkUnique(world.enums, accept, 'Enum');
+        this.checkUnique(world.states, accept, 'State');
     }
 
     /** Only the built-in relation types exist for now: a world cannot declare its own, which would also shadow a built-in one of the same name. */
@@ -284,8 +284,8 @@ export class DndDslValidator {
         return `${type}\u0000${ENDPOINT_KIND[fact.target.$type]}\u0000${fact.target.val.val.$refText}`;
     }
 
-    checkUniqueEnumValues(e: Enum, accept: ValidationAcceptor): void {
-        this.checkUnique(e.values, accept, 'enum value');
+    checkUniqueStateValues(e: State, accept: ValidationAcceptor): void {
+        this.checkUnique(e.values, accept, 'state value');
     }
 
     checkStatusDeclaration(decl: VariableDeclaration, accept: ValidationAcceptor): void {
@@ -294,7 +294,7 @@ export class DndDslValidator {
         accept('error', `'${STATUS_VARIABLE}' is built into every quest and objective and cannot be declared again.`, { node: decl, property: 'target' });
     }
 
-    /** `set quest "X" . Status = "Bogus"` is caught here when the value is a literal or an enum value; any other expression is checked when it runs. */
+    /** `set quest "X" . Status = "Bogus"` is caught here when the value is a literal or a state value; any other expression is checked when it runs. */
     checkStatusAssignment(stmt: SetStatement, accept: ValidationAcceptor): void {
         const chain = stmt.target;
         const tail = chain.rest.length > 0 ? chain.rest[chain.rest.length - 1] : chainHead(chain);
@@ -305,59 +305,59 @@ export class DndDslValidator {
         const allowed: readonly string[] = owner === 'quest' ? QUEST_STATUSES : OBJECTIVE_STATUSES;
         const value = unwrapExpression(stmt.value);
         const given = isStringVal(value) ? value.val
-            : isEnumValueRef(value) ? (value.value.ref?.name ?? value.value.$refText)
+            : isStateValueRef(value) ? (value.value.ref?.name ?? value.value.$refText)
             : undefined;
         if (given === undefined || allowed.includes(given)) return;
         accept('error', `'${given}' is not a ${owner} status. Use one of: ${allowed.join(', ')}.`, { node: stmt, property: 'value' });
     }
 
-    checkEnumValue(decl: VariableDeclaration, accept: ValidationAcceptor): void {
-        const enumDecl = decl.enumType?.ref;
-        if (!enumDecl || !decl.value) return;
+    checkStateValue(decl: VariableDeclaration, accept: ValidationAcceptor): void {
+        const stateDecl = decl.stateType?.ref;
+        if (!stateDecl || !decl.value) return;
         const value = unwrapExpression(decl.value);
 
         if (decl.isList) {
             if (isListLiteral(value)) {
-                for (const element of value.elements) this.checkEnumElement(element, enumDecl, accept);
-            } else if (isEnumValueRef(value) || isStringVal(value) || isIntVal(value) || isBoolVal(value)) {
-                accept('error', `A ${enumDecl.name}[] variable needs a list, e.g. [${enumDecl.name}::<value>].`, { node: decl, property: 'value' });
+                for (const element of value.elements) this.checkStateElement(element, stateDecl, accept);
+            } else if (isStateValueRef(value) || isStringVal(value) || isIntVal(value) || isBoolVal(value)) {
+                accept('error', `A ${stateDecl.name}[] variable needs a list, e.g. [${stateDecl.name}::<value>].`, { node: decl, property: 'value' });
             }
             return;
         }
 
         if (isListLiteral(value)) {
-            accept('error', `A list was assigned to a variable declared as ${enumDecl.name}; declare it as ${enumDecl.name}[].`, { node: decl, property: 'value' });
+            accept('error', `A list was assigned to a variable declared as ${stateDecl.name}; declare it as ${stateDecl.name}[].`, { node: decl, property: 'value' });
             return;
         }
 
-        if (isEnumValueRef(value)) {
-            if (value.enumName !== enumDecl.name) {
-                accept('error', `Value of enum ${value.enumName} used where ${enumDecl.name} is expected.`, { node: decl, property: 'value' });
+        if (isStateValueRef(value)) {
+            if (value.stateName !== stateDecl.name) {
+                accept('error', `Value of state ${value.stateName} used where ${stateDecl.name} is expected.`, { node: decl, property: 'value' });
             }
             return;
         }
 
         if (isStringVal(value)) {
-            const allowed = enumDecl.values.map(v => v.name);
+            const allowed = stateDecl.values.map(v => v.name);
             if (!allowed.includes(value.val)) {
-                accept('warning', `"${value.val}" is not a value of enum ${enumDecl.name}. Use ${enumDecl.name}::<value> (allowed: ${allowed.join(', ')}).`, { node: decl, property: 'value' });
+                accept('warning', `"${value.val}" is not a value of state ${stateDecl.name}. Use ${stateDecl.name}::<value> (allowed: ${allowed.join(', ')}).`, { node: decl, property: 'value' });
             }
         }
     }
 
-    private checkEnumElement(element: AstNode, enumDecl: Enum, accept: ValidationAcceptor): void {
+    private checkStateElement(element: AstNode, stateDecl: State, accept: ValidationAcceptor): void {
         const value = unwrapExpression(element);
-        if (isEnumValueRef(value)) {
-            if (value.enumName !== enumDecl.name) {
-                accept('error', `Value of enum ${value.enumName} in a ${enumDecl.name}[] list.`, { node: value });
+        if (isStateValueRef(value)) {
+            if (value.stateName !== stateDecl.name) {
+                accept('error', `Value of state ${value.stateName} in a ${stateDecl.name}[] list.`, { node: value });
             }
         } else if (isStringVal(value)) {
-            const allowed = enumDecl.values.map(v => v.name);
+            const allowed = stateDecl.values.map(v => v.name);
             if (!allowed.includes(value.val)) {
-                accept('warning', `"${value.val}" is not a value of enum ${enumDecl.name}. Use ${enumDecl.name}::<value> (allowed: ${allowed.join(', ')}).`, { node: value });
+                accept('warning', `"${value.val}" is not a value of state ${stateDecl.name}. Use ${stateDecl.name}::<value> (allowed: ${allowed.join(', ')}).`, { node: value });
             }
         } else if (isIntVal(value) || isBoolVal(value) || isListLiteral(value) || isObjectDeclaration(value)) {
-            accept('error', `A ${enumDecl.name}[] list can only hold ${enumDecl.name} values.`, { node: value });
+            accept('error', `A ${stateDecl.name}[] list can only hold ${stateDecl.name} values.`, { node: value });
         }
     }
 
@@ -380,7 +380,7 @@ export class DndDslValidator {
         if (isIntVal(node)) return 'numbers';
         if (isStringVal(node)) return 'strings';
         if (isBoolVal(node)) return 'booleans';
-        if (isEnumValueRef(node)) return `${node.enumName} values`;
+        if (isStateValueRef(node)) return `${node.stateName} values`;
         if (isListLiteral(node)) return 'lists';
         if (isObjectDeclaration(node)) return 'objects';
         return undefined;
@@ -455,12 +455,12 @@ export class DndDslValidator {
         return isVariableRefItem(tail);
     }
 
-    checkEnumComparison(expr: IntToBoolExpression, accept: ValidationAcceptor): void {
+    checkStateComparison(expr: IntToBoolExpression, accept: ValidationAcceptor): void {
         const left = unwrapExpression(expr.left);
         const right = unwrapExpression(expr.right);
-        if (!isEnumValueRef(left) || !isEnumValueRef(right)) return;
-        if (left.enumName !== right.enumName) {
-            accept('error', `Cannot compare enum ${left.enumName} with enum ${right.enumName}.`, { node: expr });
+        if (!isStateValueRef(left) || !isStateValueRef(right)) return;
+        if (left.stateName !== right.stateName) {
+            accept('error', `Cannot compare state ${left.stateName} with state ${right.stateName}.`, { node: expr });
         }
     }
 
@@ -488,7 +488,7 @@ export class DndDslValidator {
         }
         const headKind = collectionHeadKind(chainHead(chain));
         if (!headKind) {
-            accept('error', `'.${chain.field}' needs a location/npc/quest/world/enum/this/parent head, not '${chainHead(chain).$type}'.`, { node: chain, property: 'field' });
+            accept('error', `'.${chain.field}' needs a location/npc/quest/world/state/this/parent head, not '${chainHead(chain).$type}'.`, { node: chain, property: 'field' });
             return;
         }
 
@@ -571,14 +571,14 @@ export class DndDslValidator {
         if (isQuestRefItem(head) && field === 'objectives') return head.val.val.ref?.objectives.map(o => o.name);
         if (isLocationRefItem(head) && field === 'sublocations') return head.val.val.ref?.sublocations.map(l => l.name);
         if (isLocationRefItem(head) && field === 'exits') return head.val.val.ref?.exits.map(e => e.name);
-        if (isEnumRefItem(head) && field === 'values') return head.val.ref?.values.map(v => v.name);
+        if (isStateRefItem(head) && field === 'values') return head.val.ref?.values.map(v => v.name);
         if (isWorldRefItem(head)) {
             const world = AstUtils.getContainerOfType(chain, isWorld);
             // A `reference world` script holds none of the world's own items.
             if (!world || world.isReference) return undefined;
             const byField: Record<string, { name: string }[] | undefined> = {
                 locations: this.collectAllLocations(world.locations), npcs: world.npcs, factions: world.factions, quests: world.quests,
-                events: world.events, functions: world.functions, enums: world.enums,
+                events: world.events, functions: world.functions, states: world.states,
             };
             return byField[field ?? '']?.map(n => n.name);
         }

@@ -11,7 +11,7 @@ World:
     | (quests+=Quest)+
     | (events+=Event)+
     | (npcs+=Npc)+
-    | (enums+=Enum)+
+    | (states+=State)+
     | (variables+=VariableDeclaration)+
     | (onBlocks+=OnBlock)+
     | (parties+=Party)+
@@ -19,9 +19,9 @@ World:
     | (relationTypes+=RelationType)+)*
   | isReference?='reference' 'world' name=STRING (script=CodeBlock)?;
 
-Enum:
-    'enum' name=ID '{' values+=EnumValueDecl (',' values+=EnumValueDecl)* ','? '}';
-EnumValueDecl:
+State:
+    'state' name=ID '{' values+=StateValueDecl (',' values+=StateValueDecl)* ','? '}';
+StateValueDecl:
     name=ID;
 
 Npc:
@@ -62,7 +62,7 @@ Relation:
     (variables+=VariableDeclaration)*
     (onBlocks+=OnBlock)*;
 
-// Literal kind-keyword references only, so `this`, variables, `world`, `enum` and `event` cannot be a fact's target.
+// Literal kind-keyword references only, so `this`, variables, `world`, `state` and `event` cannot be a fact's target.
 RelationEndpoint:
     FactionRefItem | NpcRefItem;
 
@@ -206,7 +206,7 @@ CompleteStatement infers QuestStatements:
 
 //General Declarations
 VariableDeclaration:
-    'let' isComputed='computed'? target=ID (':' enumType=[Enum:ID] (isList?='[' ']')?)? '=' value=(Expression);
+    'let' isComputed='computed'? target=ID (':' stateType=[State:ID] (isList?='[' ']')?)? '=' value=(Expression);
 ObjectDeclaration:
     'object'
     (variables+=VariableDeclaration)*
@@ -245,7 +245,7 @@ MultiplicativeExpression infers Expression:
     )*;
 PrimaryExpression infers Expression:
     {infer GroupedExpression} '(' exp=Expression ')' |
-    EnumValueRef |
+    StateValueRef |
     ReferenceExpression |
     ConstantExpression;
 ConstantExpression:
@@ -257,12 +257,12 @@ ConstantExpression:
     ;
 ListLiteral:
     '[' (elements+=Expression (',' elements+=Expression)* ','?)? ']';
-// `enumName` is a plain token (ENUM_NAME only matches an identifier immediately
-// followed by `::`), which keeps `EnumName::Value` unambiguous against a bare
-// variable reference in the same expression slot. The enum is resolved by name in
+// `stateName` is a plain token (STATE_NAME only matches an identifier immediately
+// followed by `::`), which keeps `StateName::Value` unambiguous against a bare
+// variable reference in the same expression slot. The state is resolved by name in
 // the scope provider and validator.
-EnumValueRef:
-    enumName=ENUM_NAME '::' value=[EnumValueDecl:ID];
+StateValueRef:
+    stateName=STATE_NAME '::' value=[StateValueDecl:ID];
 ReferenceExpression:
     FunctionCall |
     QuestExpressions |
@@ -310,7 +310,7 @@ ChainTail:
 ChainField returns string:
     //Collection fields
     'locations' | 'npcs' | 'factions' | 'quests' | 'events' | 'functions'
-    | 'enums' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values'
+    | 'states' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values'
     //Single-value fields
     | 'name' | 'description';
 
@@ -323,7 +323,7 @@ RefChainHead infers RefChainStart:
     | FactionRefItem
     | RelationRefItem
     | WorldRefItem
-    | EnumRefItem
+    | StateRefItem
     | ThisRefItem
     | ParentRefItem
     | PartyRefItem;
@@ -353,8 +353,8 @@ RelationRefItem:
 WorldRefItem:
     isWorld='world';
 // A single-level cross-reference
-EnumRefItem:
-    isEnum='enum' val=[Enum:ID];
+StateRefItem:
+    isState='state' val=[State:ID];
 // Resolved by container-walk, not cross-reference - see DndScopeProvider (inside an
 // `object...end` block) and LangiumInterpreterService.fireHandler (inside a handler
 // body). Restricted to those two positions by DndDslValidator - see below.
@@ -401,10 +401,10 @@ terminal BooleanValue returns boolean:
 
 
 hidden terminal WS: /\s+/;
-// An identifier immediately followed by `::` - the qualifier of an EnumName::Value
-// reference. Declared before ID so `Foo::` lexes as ENUM_NAME while a bare `Foo`
+// An identifier immediately followed by `::` - the qualifier of a StateName::Value
+// reference. Declared before ID so `Foo::` lexes as STATE_NAME while a bare `Foo`
 // stays an ID.
-terminal ENUM_NAME: /[_a-zA-Z][\w_]*(?=::)/;
+terminal STATE_NAME: /[_a-zA-Z][\w_]*(?=::)/;
 terminal ID: /[_a-zA-Z][\w_]*/;
 terminal INT returns number: /[0-9]+/;
 terminal STRING: /"(\\.|[^"\\])*"|'(\\.|[^'\\])*'/;

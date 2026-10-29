@@ -1,4 +1,4 @@
-export type EditorType = 'text' | 'number' | 'boolean' | 'list' | 'enum';
+export type EditorType = 'text' | 'number' | 'boolean' | 'list' | 'state';
 
 /** A value the overlay can hold: JSON-safe, with no null and no object. */
 export type Storable = number | string | boolean | Storable[];
@@ -13,22 +13,22 @@ export function isStorable(value: unknown): value is Storable {
   }
 }
 
-/** `enumMembers` is the declared enum's member names, passed only when the declaration has one. */
-export function editorTypeOf(value: unknown, enumMembers?: readonly string[]): EditorType | undefined {
-  if (typeof value === 'string') return enumMembers?.includes(value) ? 'enum' : 'text';
+/** `stateMembers` is the declared state's member names, passed only when the declaration has one. */
+export function editorTypeOf(value: unknown, stateMembers?: readonly string[]): EditorType | undefined {
+  if (typeof value === 'string') return stateMembers?.includes(value) ? 'state' : 'text';
   if (typeof value === 'number') return 'number';
   if (typeof value === 'boolean') return 'boolean';
   if (Array.isArray(value)) return 'list';
   return undefined;
 }
 
-export function defaultValue(type: EditorType, enumMembers?: readonly string[]): Storable {
+export function defaultValue(type: EditorType, stateMembers?: readonly string[]): Storable {
   switch (type) {
     case 'text': return '';
     case 'number': return 0;
     case 'boolean': return false;
     case 'list': return [];
-    case 'enum': return enumMembers?.[0] ?? '';
+    case 'state': return stateMembers?.[0] ?? '';
   }
 }
 
@@ -48,8 +48,8 @@ function scalarOf(value: unknown): Scalar | undefined {
   return typeof current === 'number' || typeof current === 'string' || typeof current === 'boolean' ? current : undefined;
 }
 
-export function convertValue(value: unknown, to: EditorType, enumMembers?: readonly string[]): Storable {
-  if (editorTypeOf(value, enumMembers) === to && isStorable(value)) return value;
+export function convertValue(value: unknown, to: EditorType, stateMembers?: readonly string[]): Storable {
+  if (editorTypeOf(value, stateMembers) === to && isStorable(value)) return value;
 
   const scalar = scalarOf(value);
   switch (to) {
@@ -65,8 +65,8 @@ export function convertValue(value: unknown, to: EditorType, enumMembers?: reado
       return typeof scalar === 'string' && scalar.trim().toLowerCase() === 'true';
     case 'list':
       return scalar === undefined ? [] : [scalar];
-    case 'enum':
-      return typeof scalar === 'string' && enumMembers?.includes(scalar) ? scalar : defaultValue('enum', enumMembers);
+    case 'state':
+      return typeof scalar === 'string' && stateMembers?.includes(scalar) ? scalar : defaultValue('state', stateMembers);
   }
 }
 
@@ -86,12 +86,12 @@ export function sanitizeList(items: readonly unknown[]): Storable[] | undefined 
   return clean;
 }
 
-/** What `+` appends: the same type as the last item, a declared enum's first member, or empty text. */
-export function newListItem(items: readonly Storable[], enumMembers?: readonly string[]): Storable {
+/** What `+` appends: the same type as the last item, a declared state's first member, or empty text. */
+export function newListItem(items: readonly Storable[], stateMembers?: readonly string[]): Storable {
   const last = items[items.length - 1];
-  const type = editorTypeOf(last, enumMembers);
-  if (type) return defaultValue(type, enumMembers);
-  return enumMembers?.length ? defaultValue('enum', enumMembers) : '';
+  const type = editorTypeOf(last, stateMembers);
+  if (type) return defaultValue(type, stateMembers);
+  return stateMembers?.length ? defaultValue('state', stateMembers) : '';
 }
 
 export function replaceAt(items: readonly Storable[], index: number, value: Storable): Storable[] {

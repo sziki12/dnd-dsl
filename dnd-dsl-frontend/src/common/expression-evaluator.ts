@@ -79,8 +79,8 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
             const e = expr as unknown as SerializedNode<StringVal>;
             return e.val;
         }
-        case 'EnumValueRef': {
-            // Enum reference evaluates to its value name (parallel to the backend
+        case 'StateValueRef': {
+            // State reference evaluates to its value name (parallel to the backend
             // interpreter and dnd-dsl-value-evaluator).
             if (!options?.worldState) return undefined;
             const ref = (expr as unknown as { value: SerializedRef }).value;

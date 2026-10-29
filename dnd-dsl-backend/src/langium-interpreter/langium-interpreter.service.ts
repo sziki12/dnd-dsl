@@ -7,7 +7,7 @@ import {
     ChainTail,
     ConditionalBlock,
     ConstantExpression,
-    EnumValueDecl,
+    StateValueDecl,
     Expression,
     ForStatement,
     FunctionCall,
@@ -15,8 +15,8 @@ import {
     isBoolExpression,
     isBoolVal,
     isConstantExpression,
-    isEnumRefItem,
-    isEnumValueRef,
+    isStateRefItem,
+    isStateValueRef,
     isEvent,
     isEventRefItem,
     isFunctionCall,
@@ -153,8 +153,8 @@ export class LangiumInterpreterService {
             return this.evaluateReferenceExpression(ctx, expression);
         }
 
-        if (isEnumValueRef(expression)) {
-            // Runtime value of an enum reference is its value name 
+        if (isStateValueRef(expression)) {
+            // Runtime value of a state reference is its value name 
             // Keeps comparison as plain string comparison
             return expression.value.ref?.name ?? expression.value.$refText;
         }
@@ -1183,12 +1183,12 @@ export class LangiumInterpreterService {
                     .map(node => this.makeEntityHandle(node))
                     .filter((handle): handle is LoopEntityHandle => handle !== undefined);
             // Named, but no `.variables` of their own - bind the name only.
-            case 'events': case 'functions': case 'enums':
+            case 'events': case 'functions': case 'states':
                 return (items as { name: string }[]).map(node => node.name);
-            // EnumValueDecl - same runtime representation as an EnumValueRef elsewhere
+            // StateValueDecl - same runtime representation as a StateValueRef elsewhere
             // in the interpreter (a bare name string), not an entity.
             case 'values':
-                return (items as EnumValueDecl[]).map(v => v.name);
+                return (items as StateValueDecl[]).map(v => v.name);
             // LocationExit - not StatePath-addressable, so a small plain record instead
             // of a live handle; `target` resolves the exit's own cross-reference.
             case 'exits':
@@ -1208,8 +1208,8 @@ export class LangiumInterpreterService {
     /** 
      *  Resolves a CollectionRef's head to the concrete node its field is read off.
      *  Location/Quest/Npc/Faction reuse their existing cross-reference; World has none 
-     *  (only one per document); Enum's is a direct [Enum:ID] reference 
-     *  (see the grammar comment on EnumRefItem) resolved by Langium's own default scoping.
+     *  (only one per document); State's is a direct [State:ID] reference 
+     *  (see the grammar comment on StateRefItem) resolved by Langium's own default scoping.
      *  A VariableRefItem head is only meaningful here when it's a `for`-loop variable
      *  bound to a LoopEntityHandle - its path is resolved back to the live node. 
      **/
@@ -1220,7 +1220,7 @@ export class LangiumInterpreterService {
         if (isNpcRefItem(start)) return start.val.val.ref;
         if (isFactionRefItem(start)) return start.val.val.ref;
         if (isWorldRefItem(start)) return ctx.model?.World;
-        if (isEnumRefItem(start)) return start.val.ref;
+        if (isStateRefItem(start)) return start.val.ref;
         if (isThisRefItem(start)) return ctx.thisEntity;
         if (isParentRefItem(start)) return ctx.parentEntity;
         if (isVariableRefItem(start)) {

@@ -1,11 +1,11 @@
 import { AstUtils, DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream } from "langium";
 import type { AstNode, AstNodeDescription, ReferenceInfo, Scope } from "langium";
 import {
-    type Enum,
+    type State,
     isChainTail,
     isCodeBlock,
-    isEnum,
-    isEnumValueRef,
+    isState,
+    isStateValueRef,
     isEvent,
     isForStatement,
     isLocation,
@@ -129,16 +129,16 @@ export class DndScopeProvider extends DefaultScopeProvider
         const stepScope = this.getStepScope(context);
         if (stepScope) return stepScope;
 
-        // `EnumName::Value` - the value half is scoped to that enum's own members.
-        // EnumValueDecl nodes are only visible inside their Enum declaration by
+        // `StateName::Value` - the value half is scoped to that state's own members.
+        // StateValueDecl nodes are only visible inside their State declaration by
         // default, so without this the value never resolves at any use site.
         const container = context.container;
-        if (isEnumValueRef(container) && context.property === "value")
+        if (isStateValueRef(container) && context.property === "value")
         {
-            const enumDecl = this.resolveEnum(container.enumName, context);
-            if (!enumDecl) return EMPTY_SCOPE;
+            const stateDecl = this.resolveState(container.stateName, context);
+            if (!stateDecl) return EMPTY_SCOPE;
             return new MapScope(
-                stream(enumDecl.values).map(v => this.descriptions.createDescription(v, v.name))
+                stream(stateDecl.values).map(v => this.descriptions.createDescription(v, v.name))
             );
         }
 
@@ -154,15 +154,15 @@ export class DndScopeProvider extends DefaultScopeProvider
     }
 
     /**
-     * The enclosing World's enum by name, or - for a `reference world` script whose
-     *  own World declares no enums - the loaded world's enum from the global index. 
+     * The enclosing World's state by name, or - for a `reference world` script whose
+     *  own World declares no states - the loaded world's state from the global index. 
      **/
-    private resolveEnum(name: string, context: ReferenceInfo): Enum | undefined
+    private resolveState(name: string, context: ReferenceInfo): State | undefined
     {
-        const local = AstUtils.getContainerOfType(context.container, isWorld)?.enums.find(e => e.name === name);
+        const local = AstUtils.getContainerOfType(context.container, isWorld)?.states.find(e => e.name === name);
         if (local) return local;
-        const global = this.getGlobalScope("Enum", context).getElement(name)?.node;
-        return isEnum(global) ? global : undefined;
+        const global = this.getGlobalScope("State", context).getElement(name)?.node;
+        return isState(global) ? global : undefined;
     }
 
     /** Event has no `.variables` field at all - it can never actually be `this`/`parent`
@@ -306,7 +306,7 @@ export class DndScopeProvider extends DefaultScopeProvider
     /** True for a `for x in <collection> do ... end` loop variable whose collection is
      *  one of entities-with-variables (see ENTITY_COLLECTION_FIELDS) - the only case
      *  `.member` through a loop variable is meaningful. A loop variable bound to a
-     *  name-only or record collection (events/functions/enums/values/exits/variables)
+     *  name-only or record collection (events/functions/states/values/exits/variables)
      *  correctly falls through to EMPTY_SCOPE below - it structurally has no members. */
     private isEntityLoopVariable(decl: VariableDeclaration): boolean
     {
@@ -317,8 +317,8 @@ export class DndScopeProvider extends DefaultScopeProvider
 
     /** True for a `for x in <list variable> do ... end` loop variable. The elements
      *  are plain values, possibly `object` records whose fields can't be known at link
-     *  time, so `.member` gets the same permissive scope - except over an enum list
-     *  (`Disposition[]`), whose elements are enum names with no members at all. */
+     *  time, so `.member` gets the same permissive scope - except over a state list
+     *  (`Disposition[]`), whose elements are state names with no members at all. */
     private isListLoopVariable(decl: VariableDeclaration): boolean
     {
         const owner = decl.$container;
@@ -326,7 +326,7 @@ export class DndScopeProvider extends DefaultScopeProvider
         const source = owner.source;
         const tail = source.rest.length > 0 ? source.rest[source.rest.length - 1] : chainHead(source);
         const listDecl = isVariableRefItem(tail) ? tail.val.val.ref : undefined;
-        return !(listDecl?.isList && listDecl.enumType);
+        return !(listDecl?.isList && listDecl.stateType);
     }
 
     /** Any name resolves successfully, to a placeholder description that carries no

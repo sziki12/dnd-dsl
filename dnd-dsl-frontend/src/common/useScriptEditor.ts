@@ -53,7 +53,7 @@ function wireSuggestRecovery(app: EditorApp): Disposable[] {
 /**
  * A Monaco editor for the script console, wired to the `dnd-dsl` language server.
  * Opens the loaded world's source as a second (editor-less) model so the LSP can
- * resolve the script's `location "X"` / `trigger "E"` / `Enum::Value` references
+ * resolve the script's `location "X"` / `trigger "E"` / `State::Value` references
  * against it (via DndScopeComputation). Recreated when the world switches.
  *
  * `initialText` seeds the editor on (re)mount - pass the persisted script so it

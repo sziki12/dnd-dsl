@@ -185,16 +185,16 @@ function describeValue(value: unknown): string {
 }
 
 function renderValue(value: unknown, decl?: VariableDeclaration): string {
-    const enumName = decl?.enumType?.$refText;
-    const members = decl?.enumType?.ref?.values.map(v => v.name);
-    return render(value, enumName, members);
+    const stateName = decl?.stateType?.$refText;
+    const members = decl?.stateType?.ref?.values.map(v => v.name);
+    return render(value, stateName, members);
 }
 
-function render(value: unknown, enumName?: string, members?: string[]): string {
+function render(value: unknown, stateName?: string, members?: string[]): string {
     if (typeof value === "string") {
-        return enumName && members?.includes(value) ? `${enumName}::${value}` : JSON.stringify(value);
+        return stateName && members?.includes(value) ? `${stateName}::${value}` : JSON.stringify(value);
     }
     if (typeof value === "number" || typeof value === "boolean") return String(value);
-    if (Array.isArray(value)) return `[${value.map(v => render(v, enumName, members)).join(", ")}]`;
+    if (Array.isArray(value)) return `[${value.map(v => render(v, stateName, members)).join(", ")}]`;
     return JSON.stringify(JSON.stringify(value) ?? "");
 }

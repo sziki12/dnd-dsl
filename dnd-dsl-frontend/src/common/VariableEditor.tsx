@@ -16,7 +16,7 @@ import {
 } from './value-conversion';
 import { STATUS_VARIABLE } from '@dnd-language/evaluation/dnd-dsl-status.js';
 import type { StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
-import type { SerializedEnum, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import type { SerializedState, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 const stop = (e: MouseEvent) => e.stopPropagation();
 
@@ -42,7 +42,7 @@ export type RowSelection = {
   toggle: (key: string, decl: Pick<SerializedVariableDecl, 'target' | 'isComputed'>) => void;
 };
 
-type EnumInfo = { name?: string; members?: readonly string[] };
+type StateInfo = { name?: string; members?: readonly string[] };
 
 type ObjectBody = { $type?: string; exp?: unknown; variables?: SerializedVariableDecl[] };
 
@@ -125,41 +125,41 @@ export default function VariableEditor({ variable, owner, index, depth = 0, sele
     );
   }
 
-  const enumDecl = variable.enumType ? getByReference<SerializedEnum>(variable.enumType) : undefined;
-  const enumInfo: EnumInfo = {
-    name: enumDecl?.name,
-    members: enumDecl?.values.map(v => v.name),
+  const stateDecl = variable.stateType ? getByReference<SerializedState>(variable.stateType) : undefined;
+  const stateInfo: StateInfo = {
+    name: stateDecl?.name,
+    members: stateDecl?.values.map(v => v.name),
   };
-  // For `Kind[]` the enum describes the items, not the list itself.
-  const ownEnum: EnumInfo = variable.isList ? {} : enumInfo;
-  const itemEnum: EnumInfo = variable.isList ? enumInfo : {};
+  // For `Kind[]` the state describes the items, not the list itself.
+  const ownState: StateInfo = variable.isList ? {} : stateInfo;
+  const itemState: StateInfo = variable.isList ? stateInfo : {};
 
   const commit = (newValue: Storable) => { void execute({ type: 'ASSIGN_VARIABLE', path, newValue }); };
-  const type = editorTypeOf(value, ownEnum.members);
+  const type = editorTypeOf(value, ownState.members);
 
   return row(
     <>
       <TypeSelect
         type={type}
-        enumName={ownEnum.name}
-        onChange={to => commit(convertValue(value, to, ownEnum.members))}
+        stateName={ownState.name}
+        onChange={to => commit(convertValue(value, to, ownState.members))}
       />
       <span className="tok-variable">{name}</span>
       <span className="tok-operator">=</span>
       {type
-        ? <ValueInput value={value} type={type} enumInfo={ownEnum} itemEnum={itemEnum} onCommit={commit} />
+        ? <ValueInput value={value} type={type} stateInfo={ownState} itemState={itemState} onCommit={commit} />
         : renderValueToken(value)}
     </>,
   );
 }
 
 /** The input for one value of a known type. A list renders its items with this same component. */
-function ValueInput({ value, type, enumInfo, itemEnum, onCommit }: {
+function ValueInput({ value, type, stateInfo, itemState, onCommit }: {
   value: unknown;
   type: EditorType;
-  enumInfo: EnumInfo;
-  /** The enum list items are drawn from, for a `Kind[]` variable. */
-  itemEnum: EnumInfo;
+  stateInfo: StateInfo;
+  /** The state list items are drawn from, for a `Kind[]` variable. */
+  itemState: StateInfo;
   onCommit: (next: Storable) => void;
 }) {
   switch (type) {
@@ -172,7 +172,7 @@ function ValueInput({ value, type, enumInfo, itemEnum, onCommit }: {
           onChange={e => onCommit(e.target.checked)}
         />
       );
-    case 'enum':
+    case 'state':
       return (
         <select
           value={typeof value === 'string' ? value : ''}
@@ -180,7 +180,7 @@ function ValueInput({ value, type, enumInfo, itemEnum, onCommit }: {
           onChange={e => { e.stopPropagation(); onCommit(e.target.value); }}
           style={inputStyle}
         >
-          {(enumInfo.members ?? []).map(member => <option key={member} value={member}>{member}</option>)}
+          {(stateInfo.members ?? []).map(member => <option key={member} value={member}>{member}</option>)}
         </select>
       );
     case 'number':
@@ -197,7 +197,7 @@ function ValueInput({ value, type, enumInfo, itemEnum, onCommit }: {
     case 'text':
       return <DraftInput value={String(value)} onCommit={onCommit} />;
     case 'list':
-      return <ListInput items={Array.isArray(value) ? value : []} itemEnum={itemEnum} onCommit={onCommit} />;
+      return <ListInput items={Array.isArray(value) ? value : []} itemState={itemState} onCommit={onCommit} />;
   }
 }
 
@@ -235,9 +235,9 @@ function DraftInput({ value, numeric, onCommit }: {
   );
 }
 
-function ListInput({ items, itemEnum, onCommit }: {
+function ListInput({ items, itemState, onCommit }: {
   items: Array<EvalResult | undefined>;
-  itemEnum: EnumInfo;
+  itemState: StateInfo;
   onCommit: (next: Storable) => void;
 }) {
   // A list holding a record cannot be written back, so it stays read-only.
@@ -248,20 +248,20 @@ function ListInput({ items, itemEnum, onCommit }: {
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
       <span className="tok-operator">[</span>
       {clean.map((item, i) => {
-        const itemType = editorTypeOf(item, itemEnum.members);
+        const itemType = editorTypeOf(item, itemState.members);
         return (
           <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
             <TypeSelect
               type={itemType}
-              enumName={itemEnum.name}
-              onChange={to => onCommit(replaceAt(clean, i, convertValue(item, to, itemEnum.members)))}
+              stateName={itemState.name}
+              onChange={to => onCommit(replaceAt(clean, i, convertValue(item, to, itemState.members)))}
             />
             {itemType && (
               <ValueInput
                 value={item}
                 type={itemType}
-                enumInfo={itemEnum}
-                itemEnum={itemEnum}
+                stateInfo={itemState}
+                itemState={itemState}
                 onCommit={next => onCommit(replaceAt(clean, i, next))}
               />
             )}
@@ -275,7 +275,7 @@ function ListInput({ items, itemEnum, onCommit }: {
         type="button"
         title="Add item"
         style={buttonStyle}
-        onClick={e => { stop(e); onCommit([...clean, newListItem(clean, itemEnum.members)]); }}
+        onClick={e => { stop(e); onCommit([...clean, newListItem(clean, itemState.members)]); }}
       >
         +
       </button>

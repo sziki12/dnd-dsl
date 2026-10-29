@@ -1,7 +1,7 @@
 import type { ChangeEvent, MouseEvent } from 'react';
 import type { EditorType } from './value-conversion';
 
-const LABELS: Record<Exclude<EditorType, 'enum'>, string> = {
+const LABELS: Record<Exclude<EditorType, 'state'>, string> = {
   text: 'text',
   number: 'number',
   boolean: 'bool',
@@ -11,11 +11,11 @@ const LABELS: Record<Exclude<EditorType, 'enum'>, string> = {
 /**
  * The inferred type of a value, as a dropdown. Choosing another type is how the DM changes a
  * dynamically typed variable: the caller converts the value and writes it.
- * `enumName` adds the declared enum as an option and is passed only when the declaration has one.
+ * `stateName` adds the declared state as an option and is passed only when the declaration has one.
  */
-export default function TypeSelect({ type, enumName, onChange }: {
+export default function TypeSelect({ type, stateName, onChange }: {
   type: EditorType | undefined;
-  enumName?: string;
+  stateName?: string;
   onChange: (to: EditorType) => void;
 }) {
   const stop = (e: MouseEvent) => e.stopPropagation();
@@ -44,7 +44,7 @@ export default function TypeSelect({ type, enumName, onChange }: {
       {(Object.keys(LABELS) as Array<keyof typeof LABELS>).map(key => (
         <option key={key} value={key}>{LABELS[key]}</option>
       ))}
-      {enumName && <option value="enum">{enumName}</option>}
+      {stateName && <option value="state">{stateName}</option>}
     </select>
   );
 }

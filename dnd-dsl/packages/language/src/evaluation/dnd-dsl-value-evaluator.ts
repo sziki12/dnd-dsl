@@ -170,8 +170,8 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
         case 'StringVal':
             return (node as unknown as { val: string }).val;
 
-        case 'EnumValueRef': {
-            // The runtime value of an enum reference is its value name - keeps `is` /
+        case 'StateValueRef': {
+            // The runtime value of a state reference is its value name - keeps `is` /
             // `==` as plain string comparison and matches what an ASSIGN_VARIABLE
             // overlay write stores (a bare name string).
             const ref = (node as unknown as { value: SerializedRef }).value;
