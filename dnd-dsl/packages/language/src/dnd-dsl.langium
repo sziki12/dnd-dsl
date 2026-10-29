@@ -172,8 +172,14 @@ ConditionalBlock:
     'when' condition=BoolExpression 'do' body+=CodeBlock ('otherwise' 'do' otherwise+=CodeBlock)? 'end';
 ReturnStatement:
     'return' (returnValue=(Expression))?;
-VariableAssignment:
-    target=VariableRef ('=' | 'to') value=(Expression);
+// Without `set` a statement may only start with a variable, `this` or `parent`: every other RefChain head
+// (`event`, `npc`, `location`, ...) also starts a declaration, which the code block before it would swallow.
+VariableAssignment infers SetStatement:
+    target=AssignTarget ('=') value=(Expression);
+AssignTarget infers RefChain:
+    first=AssignTargetHead ('.' rest+=VariableRefItem)* ('.' field=ChainField)? (('[' indexes+=Expression ']')+ next=ChainTail?)?;
+AssignTargetHead infers RefChainStart:
+    VariableRefItem | ThisRefItem | ParentRefItem;
 PrintStatement:
     'print' value=(Expression);
 

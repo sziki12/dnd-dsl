@@ -626,26 +626,17 @@ export class LangiumInterpreterService {
                 ctx.scope[name] = c.value ? this.evaluateExpression(ctx, c.value) : undefined;
                 break;
             }
-            case 'VariableAssignment': {
-                const decl = code.target.val.ref;
-                const value = this.evaluateExpression(ctx, code.value);
-                // An assignment whose target is an entity-owned variable (a name-based
-                // StatePath resolves) is a persistent write; anything else is a
-                // local/function-scope write.
-                const path = decl ? nodeToStatePath(decl) : undefined;
-                if (path && ctx.pendingOverlayWrites) {
-                    this.pushWrite(ctx, path, value);
-                } else {
-                    ctx.scope[decl?.target ?? decl?.name ?? ''] = value;
-                }
-                break;
-            }
             case 'SetStatement': {
                 const c = code as unknown as SetStatement;
                 const value = this.evaluateExpression(ctx, c.value);
                 const { path, indexes } = this.resolveSetTarget(ctx, c.target);
                 if (path[path.length - 1]?.kind !== 'variable') {
-                    throw new Error('`set` needs an entity variable target, e.g. `set npc "X" . mood = ...`');
+                    const local = indexes.length === 0 ? this.localVariableName(c.target) : undefined;
+                    if (local === undefined) {
+                        throw new Error('`set` needs an entity variable target, e.g. `set npc "X" . mood = ...`');
+                    }
+                    ctx.scope[local] = value;
+                    break;
                 }
                 if (indexes.length > 0) {
                     this.pushWrite(ctx, path, replaceAtIndexes(this.readPath(ctx, path), indexes, value));
@@ -988,6 +979,14 @@ export class LangiumInterpreterService {
     /** A chain that picks an item of an entity collection, or carries on after an index: its address is only known when it runs. */
     private isItemChain(chain: RefChain): boolean {
         return !!chain.next || (!!chain.field && chain.indexes.length > 0);
+    }
+
+    /** The scope key of a chain that is just one local (function or script scope) variable, else undefined. */
+    private localVariableName(chain: RefChain): string | undefined {
+        const head = chainHead(chain);
+        if (chain.rest.length > 0 || this.isItemChain(chain) || !isVariableRefItem(head)) return undefined;
+        const decl = head.val.val.ref;
+        return decl ? (decl.target ?? decl.name ?? '') : head.val.val.$refText;
     }
 
     /** Where `set` stores: the variable's address, plus the list indexes (`Items[1]`) when it replaces one item of a list. */
