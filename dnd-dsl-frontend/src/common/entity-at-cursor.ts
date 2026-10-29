@@ -1,4 +1,4 @@
-export type EntityKind = 'location' | 'npc' | 'quest' | 'objective' | 'event';
+export type EntityKind = 'location' | 'npc' | 'faction' | 'quest' | 'objective' | 'event';
 
 export type EntityRef = {
   kind: EntityKind;
@@ -11,6 +11,7 @@ export type EntityRef = {
 export type EntityNames = {
   location: ReadonlySet<string>;
   npc: ReadonlySet<string>;
+  faction: ReadonlySet<string>;
   quest: ReadonlySet<string>;
   event: ReadonlySet<string>;
   /** Objective name to the quest that owns it (objective names are unique across the world). */
@@ -24,17 +25,19 @@ export type NamedWorld = {
   World?: {
     locations?: NamedLocation[];
     npcs?: { name: string }[];
+    factions?: { name: string }[];
     quests?: { name: string; objectives?: { name: string }[] }[];
     events?: { name: string }[];
   };
 };
 
-const KINDS: EntityKind[] = ['location', 'npc', 'quest', 'objective', 'event'];
+const KINDS: EntityKind[] = ['location', 'npc', 'faction', 'quest', 'objective', 'event'];
 
 /** The word before a string that says what the string names. */
 const HINTS: Record<string, EntityKind> = {
   location: 'location', locations: 'location', sublocations: 'location', to: 'location', entry: 'location',
   npc: 'npc', npcs: 'npc',
+  faction: 'faction', factions: 'faction',
   quest: 'quest', quests: 'quest',
   objective: 'objective', objectives: 'objective',
   event: 'event', events: 'event', trigger: 'event',
@@ -64,6 +67,7 @@ export function collectEntityNames(world: NamedWorld | undefined): EntityNames {
   return {
     location,
     npc: new Set((world?.World?.npcs ?? []).map(item => item.name)),
+    faction: new Set((world?.World?.factions ?? []).map(item => item.name)),
     quest: new Set((world?.World?.quests ?? []).map(item => item.name)),
     event: new Set((world?.World?.events ?? []).map(item => item.name)),
     objective,
@@ -124,7 +128,7 @@ export function entityAt(line: string, column: number, names: EntityNames): Enti
   return matches.length === 1 ? refOf(names, matches[0], found.value) : undefined;
 }
 
-/** The page that shows the entity. NPCs have one list page, an objective lives on its quest's page. */
+/** The page that shows the entity. NPCs and factions have one list page each, an objective lives on its quest's page. */
 export function entityRoute(ref: EntityRef): string {
   const name = encodeURIComponent(ref.name);
   switch (ref.kind) {
@@ -133,5 +137,6 @@ export function entityRoute(ref: EntityRef): string {
     case 'objective': return `/quests/${encodeURIComponent(ref.questName ?? ref.name)}`;
     case 'event': return `/events/${name}`;
     case 'npc': return '/npcs';
+    case 'faction': return '/factions';
   }
 }

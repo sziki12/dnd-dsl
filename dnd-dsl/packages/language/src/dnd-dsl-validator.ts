@@ -53,6 +53,7 @@ import {
     type Quest,
     type RefChain,
     type Relation,
+    type RelationRefItem,
     type RemindStatement,
     type SetStatement,
     type VariableDeclaration,
@@ -192,6 +193,7 @@ export function registerValidationChecks(services: DndDslServices) {
     const checks: ValidationChecks<DndDslAstType> = {
         World: [validator.checkUniqueNames, validator.checkRelationTypes],
         Relation: validator.checkRelation,
+        RelationRefItem: validator.checkRelationQuery,
         Enum: validator.checkUniqueEnumValues,
         VariableDeclaration: [validator.checkEnumValue, validator.checkStatusDeclaration],
         SetStatement: validator.checkStatusAssignment,
@@ -257,6 +259,22 @@ export class DndDslValidator {
         const earlier = fact.$container.relations.slice(0, fact.$containerIndex ?? 0);
         if (earlier.some(other => this.relationKey(other) === key)) {
             accept('error', `Duplicate relation '${type.name}' to ${targetKind} "${fact.target.val.val.$refText}" in ${hostKind} "${fact.$container.name}".`, { node: fact });
+        }
+    }
+
+    /** `relation npc "A" "T" faction "F"` is a question, so a fact that is not written is fine; only a kind the type cannot join is wrong. */
+    checkRelationQuery(query: RelationRefItem, accept: ValidationAcceptor): void {
+        const type = query.predicate.ref;
+        if (!type) return;
+
+        const subjectKind = ENDPOINT_KIND[query.subject.$type];
+        if (subjectKind && !(type.sources as string[]).includes(subjectKind)) {
+            accept('error', `'${type.name}' cannot start from a ${subjectKind}; it starts from: ${type.sources.join(', ')}.`, { node: query, property: 'subject' });
+        }
+
+        const targetKind = ENDPOINT_KIND[query.target.$type];
+        if (targetKind && !(type.targets as string[]).includes(targetKind)) {
+            accept('error', `'${type.name}' cannot point at a ${targetKind}; it points at: ${type.targets.join(', ')}.`, { node: query, property: 'target' });
         }
     }
 

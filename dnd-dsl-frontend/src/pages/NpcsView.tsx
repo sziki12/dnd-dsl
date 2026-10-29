@@ -1,6 +1,8 @@
 import { useContext } from 'react';
 import { DslContext } from '../contexts/DslContext';
 import VariableEditor from '../common/VariableEditor';
+import RelationFacts from '../common/RelationFacts';
+import { factsOf } from '../common/relation-facts';
 import type { SerializedNpc, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 export default function NpcsView() {
@@ -29,6 +31,7 @@ export default function NpcsView() {
               index={i + 1}
             />
           ))}
+          <RelationFacts host={[{ kind: 'npc', name: npc.name }]} facts={factsOf(worldState, npc)} />
         </div>
       ))}
     </div>

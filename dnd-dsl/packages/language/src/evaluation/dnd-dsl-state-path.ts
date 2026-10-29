@@ -27,6 +27,7 @@ import {
     type VariableDeclaration,
     type World,
 } from "../generated/ast.js";
+import { ENDPOINT_KIND, findRelation, refName } from "./dnd-dsl-relations.js";
 
 // All Langium imports above are used only for their exported type guards / type
 // annotations — no LSP-only services are touched — so this file is safe to import
@@ -90,6 +91,7 @@ export type StatePathSegment =
     | { kind: 'function'; name: string }
     | { kind: 'npc'; name: string }
     | { kind: 'faction'; name: string }
+    | { kind: 'relation'; predicate: string; targetKind: string; targetName: string }
     | { kind: 'world' }
     | { kind: 'variable'; target: string };
 
@@ -130,10 +132,17 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
             // is not, so bail out rather than returning a bogus path.
             const container = current.$container;
             if (!container || !(isLocation(container) || isObjectDeclaration(container)
-                || isNpc(container) || isFaction(container) || isQuest(container) || isObjective(container) || isWorld(container))) {
+                || isNpc(container) || isFaction(container) || isRelation(container) || isQuest(container) || isObjective(container) || isWorld(container))) {
                 return undefined;
             }
             segments.unshift({ kind: 'variable', target: current.target ?? current.name ?? '' });
+        } else if (isRelation(current)) {
+            // Its host contributes its own segment on a later iteration, so this one does not return.
+            const targetKind = ENDPOINT_KIND[current.target?.$type];
+            const targetName = refName(undefined, current.target?.val?.val);
+            const predicate = refName(undefined, current.predicate);
+            if (!targetKind || targetName === undefined || predicate === undefined) return undefined;
+            segments.unshift({ kind: 'relation', predicate, targetKind, targetName });
         } else if (isLocation(current)) {
             segments.unshift({ kind: 'location', name: current.name });
             return segments;
@@ -205,11 +214,16 @@ export function statePathToNode(model: Model, path: StatePath): AstNode | undefi
             root = model.World;
             break;
         case 'variable':
-            return undefined; // a 'variable' segment can never be the path head
+        case 'relation':
+            return undefined; // a 'variable' or 'relation' segment can never be the path head
     }
 
     return rest.reduce<AstNode | undefined>((node, seg) => {
-        if (!node || seg.kind !== 'variable') return undefined;
+        if (!node) return undefined;
+        if (seg.kind === 'relation') {
+            return findRelation(model, node as { relations?: Relation[] }, seg.predicate, seg.targetKind, seg.targetName);
+        }
+        if (seg.kind !== 'variable') return undefined;
         const variables = getVariablesArray(node);
         const decl = variables?.find(v => (v.target ?? v.name) === seg.target);
         if (!decl) return undefined;
@@ -292,6 +306,7 @@ function getVariablesArray(node: AstNode): VariableDeclaration[] | undefined {
     if (isObjectDeclaration(node)) return node.variables;
     if (isNpc(node)) return node.variables;
     if (isFaction(node)) return node.variables;
+    if (isRelation(node)) return node.variables;
     if (isQuest(node)) return node.variables;
     if (isObjective(node)) return node.variables;
     if (isWorld(node)) return node.variables;

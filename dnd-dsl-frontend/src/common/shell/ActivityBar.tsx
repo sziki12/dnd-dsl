@@ -4,6 +4,7 @@ import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
+import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
 import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
 import TerminalOutlinedIcon from '@mui/icons-material/TerminalOutlined';
@@ -40,6 +41,14 @@ export default function ActivityBar() {
       label: 'NPCs',
       active: pathname === '/npcs',
       onClick: () => navigate('/npcs'),
+      disabled: !worldState,
+    },
+    {
+      id: 'factions',
+      icon: <GroupsOutlinedIcon />,
+      label: 'Factions',
+      active: pathname === '/factions',
+      onClick: () => navigate('/factions'),
       disabled: !worldState,
     },
     {

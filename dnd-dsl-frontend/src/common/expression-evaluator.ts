@@ -1,5 +1,5 @@
 import type { SerializedModel, SerializedNode, SerializedRef, SerializedRefChain, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
-import { evaluateStatusExpression, resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
+import { evaluateRelationQuery, evaluateStatusExpression, resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import { isStatusExpressionType } from '@dnd-language/evaluation/dnd-dsl-status.js';
 import { serializedRefName } from '@dnd-language/evaluation/dnd-dsl-reference.js';
 import { PREDEFINED_FUNCTIONS } from '@dnd-language/evaluation/dnd-dsl-predefined-functions.js';
@@ -136,6 +136,8 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
             if (!options?.worldState) return undefined;
             try {
                 const chain = expr as unknown as SerializedRefChain;
+                const exists = evaluateRelationQuery(options.worldState, chain);
+                if (exists !== undefined) return exists;
                 const target = resolveSerializedRefChain(options.worldState, chain);
                 const value = target.kind === 'location' || target.kind === 'entity'
                     // Reuse the ObjectDeclaration case above rather than duplicating record-building.

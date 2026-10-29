@@ -20,6 +20,7 @@ import {
     isParentRefItem,
     isQuestRefItem,
     isRefChain,
+    isRelationRefItem,
     isThisRefItem,
     isVariableDeclaration,
     isVariableRef,
@@ -32,6 +33,7 @@ import {
     type RefChain,
     type VariableDeclaration,
 } from "./generated/ast.js";
+import { ENDPOINT_KIND, findRelation } from "./evaluation/dnd-dsl-relations.js";
 import { chainHead, lastChainSegment, nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from "./evaluation/dnd-dsl-state-path.js";
 
 /** 
@@ -205,6 +207,15 @@ export class DndScopeProvider extends DefaultScopeProvider
         else if (isFactionRefItem(prev))
         {
             members = prev.val.val.ref?.variables;
+        }
+        else if (isRelationRefItem(prev))
+        {
+            // `relation npc "Ann" "Member of" faction "Guards" . Standing` -> that fact's own variables, if it is written
+            const host = prev.subject.val.val.ref;
+            const type = prev.predicate.ref;
+            const target = prev.target.val.val.ref;
+            const kind = ENDPOINT_KIND[prev.target.$type];
+            members = host && type && target && kind ? findRelation(undefined, host, type.name, kind, target.name)?.variables : undefined;
         }
         else if (isWorldRefItem(prev))
         {

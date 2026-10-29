@@ -4,10 +4,11 @@ import { DefaultCompletionProvider, type CompletionContext } from "langium/lsp";
 import type { LangiumServices } from "langium/lsp";
 import { CompletionItemKind, CompletionList } from "vscode-languageserver";
 import type { CancellationToken, CompletionItem, CompletionParams } from "vscode-languageserver";
-import { isChangeOccurrence, isLocation, isQuest, isRefChain, isSetStatement, isVariableRef, type RefChain } from "./generated/ast.js";
+import { isChangeOccurrence, isFaction, isLocation, isNpc, isQuest, isRefChain, isSetStatement, isVariableRef, type RefChain, type RelationType } from "./generated/ast.js";
 import { PREDEFINED_SIGNATURES } from "./evaluation/dnd-dsl-predefined-signatures.js";
 import { COLLECTION_FIELDS, SIMPLE_FIELDS, ObjectKind, collectionHeadKind } from "./dnd-dsl-validator.js";
 import { chainHead } from "./evaluation/dnd-dsl-state-path.js";
+import { HOST_KIND } from "./evaluation/dnd-dsl-relations.js";
 
 /** The name slot of `call predefined <name>` */
 const CALL_KEYWORD = "call";
@@ -37,6 +38,14 @@ const ENTITY_SLOT = new RegExp(
  */
 const STEP_SLOT = /\b(location|quest)[ \t]+"([^"\n]*)"((?:[ \t]*(?:->|\.[ \t]*(?:sublocations|objectives))[ \t]*"[^"\n]*")*)[ \t]*(?:->|\.[ \t]*(sublocations|objectives))[ \t]*"([^"\n]*)$/;
 const ENTRY_SLOT = /(?:^|[^\w"])entry[ \t]+"([^"\n]*)$/;
+
+/**
+ * The relation type of a fact (`"Member of" faction "Guards"`: the line starts with the string, no keyword before it)
+ * and of a query head (`relation npc "Ann" "Member of" faction "Guards"`). The query's subject keyword says which kind
+ * the type has to start from.
+ */
+const FACT_SLOT = /^[ \t]*"([^"\n]*)$/;
+const QUERY_SLOT = /\brelation[ \t]+(npc|faction)[ \t]+"[^"\n]*"[ \t]+("?)([^"\n]*)$/;
 
 export class DndCompletionProvider extends DefaultCompletionProvider {
     //We would like completion for:
@@ -71,6 +80,11 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return CompletionList.create(this.deduplicateItems(children), true);
         }
 
+        const relationTypes = this.relationTypeCompletions(document, params);
+        if (relationTypes) {
+            return CompletionList.create(this.deduplicateItems(relationTypes), true);
+        }
+
         const names = this.entityNameCompletions(document, params);
         if (names.length > 0) {
             return CompletionList.create(this.deduplicateItems(names), true);
@@ -81,7 +95,42 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return CompletionList.create(predefined, true);
         }
 
-        return super.getCompletion(document, params, cancelToken);
+        return this.quoteRelationTypes(document, params, await super.getCompletion(document, params, cancelToken));
+    }
+
+    /**
+     * With no quote typed yet (an empty line or a bare `Mem`) the default cross-reference completion offers the relation
+     * type as a bare name. Rewrites those items to the quoted string and drops the types the entity cannot start from.
+     */
+    private quoteRelationTypes(document: LangiumDocument, params: CompletionParams, list: CompletionList | undefined): CompletionList | undefined {
+        if (!list) return list;
+        const types = new Map<string, RelationType | undefined>();
+        for (const description of this.indexManager.allElements("RelationType")) {
+            types.set(description.name, this.nodeOf(description) as RelationType | undefined);
+        }
+        if (types.size === 0) return list;
+
+        const hostKind = this.hostKindAt(document, params);
+        const items: CompletionItem[] = [];
+        for (const item of list.items) {
+            const type = item.kind === CompletionItemKind.Reference ? types.get(item.label) : undefined;
+            const edit = item.textEdit;
+            if (!type || !edit || !("range" in edit)) {
+                items.push(item);
+                continue;
+            }
+            if (hostKind && !(type.sources as string[]).includes(hostKind)) continue;
+            items.push({ ...item, textEdit: { range: edit.range, newText: `"${item.label}"` } });
+        }
+        return CompletionList.create(items, list.isIncomplete);
+    }
+
+    /** The relation kind of the npc or faction the cursor is in, if any. */
+    private hostKindAt(document: LangiumDocument, params: CompletionParams): string | undefined {
+        const cst = document.parseResult.value.$cstNode;
+        const leaf = cst && CstUtils.findLeafNodeBeforeOffset(cst, document.textDocument.offsetAt(params.position));
+        const host = leaf && AstUtils.getContainerOfType(leaf.astNode, node => isNpc(node) || isFaction(node));
+        return host ? HOST_KIND[host.$type] : undefined;
     }
 
     private predefinedCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
@@ -252,6 +301,44 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return this.nameItems(document, params, entry[1], true, ObjectKind.Location, owner ? owner.sublocations.map(l => l.name) : []);
         }
         return undefined;
+    }
+
+    /**
+     * The relation types that can start from the entity the cursor is in (a fact), or from the subject kind a query names.
+     * Undefined when the cursor is in neither slot, so the other completions still run. Langium's own cross-reference
+     * completion would offer the bare name, since it does not know the string needs its quotes.
+     */
+    private relationTypeCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] | undefined {
+        const td = document.textDocument;
+        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+
+        let hostKind: string | undefined;
+        let partial: string;
+        let hasOpenQuote: boolean;
+
+        const query = QUERY_SLOT.exec(line);
+        const fact = query ? undefined : FACT_SLOT.exec(line);
+        if (query) {
+            hostKind = query[1];
+            hasOpenQuote = query[2] === '"';
+            partial = query[3];
+        } else if (fact) {
+            partial = fact[1];
+            hasOpenQuote = true;
+            hostKind = this.hostKindAt(document, params);
+            // A line that starts with a quote outside an npc or faction is not a fact.
+            if (!hostKind) return undefined;
+        } else {
+            return undefined;
+        }
+
+        const names: string[] = [];
+        for (const description of this.indexManager.allElements("RelationType")) {
+            const type = this.nodeOf(description) as RelationType | undefined;
+            if (type && hostKind && !(type.sources as string[]).includes(hostKind)) continue;
+            names.push(description.name);
+        }
+        return this.nameItems(document, params, partial, hasOpenQuote, "RelationType", names);
     }
 
     private findByName(type: ObjectKind, name: string): AstNode | undefined {

@@ -29,6 +29,8 @@ import {
     isLocationRefItem,
     isFaction,
     isFactionRefItem,
+    isRelation,
+    isRelationRefItem,
     isNpc,
     isNpcRefItem,
     isObjectDeclaration,
@@ -50,6 +52,7 @@ import {
     Model,
     Objective,
     OnBlock,
+    RelationRefItem,
     PrintStatement,
     Quest,
     QuestStatements,
@@ -62,6 +65,7 @@ import {
 } from '@dnd-language/index.js';
 import { Injectable } from '@nestjs/common';
 import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
+import { ENDPOINT_KIND, findRelation } from '@dnd-language/evaluation/dnd-dsl-relations.js';
 import { chainHead, encodeStatePath, nodeToStatePath, parentOwningObject, statePathToNode, unwrapExpression, type ChainHead, type OwningObject, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefined-signatures.js';
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
@@ -399,6 +403,7 @@ export class LangiumInterpreterService {
                 if (!f) throw new Error(`Unresolved faction ref: ${head.val.val.$refText}`);
                 return this.readPath(ctx, [{ kind: 'faction', name: f.name }]);
             }
+            if (isRelationRefItem(head)) return this.relationExists(ctx, head);
             if (isThisRefItem(head)) {
                 if (!ctx.thisEntity) throw new Error(`'this' is not available here`);
                 if (isEvent(ctx.thisEntity)) throw new Error(`Cannot read 'this' as a value when it refers to an Event`);
@@ -464,6 +469,17 @@ export class LangiumInterpreterService {
         return current;
     }
 
+    /** Whether the fact a `relation ...` head names is written in the world. Facts are source, so the live model answers. */
+    private relationExists(ctx: EvalContext, head: RelationRefItem): boolean {
+        const host = head.subject.val.val.ref;
+        const target = head.target.val.val.ref;
+        const type = head.predicate.ref;
+        if (!host) throw new Error(`Unresolved ref: ${head.subject.val.val.$refText}`);
+        if (!target) throw new Error(`Unresolved ref: ${head.target.val.val.$refText}`);
+        if (!type) throw new Error(`Unresolved relation type: ${head.predicate.$refText}`);
+        return findRelation(ctx.model, host, type.name, ENDPOINT_KIND[head.target.$type], target.name) !== undefined;
+    }
+
     /** A persistent read that sees this run's own not-yet-flushed writes: the newest
      *  pending write to exactly this path wins, else the served state is read. Without
      *  it a second `append` on a persistent list would start from the old value and
@@ -507,7 +523,7 @@ export class LangiumInterpreterService {
     private readPersistentValue(worldState: SerializedModel, path: StatePath): any {
         const node = statePathToNode(worldState as unknown as Model, path) as any;
         if (!node) return undefined; // renamed/removed since linking - soft-fail
-        if (isLocation(node) || isObjectDeclaration(node) || isNpc(node) || isFaction(node) || isQuest(node) || isObjective(node) || isWorld(node)) {
+        if (isLocation(node) || isObjectDeclaration(node) || isNpc(node) || isFaction(node) || isRelation(node) || isQuest(node) || isObjective(node) || isWorld(node)) {
             return buildVariablesRecord(worldState, node.variables as any);
         }
         return evaluateSerializedExpression(worldState, node.value);

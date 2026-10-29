@@ -321,6 +321,7 @@ RefChainHead infers RefChainStart:
     | EventRefItem
     | NpcRefItem
     | FactionRefItem
+    | RelationRefItem
     | WorldRefItem
     | EnumRefItem
     | ThisRefItem
@@ -344,6 +345,9 @@ NpcRefItem:
     isNpc='npc' val=NpcRef;
 FactionRefItem:
     isFaction='faction' val=FactionRef;
+// `relation npc "Ann" "Member of" faction "Guards"`: whether that fact is written, or with `. Var` one of its variables.
+RelationRefItem:
+    isRelation='relation' subject=RelationEndpoint predicate=[RelationType:STRING] target=RelationEndpoint;
 // Only one World per document, so a bare keyword is enough - no cross-reference to
 // resolve. Exists so `world . npcs` etc. can be written as a CollectionRef head.
 WorldRefItem:

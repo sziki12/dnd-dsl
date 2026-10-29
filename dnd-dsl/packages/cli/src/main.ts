@@ -43,11 +43,12 @@ export const stringifyNode = (node: AstNode, paramServices: DndDslServices | und
 
 export const parseModel = async (fileName: string, paramServices: DndDslServices | undefined = undefined): Promise<Model> => {
     const services = paramServices || createDndDslServices(NodeFileSystem).DndDsl;
+    // Load pre declared objects first: extractDocument already builds and validates the document, so a fact's
+    // relation type ("Member of") has to be in the index by then.
+    await registerBuiltinDocument(services.shared);
+
     // 1. Document betöltése
     const document = await extractDocument(fileName, services);
-
-    // Load pre declared objects
-    await registerBuiltinDocument(services.shared);
 
     // 2. Explicitly build-elni kell – ez futtatja a linkert!
     await services.shared.workspace.DocumentBuilder.build(

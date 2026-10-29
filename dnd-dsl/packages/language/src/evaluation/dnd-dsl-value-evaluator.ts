@@ -13,6 +13,8 @@ import type {
 import { isStatusExpressionType, STATUS_VARIABLE, statusExpressionHolds, type StatusExpressionType } from './dnd-dsl-status.js';
 import { parseReferenceFromSerializedModel, serializedRefName } from './dnd-dsl-reference.js';
 import { chainHead } from './dnd-dsl-state-path.js';
+import { ENDPOINT_KIND, findRelation, refName } from './dnd-dsl-relations.js';
+import type { Model } from '../generated/ast.js';
 import {
     applyArithmetic,
     applyComparison,
@@ -81,6 +83,29 @@ export function resolveSerializedRefChain(model: SerializedModel, chain: Seriali
     const decl = parseReferenceFromSerializedModel<SerializedVariableDecl>(model, ref);
     if (!decl) throw new Error(`Unresolved variable ref in chain: ${ref.$ref}`);
     return { kind: 'variable', node: decl };
+}
+
+/**
+ * `relation npc "Ann" "Member of" faction "Guards"` with nothing after it: whether that fact is written in the world.
+ * Undefined when `chain` is not such a query, so the caller falls through to the ordinary chain rules; a query that
+ * continues (`. Standing`) is an ordinary variable read and goes through `resolveSerializedRefChain`.
+ */
+export function evaluateRelationQuery(model: SerializedModel, chain: SerializedRefChain): boolean | undefined {
+    const head = chainHead(chain) as unknown as {
+        $type: string;
+        subject: { $type: string; val: { val: SerializedRef } };
+        predicate: SerializedRef;
+        target: { $type: string; val: { val: SerializedRef } };
+    };
+    if (head.$type !== 'RelationRefItem' || chain.rest.length > 0) return undefined;
+
+    const live = model as unknown as Model;
+    const host = parseReferenceFromSerializedModel<SerializedNpc | SerializedFaction>(model, head.subject.val.val);
+    const predicate = refName(live, head.predicate);
+    const targetName = refName(live, head.target.val.val);
+    const targetKind = ENDPOINT_KIND[head.target.$type];
+    if (!host || predicate === undefined || targetName === undefined || !targetKind) return false;
+    return findRelation(live, host as never, predicate, targetKind, targetName) !== undefined;
 }
 
 /**
@@ -177,6 +202,8 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
 
         case 'RefChain': {
             const chain = node as unknown as SerializedRefChain;
+            const exists = evaluateRelationQuery(model, chain);
+            if (exists !== undefined) return exists;
             const target = resolveSerializedRefChain(model, chain);
             const value = target.kind === 'location' || target.kind === 'entity'
                 ? buildVariablesRecord(model, target.node.variables)
