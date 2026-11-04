@@ -13,6 +13,7 @@ function useViewName(): string {
 
   if (pathname === '/') return 'Home';
   if (pathname.startsWith('/location/')) return locationName ?? worldState?.World?.locations[0]?.name ?? 'Location';
+  if (pathname === '/map') return 'World map';
   if (pathname === '/npcs') return 'NPCs';
   if (pathname === '/factions') return 'Factions';
   if (pathname === '/quests') return 'Quests';

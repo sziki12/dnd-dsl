@@ -327,6 +327,22 @@
 .map-hide-edges .react-flow__edges { display: none; }
 .map-hide-nodes .react-flow__node { visibility: hidden !important; pointer-events: none !important; }
 
+/* The chevron that opens a group on the world map. */
+.map-node-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 1px solid var(--bd-soft);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.map-node-toggle:hover { color: var(--fg-bright); background: var(--bg-hover, var(--bd-soft)); }
+
 .map-settings {
   position: absolute;
   top: 8px;

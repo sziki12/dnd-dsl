@@ -2,6 +2,7 @@ import { useContext } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
+import MapOutlinedIcon from '@mui/icons-material/MapOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined';
 import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
@@ -34,6 +35,14 @@ export default function ActivityBar() {
       active: pathname.startsWith('/location/'),
       onClick: () => fallbackLocation && navigate(`/location/${encodeURIComponent(fallbackLocation)}`),
       disabled: !fallbackLocation,
+    },
+    {
+      id: 'map',
+      icon: <MapOutlinedIcon />,
+      label: 'World map',
+      active: pathname === '/map',
+      onClick: () => navigate('/map'),
+      disabled: !worldState,
     },
     {
       id: 'npcs',

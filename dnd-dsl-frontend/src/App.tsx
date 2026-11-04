@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import LocationView from './pages/LocationView';
+import WorldMapView from './pages/WorldMapView';
 import NpcsView from './pages/NpcsView';
 import FactionsView from './pages/FactionsView';
 import EventsView from './pages/EventsView';
@@ -39,6 +40,7 @@ function App() {
         <Routes>
           {createRoute({path:"/", element:<Home />})}
           {createRoute({path:"/location/:locationName", element:<LocationView />})}
+          {createRoute({path:"/map", element:<WorldMapView />})}
           {createRoute({path:"/npcs", element:<NpcsView />})}
           {createRoute({path:"/factions", element:<FactionsView />})}
           {createRoute({path:"/quests", element:<QuestsView />})}

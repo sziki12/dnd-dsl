@@ -6,6 +6,7 @@ import { FileService } from './file.service.js';
 import { WorldStateService } from '../world-state/world-state.service.js';
 import { EMPTY_STATE_OVERLAY, type StateOverlayFile } from '../world-state/state-overlay.types.js';
 import { isSafeSegment, readMapView, writeMapView, type MapViewEntry } from './map-view-store.js';
+import { readLayout, writeLayout, type Layout } from './layout-store.js';
 
 @Controller('file')
 export class FileController {
@@ -41,15 +42,9 @@ export class FileController {
         @Query('adventure') adventure: string,
         @Query('world') world: string,
         @Query('location') location: string,
-        @Body() positions: Record<string, { x: number; y: number }>
+        @Body() positions: Layout
     ): { success: boolean } {
-        const layoutPath = this.fileService.getLayoutFilePath(adventure, world);
-        let allLayouts: Record<string, Record<string, { x: number; y: number }>> = {};
-        if (fs.existsSync(layoutPath)) {
-            allLayouts = JSON.parse(fs.readFileSync(layoutPath, 'utf-8'));
-        }
-        allLayouts[location] = positions;
-        fs.writeFileSync(layoutPath, JSON.stringify(allLayouts, null, 2), 'utf-8');
+        writeLayout(this.fileService.getLayoutFilePath(adventure, world), location, positions);
         return { success: true };
     }
 
@@ -58,11 +53,8 @@ export class FileController {
         @Query('adventure') adventure: string,
         @Query('world') world: string,
         @Query('location') location: string,
-    ): Record<string, { x: number; y: number }> {
-        const layoutPath = this.fileService.getLayoutFilePath(adventure, world);
-        if (!fs.existsSync(layoutPath)) return {};
-        const allLayouts = JSON.parse(fs.readFileSync(layoutPath, 'utf-8'));
-        return allLayouts[location] ?? {};
+    ): Layout {
+        return readLayout(this.fileService.getLayoutFilePath(adventure, world), location);
     }
 
     // Map view settings (colours, labels, node size, ...) per location. An empty body clears the location's entry.

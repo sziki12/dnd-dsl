@@ -15,13 +15,13 @@ import {
   type ViewMode,
 } from './map-view-settings';
 
-const COLOUR_ROWS: { scope: ColorScope; label: string; indent?: boolean }[] = [
+const COLOUR_ROWS: { scope: ColorScope; label: string; worldLabel?: string; indent?: boolean; worldHidden?: boolean }[] = [
   { scope: 'all', label: 'Everything' },
   { scope: 'nodes', label: 'All nodes' },
-  { scope: 'root', label: 'This location', indent: true },
+  { scope: 'root', label: 'This location', worldLabel: 'Top-level locations', indent: true },
   { scope: 'sub', label: 'Sublocations', indent: true },
   { scope: 'entry', label: 'Entry sublocation', indent: true },
-  { scope: 'external', label: 'Exit targets', indent: true },
+  { scope: 'external', label: 'Exit targets', indent: true, worldHidden: true },
   { scope: 'edges', label: 'All edges' },
   { scope: 'exit', label: 'Exits', indent: true },
   { scope: 'sublocation', label: 'Sublocation links', indent: true },
@@ -77,7 +77,9 @@ function SliderRow({ label, value, min, max, step, suffix, disabled, onChange }:
  * Live view settings for the map. Every change calls onChange straight away, and MapFlow turns it into CSS
  * variables and classes, so the map updates as a slider moves or a colour is dragged.
  */
-export default function MapSettingsPanel({ settings, mode, image, exitTags, onChange, onClose }: {
+export default function MapSettingsPanel({ scope = 'location', settings, mode, image, exitTags, onChange, onClose }: {
+  /** The world map has no exit targets outside the map and calls its nodes by what they are there. */
+  scope?: 'location' | 'world';
   settings: MapViewSettings;
   mode: ViewMode;
   /** Every tag the exits of this location carry, for the exit styles. */
@@ -93,7 +95,7 @@ export default function MapSettingsPanel({ settings, mode, image, exitTags, onCh
     if (!file) return;
     // A file that cannot be used is reported by the upload itself, without asking about the old image first.
     if (image.hasImage && validateImageFile(file) === undefined
-      && !window.confirm(`Replace this location's map image with "${file.name}"? The current image file is deleted.`)) return;
+      && !window.confirm(`Replace this ${scope === 'world' ? "world map's" : "location's"} map image with "${file.name}"? The current image file is deleted.`)) return;
     image.onReplace(file);
   };
   const patchNodes = (patch: Partial<MapViewSettings['nodes']>) => onChange({ ...settings, nodes: { ...settings.nodes, ...patch } });
@@ -158,22 +160,22 @@ export default function MapSettingsPanel({ settings, mode, image, exitTags, onCh
       </Section>
 
       <Section title="Colours">
-        {COLOUR_ROWS.map(({ scope, label, indent }) => (
-          <div key={scope} className="ms-row" style={indent ? { paddingLeft: 14 } : undefined}>
-            <span className="ms-label">{label}</span>
-            <span className="ms-state">{stateLabel(settings, scope)}</span>
+        {COLOUR_ROWS.filter(row => scope !== 'world' || !row.worldHidden).map(({ scope: colourScope, label, worldLabel, indent }) => (
+          <div key={colourScope} className="ms-row" style={indent ? { paddingLeft: 14 } : undefined}>
+            <span className="ms-label">{scope === 'world' && worldLabel ? worldLabel : label}</span>
+            <span className="ms-state">{stateLabel(settings, colourScope)}</span>
             <input
               type="color"
-              value={settings.colors[scope] ?? pickerColor(settings, scope)}
-              onChange={e => onChange(setColor(settings, scope, e.target.value))}
+              value={settings.colors[colourScope] ?? pickerColor(settings, colourScope)}
+              onChange={e => onChange(setColor(settings, colourScope, e.target.value))}
             />
             <button
               type="button"
               className="ms-icon-btn"
               title="Back to the default"
-              disabled={!settings.colors[scope]}
-              style={settings.colors[scope] ? undefined : { visibility: 'hidden' }}
-              onClick={() => onChange(setColor(settings, scope, undefined))}
+              disabled={!settings.colors[colourScope]}
+              style={settings.colors[colourScope] ? undefined : { visibility: 'hidden' }}
+              onClick={() => onChange(setColor(settings, colourScope, undefined))}
             >
               <CloseOutlinedIcon style={{ fontSize: 14 }} />
             </button>
@@ -183,7 +185,7 @@ export default function MapSettingsPanel({ settings, mode, image, exitTags, onCh
       </Section>
 
       <div className="ms-foot">
-        <button type="button" className="ms-reset" onClick={() => onChange(defaultSettings())}>Reset to defaults</button>
+        <button type="button" className="ms-reset" onClick={() => onChange({ ...defaultSettings(), expanded: settings.expanded })}>Reset to defaults</button>
       </div>
     </div>
   );

@@ -74,6 +74,9 @@ import { ENDPOINT_KIND, HOST_KIND, queryEnd } from './evaluation/dnd-dsl-relatio
 type NamedNode = State | StateValueDecl | Event | Faction | FunctionDeclaration | Location | Npc | Objective | Quest;
 import type { DndDslServices } from './dnd-dsl-module.js';
 
+/** The key the frontend's world map is stored under, next to the location names. */
+const WORLD_MAP_KEY = '$world';
+
 /** 
  * CollectionRef.head kind -> its legal `field` names
  */
@@ -230,7 +233,14 @@ export function registerValidationChecks(services: DndDslServices) {
 export class DndDslValidator {
 
     checkUniqueNames(world: World, accept: ValidationAcceptor): void {
-        this.checkUnique(this.collectAllLocations(world.locations), accept, 'Location');
+        const locations = this.collectAllLocations(world.locations);
+        this.checkUnique(locations, accept, 'Location');
+        // The world map files its layout, view settings and image under this name.
+        for (const location of locations) {
+            if (location.name === WORLD_MAP_KEY) {
+                accept('error', `The location name "${WORLD_MAP_KEY}" is reserved for the world map.`, { node: location, property: 'name' });
+            }
+        }
         this.checkUnique(world.quests, accept, 'Quest');
         // `objective completed "X"` and `fail objective "X"` name an objective on its own, with
         // no quest in front of it, so the name has to be unique across every quest.

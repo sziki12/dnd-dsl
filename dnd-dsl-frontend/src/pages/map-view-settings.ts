@@ -44,6 +44,8 @@ export interface MapViewSettings {
   colors: Partial<Record<ColorScope, string>>;
   /** How exits with certain tags look, in order; later rules win. */
   tagRules: TagRule[];
+  /** World map only: the locations whose sublocations are shown. */
+  expanded: string[];
 }
 
 /** What each kind looks like with no custom colour. Used to show something in the pickers; the real fallback is CSS. */
@@ -64,6 +66,7 @@ export function defaultSettings(): MapViewSettings {
     edges: { visible: true },
     colors: {},
     tagRules: [],
+    expanded: [],
   };
 }
 
@@ -107,7 +110,27 @@ export function sanitizeSettings(raw: unknown): MapViewSettings {
     edges: { visible: bool(edges.visible, base.edges.visible) },
     colors: cleanColors,
     tagRules: sanitizeTagRules(r.tagRules),
+    expanded: sanitizeExpanded(r.expanded),
   };
+}
+
+/** The most open groups a saved view may remember. */
+export const MAX_EXPANDED = 500;
+
+/** Open groups as a clean list: strings only, no repeats, bounded. */
+export function sanitizeExpanded(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item === 'string' && item.length > 0 && item.length <= 200) seen.add(item);
+    if (seen.size >= MAX_EXPANDED) break;
+  }
+  return [...seen];
+}
+
+/** The open groups after opening or closing `name`. */
+export function toggleExpanded(expanded: readonly string[], name: string): string[] {
+  return expanded.includes(name) ? expanded.filter(n => n !== name) : [...expanded, name];
 }
 
 /**
