@@ -5,12 +5,12 @@ import * as vscode from 'vscode';
 import { FILE_URI, getMonacoInit, toMonacoUri, VIEW_FILE_EXTENSION } from '../MonacoInit';
 import { FileContext } from './FileContext';
 import { DslContext } from './DslContext';
-import type { EntityRef } from '../common/entity-at-cursor';
+import { enclosingQuestAt, type EntityRef } from '../common/entity-at-cursor';
 
 /** What the editor needs from the page to offer "Open View" on a named object in the world. */
 export type EntityActions = {
-    /** The entity at a 1-based column of a line of text, if there is one. */
-    find: (line: string, column: number) => EntityRef | undefined,
+    /** The entity at a 1-based column of a line of text, if there is one. `enclosingQuest` is the quest the line is in. */
+    find: (line: string, column: number, enclosingQuest?: string) => EntityRef | undefined,
     open: (entity: EntityRef) => void,
 }
 
@@ -99,7 +99,9 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         const entityAtCursor = () => {
             const position = editor.getPosition();
             const model = editor.getModel();
-            return position && model ? actions.find(model.getLineContent(position.lineNumber), position.column) : undefined;
+            if (!position || !model) return undefined;
+            const quest = enclosingQuestAt(lineNumber => model.getLineContent(lineNumber), position.lineNumber);
+            return actions.find(model.getLineContent(position.lineNumber), position.column, quest);
         };
         const onEntity = editor.createContextKey<boolean>('dndEntityUnderCursor', false);
         const refresh = () => onEntity.set(entityAtCursor() !== undefined);

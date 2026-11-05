@@ -242,9 +242,11 @@ export class DndDslValidator {
             }
         }
         this.checkUnique(world.quests, accept, 'Quest');
-        // `objective completed "X"` and `fail objective "X"` name an objective on its own, with
-        // no quest in front of it, so the name has to be unique across every quest.
-        this.checkUnique(world.quests.flatMap(q => q.objectives), accept, 'Objective', 'names must be unique across all quests.');
+        // Two quests may reuse an objective name: `quest "Q" -> "X"` says which, and a bare `objective "X"` that
+        // is not clear is reported where it is written (see DndLinker).
+        for (const quest of world.quests) {
+            this.checkUnique(quest.objectives, accept, 'Objective', 'names must be unique within a quest.');
+        }
         this.checkUnique(world.events, accept, 'Event');
         this.checkUnique(world.functions, accept, 'Function');
         this.checkUnique(world.npcs, accept, 'Npc');

@@ -268,7 +268,15 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const typeName = ENTITY_TYPE[keyword];
         if (!typeName) return [];
 
-        return this.nameItems(document, params, partial, quote === '"', typeName, Array.from(this.indexManager.allElements(typeName), d => d.name));
+        const descriptions = Array.from(this.indexManager.allElements(typeName));
+        const counts = new Map<string, number>();
+        for (const description of descriptions) counts.set(description.name, (counts.get(description.name) ?? 0) + 1);
+        // Objectives of different quests may share a name; the quest in the detail keeps the entries apart.
+        const names = descriptions.map(description => {
+            const owner = typeName === ObjectKind.Objective && counts.get(description.name)! > 1 ? this.nodeOf(description)?.$container : undefined;
+            return owner && "name" in owner ? { name: description.name, detail: `${typeName} of ${String(owner.name)}` } : description.name;
+        });
+        return this.nameItems(document, params, partial, quote === '"', typeName, names);
     }
 
     /**
@@ -362,7 +370,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         return target ? this.locator.getAstNode(target.parseResult.value, description.path) : undefined;
     }
 
-    private nameItems(document: LangiumDocument, params: CompletionParams, partial: string, hasOpenQuote: boolean, detail: string, names: string[]): CompletionItem[] {
+    private nameItems(document: LangiumDocument, params: CompletionParams, partial: string, hasOpenQuote: boolean, detail: string, names: Array<string | { name: string; detail: string }>): CompletionItem[] {
         const td = document.textDocument;
         const offset = td.offsetAt(params.position);
         const text = td.getText();
@@ -374,12 +382,13 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const newTextPrefix = hasOpenQuote ? "" : '"';
 
         const items: CompletionItem[] = [];
-        for (const name of names) {
+        for (const entry of names) {
+            const name = typeof entry === "string" ? entry : entry.name;
             if (partial && !this.fuzzyMatcher.match(partial, name)) continue;
             items.push({
                 label: name,
                 kind: CompletionItemKind.Value,
-                detail,
+                detail: typeof entry === "string" ? detail : entry.detail,
                 sortText: "0",
                 textEdit: {
                     range: { start, end },

@@ -277,7 +277,7 @@ export type ChainHead = RefChain['first'];
 
 /**
  * The head a chain's members and fields apply to. After a step down to a child (`location "A" -> "B"`,
- * `quest "Q" . objectives "O"`) that is the last step, since names are unique and the child alone says which
+ * `quest "Q" . objectives "O"`) that is the last step, since the child, linked within its parent, alone says which
  * entity is meant; otherwise it is `first`. Works on the serialized model too, where `steps` can be absent.
  */
 export function chainHead<T>(chain: { first: T; steps?: ReadonlyArray<T> }): T {

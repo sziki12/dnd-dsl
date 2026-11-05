@@ -5,7 +5,7 @@ import type { StatePath } from "./dnd-dsl-state-path.js";
  **/
 export const STATUS_VARIABLE = "Status";
 
-export const QUEST_STATUSES = ["Unavailable", "Available", "Started", "Succeeded", "Failed"] as const;
+export const QUEST_STATUSES = ["Unavailable", "Available", "Started", "Completed", "Failed"] as const;
 export const OBJECTIVE_STATUSES = ["Incomplete", "Completed", "Failed"] as const;
 
 export type QuestStatusValue = (typeof QUEST_STATUSES)[number];
@@ -40,7 +40,7 @@ type Rule<S extends string> = { from: S; to: S; runs?: StatusBlock };
 const QUEST_RULES: Partial<Record<StatusAction, Rule<QuestStatusValue>>> = {
     enable: { from: "Unavailable", to: "Available" },
     accept: { from: "Available", to: "Started" },
-    complete: { from: "Started", to: "Succeeded", runs: "completed" },
+    complete: { from: "Started", to: "Completed", runs: "completed" },
     fail: { from: "Started", to: "Failed", runs: "failed" },
 };
 
@@ -56,7 +56,7 @@ export function statusOrDefault(kind: StatusKind, current: unknown): string {
 }
 
 const STATUS_EXPRESSIONS = {
-    QuestCompletedExpression: { kind: "quest", holds: (s: string) => s === "Succeeded" },
+    QuestCompletedExpression: { kind: "quest", holds: (s: string) => s === "Completed" },
     QuestFailedExpression: { kind: "quest", holds: (s: string) => s === "Failed" },
     // Crossed `accept` at all, whatever became of the quest since.
     QuestAcceptedExpression: { kind: "quest", holds: (s: string) => s !== "Unavailable" && s !== "Available" },

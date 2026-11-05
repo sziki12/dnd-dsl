@@ -114,10 +114,12 @@ ObjectiveExpressions:
     'objective' (ObjectiveCompletedExpression
     | ObjectiveFailedExpression)
     ;
+// `quest "Q" ->` in front names the quest the objective belongs to, for an objective name that more than one quest uses.
+// `target` stays the one cross-reference, so every reader of the expression is unchanged.
 ObjectiveCompletedExpression:
-    'completed' target=ObjectiveRef;
+    'completed' ('quest' quest=QuestRef '->')? target=ObjectiveRef;
 ObjectiveFailedExpression:
-    'failed' target=ObjectiveRef;
+    'failed' ('quest' quest=QuestRef '->')? target=ObjectiveRef;
 
 //Event
 Event:
@@ -205,10 +207,12 @@ QuestStatements:
     CompleteStatement;
 AcceptQuest infers QuestStatements:
     status='accept' 'quest' target=QuestRef;
+// `complete quest "Q" -> "O"` is the objective O of quest Q (`target` is then an ObjectiveRef, as for `complete objective "O"`);
+// `complete quest "Q"` is the quest. The `->` tells them apart.
 FailStatement infers QuestStatements:
-    status='fail' ('quest' target=QuestRef | 'objective' target=ObjectiveRef);
+    status='fail' ('quest' quest=QuestRef '->' target=ObjectiveRef | 'quest' target=QuestRef | 'objective' target=ObjectiveRef);
 CompleteStatement infers QuestStatements:
-    status='complete' ('quest' target=QuestRef | 'objective' target=ObjectiveRef);
+    status='complete' ('quest' quest=QuestRef '->' target=ObjectiveRef | 'quest' target=QuestRef | 'objective' target=ObjectiveRef);
 
 //General Declarations
 VariableDeclaration:
@@ -341,7 +345,8 @@ LocationRefItem:
     isLocation='location' val=LocationRef;
 QuestRefItem:
     isQuest='quest' val=QuestRef;
-// Objective names are unique across every quest (see the validator), so `objective "X"` names one on its own.
+// An objective name only has to be unique within its quest, so `objective "X"` names one on its own only while no other
+// quest has an objective of that name (inside a quest it means that quest's own); otherwise write `quest "Q" -> "X"`.
 // `objective completed "X"` / `objective failed "X"` (ObjectiveExpressions) are told apart by the keyword that follows.
 ObjectiveRefItem:
     isObjective='objective' val=ObjectiveRef;

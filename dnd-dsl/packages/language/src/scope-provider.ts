@@ -15,10 +15,13 @@ import {
     isFactionRefItem,
     isNpcRefItem,
     isObjectDeclaration,
+    isObjectiveCompletedExpression,
+    isObjectiveFailedExpression,
     isObjectiveRef,
     isObjectiveRefItem,
     isParentRefItem,
     isQuestRefItem,
+    isQuestStatements,
     isRefChain,
     isRelationRefItem,
     isThisRefItem,
@@ -59,11 +62,12 @@ export interface ChildSlot
 }
 
 /**
- * The children a name may pick, when `ref` is a step down to a child or an `entry`. After `location "A" ->` /
+ * The children a name may pick, when `ref` is a step down to a child, an `entry`, or the objective of a status form
+ * that names its quest (`complete quest "Q" -> "O"`, `objective completed quest "Q" -> "O"`). After `location "A" ->` /
  * `. sublocations` they are A's own sublocations, after `quest "Q" ->` / `. objectives` Q's own objectives, and for
- * `entry` the sublocations of the location it sits in. Names are unique, so the global scope would also link a name
- * that is not a child; scoping to these is what makes a step a check. Undefined when `ref` is not such a reference,
- * or the name before it did not link (that error is enough).
+ * `entry` the sublocations of the location it sits in. The global scope would also link a name that is not a child,
+ * or pick the wrong one of two that share a name; scoping to these is what makes a step a check. Undefined when
+ * `ref` is not such a reference, or the name before it did not link (that error is enough).
  */
 export function childSlot(ref: AstNode): ChildSlot | undefined
 {
@@ -78,6 +82,12 @@ export function childSlot(ref: AstNode): ChildSlot | undefined
     {
         const base = stepBase(step);
         const owner = isQuestRefItem(base) ? base.val.val.ref : undefined;
+        return owner && { owner, noun: "objective", children: owner.objectives };
+    }
+    if (isObjectiveRef(ref) && ref.$containerProperty === "target"
+        && (isObjectiveCompletedExpression(step) || isObjectiveFailedExpression(step) || isQuestStatements(step)))
+    {
+        const owner = step.quest?.val.ref;
         return owner && { owner, noun: "objective", children: owner.objectives };
     }
     if (isLocationEntry(ref) && isLocation(ref.$container))

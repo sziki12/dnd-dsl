@@ -23,7 +23,7 @@ export const DslEditor = () => {
     latest.current = { entityNames, navigate, hasUnsavedChanges: monacoContext.hasUnsavedChanges };
   });
   const entityActions = useRef<EntityActions>({
-    find: (line, column) => entityAt(line, column, latest.current.entityNames),
+    find: (line, column, enclosingQuest) => entityAt(line, column, latest.current.entityNames, enclosingQuest),
     open: entity => {
       // Leaving the page disposes the editor, so unsaved text would be lost.
       if (latest.current.hasUnsavedChanges() && !window.confirm('The editor has unsaved changes. Open the view and discard them?')) return;
