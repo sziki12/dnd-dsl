@@ -384,7 +384,7 @@ export class LangiumInterpreterService {
             if (isLocationRefItem(head)) {
                 const loc = head.val.val.ref;
                 if (!loc) throw new Error(`Unresolved location ref: ${head.val.val.$refText}`);
-                return this.readPath(ctx, [{ kind: 'location', name: loc.name }]);
+                return this.readPath(ctx, nodeToStatePath(loc)!);
             }
             if (isQuestRefItem(head)) {
                 const q = head.val.val.ref;

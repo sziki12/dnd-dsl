@@ -20,6 +20,7 @@ import {
   statePathToNode,
   type StatePath,
 } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { canonicalOverlayEntries, canonicalReminder } from '@dnd-language/evaluation/dnd-dsl-state-migration.js';
 import { evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { FiredReminder, ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
@@ -95,10 +96,11 @@ export class WorldStateService {
     const overlayFile = statePath && fs.existsSync(statePath)
       ? (JSON.parse(fs.readFileSync(statePath, 'utf-8')) as StateOverlayFile)
       : undefined;
-    this._overlay = overlayFile?.entries ?? {};
+    // State saved before sublocations were addressed through their parents carries the old, name-only form.
+    this._overlay = canonicalOverlayEntries(this._model, overlayFile?.entries ?? {});
     this._clock = overlayFile?.clock ?? 0;
-    this._reminders = overlayFile?.reminders ?? [];
-    this._firedReminders = overlayFile?.firedReminders ?? [];
+    this._reminders = (overlayFile?.reminders ?? []).map(reminder => canonicalReminder(this._model!, reminder));
+    this._firedReminders = (overlayFile?.firedReminders ?? []).map(reminder => canonicalReminder(this._model!, reminder));
     this.rebuildWorldState();
     this.buildHandlerIndex();
     return this._worldState;

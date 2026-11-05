@@ -4,7 +4,7 @@ import { DefaultCompletionProvider, type CompletionContext } from "langium/lsp";
 import type { LangiumServices } from "langium/lsp";
 import { CompletionItemKind, CompletionList } from "vscode-languageserver";
 import type { CancellationToken, CompletionItem, CompletionParams } from "vscode-languageserver";
-import { isChangeOccurrence, isFaction, isLocation, isNpc, isQuest, isRefChain, isSetStatement, isVariableRef, type RefChain, type RelationType } from "./generated/ast.js";
+import { isChangeOccurrence, isFaction, isLocation, isNpc, isQuest, isRefChain, isSetStatement, isVariableRef, isWorld, type Location, type RefChain, type RelationType } from "./generated/ast.js";
 import { PREDEFINED_SIGNATURES } from "./evaluation/dnd-dsl-predefined-signatures.js";
 import { COLLECTION_FIELDS, SIMPLE_FIELDS, ObjectKind, collectionHeadKind } from "./dnd-dsl-validator.js";
 import { chainHead } from "./evaluation/dnd-dsl-state-path.js";
@@ -33,11 +33,14 @@ const ENTITY_SLOT = new RegExp(
 );
 
 /**
- * `location "A" -> "B" -> "` / `quest "Q" . objectives "`: the head, the names of the steps already taken, and what is
- * typed of the next one. The keyword after the dot, when there is one, says which collection the step names.
+ * `location "A" -> "B" -> "` / `quest "Q" . objectives "`: the head, the names of the steps already taken, whether the
+ * next one has its quote yet, and what is typed of it. The keyword after the dot, when there is one, says which
+ * collection the step names.
  */
-const STEP_SLOT = /\b(location|quest)[ \t]+"([^"\n]*)"((?:[ \t]*(?:->|\.[ \t]*(?:sublocations|objectives))[ \t]*"[^"\n]*")*)[ \t]*(?:->|\.[ \t]*(sublocations|objectives))[ \t]*"([^"\n]*)$/;
-const ENTRY_SLOT = /(?:^|[^\w"])entry[ \t]+"([^"\n]*)$/;
+const STEP_SLOT = /\b(location|quest)[ \t]+"([^"\n]*)"((?:[ \t]*(?:->|\.[ \t]*(?:sublocations|objectives))[ \t]*"[^"\n]*")*)[ \t]*(?:->|\.[ \t]*(sublocations|objectives))[ \t]*("?)([^"\n]*)$/;
+const ENTRY_SLOT = /(?:^|[^\w"])entry[ \t]+("?)([^"\n]*)$/;
+/** `exit "Back" to "A" -> "`: the names of the path already written, whether the next one has its quote yet, and what is typed of it. */
+const EXIT_SLOT = /\bexit[ \t]+"[^"\n]*"[ \t]+to[ \t]+((?:"[^"\n]*"[ \t]*->[ \t]*)*)("?)([^"\n]*)$/;
 
 /**
  * The relation type of a fact (`"Member of" faction "Guards"`: the line starts with the string, no keyword before it)
@@ -268,15 +271,38 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const typeName = ENTITY_TYPE[keyword];
         if (!typeName) return [];
 
-        const descriptions = Array.from(this.indexManager.allElements(typeName));
-        const counts = new Map<string, number>();
-        for (const description of descriptions) counts.set(description.name, (counts.get(description.name) ?? 0) + 1);
-        // Objectives of different quests may share a name; the quest in the detail keeps the entries apart.
-        const names = descriptions.map(description => {
-            const owner = typeName === ObjectKind.Objective && counts.get(description.name)! > 1 ? this.nodeOf(description)?.$container : undefined;
-            return owner && "name" in owner ? { name: description.name, detail: `${typeName} of ${String(owner.name)}` } : description.name;
-        });
-        return this.nameItems(document, params, partial, quote === '"', typeName, names);
+        return this.nameItems(document, params, partial, quote === '"', typeName, this.nameEntries(typeName));
+    }
+
+    /**
+     * The names of every entity of a kind. Objectives of different quests and locations under different parents may
+     * share a name; the quest or parent in the detail keeps those entries apart. Counted by owner, not by index
+     * entry: the same world open twice is not a shared name.
+     */
+    private nameEntries(typeName: string): Array<string | { name: string; detail: string }> {
+        const found = Array.from(this.indexManager.allElements(typeName), description => ({ description, owner: this.ownerOf(typeName, this.nodeOf(description)) }));
+        const owners = new Map<string, Set<string>>();
+        for (const { description, owner } of found) {
+            const keys = owners.get(description.name) ?? new Set<string>();
+            keys.add(owner.key);
+            owners.set(description.name, keys);
+        }
+        return found.map(({ description, owner }) =>
+            owners.get(description.name)!.size > 1 && owner.detail ? { name: description.name, detail: owner.detail } : description.name);
+    }
+
+    /** What tells apart two entities of a name: the quest of an objective, the parent locations of a location. */
+    private ownerOf(typeName: string, node: AstNode | undefined): { key: string; detail?: string } {
+        if (typeName === ObjectKind.Objective && node?.$container && "name" in node.$container) {
+            const quest = String(node.$container.name);
+            return { key: quest, detail: `${typeName} of ${quest}` };
+        }
+        if (typeName === ObjectKind.Location && node) {
+            const parents: string[] = [];
+            for (let parent: AstNode | undefined = node.$container; isLocation(parent); parent = parent.$container) parents.unshift(parent.name);
+            return { key: JSON.stringify(parents), detail: parents.length > 0 ? `${typeName} in ${parents.join(" -> ")}` : undefined };
+        }
+        return { key: "" };
     }
 
     /**
@@ -291,7 +317,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
 
         const slot = STEP_SLOT.exec(line);
         if (slot) {
-            const [, keyword, headName, earlier, collection, partial] = slot;
+            const [, keyword, headName, earlier, collection, quote, partial] = slot;
             if (collection && (collection === "sublocations") !== (keyword === "location")) return [];
 
             let current = this.findByName(keyword === "location" ? ObjectKind.Location : ObjectKind.Quest, headName);
@@ -300,17 +326,52 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             }
             const children = isLocation(current) ? current.sublocations : isQuest(current) ? current.objectives : [];
             const detail = isLocation(current) ? ObjectKind.Location : ObjectKind.Objective;
-            return this.nameItems(document, params, partial, true, detail, children.map(c => c.name));
+            return this.nameItems(document, params, partial, quote === '"', detail, children.map(c => c.name));
         }
 
         const entry = ENTRY_SLOT.exec(line);
         if (entry) {
-            const cst = document.parseResult.value.$cstNode;
-            const leaf = cst && CstUtils.findLeafNodeBeforeOffset(cst, td.offsetAt(params.position));
-            const owner = leaf && AstUtils.getContainerOfType(leaf.astNode, isLocation);
-            return this.nameItems(document, params, entry[1], true, ObjectKind.Location, owner ? owner.sublocations.map(l => l.name) : []);
+            const owner = this.locationAtCursor(document, params);
+            return this.nameItems(document, params, entry[2], entry[1] === '"', ObjectKind.Location, owner ? owner.sublocations.map(l => l.name) : []);
+        }
+
+        const exit = EXIT_SLOT.exec(line);
+        if (exit) {
+            const [, earlier, quote, partial] = exit;
+            const path = Array.from(earlier.matchAll(/"([^"\n]*)"/g), match => match[1]);
+            if (path.length === 0) {
+                return this.nameItems(document, params, partial, quote === '"', ObjectKind.Location, this.nameEntries(ObjectKind.Location));
+            }
+            let current = this.nearestLocation(path[0], this.locationAtCursor(document, params));
+            for (const name of path.slice(1)) current = current?.sublocations.find(l => l.name === name);
+            return this.nameItems(document, params, partial, quote === '"', ObjectKind.Location, current ? current.sublocations.map(l => l.name) : []);
         }
         return undefined;
+    }
+
+    /** The location the cursor is inside, found from the syntax tree before it (the half-typed line is not in the AST itself). */
+    private locationAtCursor(document: LangiumDocument, params: CompletionParams): Location | undefined {
+        const cst = document.parseResult.value.$cstNode;
+        const leaf = cst && CstUtils.findLeafNodeBeforeOffset(cst, document.textDocument.offsetAt(params.position));
+        return leaf && AstUtils.getContainerOfType(leaf.astNode, isLocation);
+    }
+
+    /**
+     * The first name of an exit target as the linker would find it: among the sublocations of the location the exit is in,
+     * then among its siblings, then the siblings of its parent and so on up; else any location of that name.
+     */
+    private nearestLocation(name: string, owner: Location | undefined): Location | undefined {
+        const levels: Location[][] = owner ? [owner.sublocations] : [];
+        for (let place: AstNode | undefined = owner; place; place = place.$container) {
+            if (!isLocation(place)) continue;
+            const parent = place.$container;
+            levels.push(isLocation(parent) ? parent.sublocations : isWorld(parent) ? parent.locations : []);
+        }
+        for (const level of levels) {
+            const hit = level.find(location => location.name === name);
+            if (hit) return hit;
+        }
+        return this.findByName(ObjectKind.Location, name) as Location | undefined;
     }
 
     /**
@@ -358,10 +419,15 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
     }
 
     private findByName(type: ObjectKind, name: string): AstNode | undefined {
+        let first: AstNode | undefined;
         for (const description of this.indexManager.allElements(type)) {
-            if (description.name === name) return this.nodeOf(description);
+            if (description.name !== name) continue;
+            const node = this.nodeOf(description);
+            // A top-level location is where a path starts; a sublocation of the same name is reached through its parent.
+            if (!isLocation(node) || !isLocation(node.$container)) return node;
+            first ??= node;
         }
-        return undefined;
+        return first;
     }
 
     private nodeOf(description: AstNodeDescription): AstNode | undefined {

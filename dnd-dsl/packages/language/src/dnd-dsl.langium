@@ -75,8 +75,10 @@ Location:
     (onBlocks+=OnBlock)*
     (Description)?
     ('sublocations' sublocations+=Location* 'end')?;
+// `to "Dungeon 2" -> "Entrance"`: the names in front say which location the target is a child of, for a name that more
+// than one location has. `exit` stays the one cross-reference to the target, so everything that reads an exit is unchanged.
 LocationExit:
-    'exit' name=STRING 'to' exit=[Location:STRING] identifiers+=Identifier*;
+    'exit' name=STRING 'to' (via+=[Location:STRING] '->')* exit=[Location:STRING] identifiers+=Identifier*;
 LocationEntry:
     'entry' entry=[Location:STRING];
 //LocationChain:
@@ -296,8 +298,8 @@ Parameter infers VariableDeclaration:
 // `quest "Q" . objectives[0] . Status`, `world . quests["Rising Dead"] . objectives[1] . Status`.
 // A step down to a child (`->`, or `. sublocations "B"` / `. objectives "O"`) is kept in `steps`, after the head it
 // starts from. The chain then continues from the LAST step, so the entity a chain's head denotes is `chainHead(chain)`
-// (the last step, else `first`); both spellings mean the same thing, and names are unique, so nothing after the head
-// needs to know the path. A step is told from the plain collection field by the string after it: `. sublocations "B"`
+// (the last step, else `first`); both spellings mean the same thing, and a step is linked within its parent, so
+// nothing after the head needs to know the path. A step is told from the plain collection field by the string after it: `. sublocations "B"`
 // is a step, `. sublocations` and `. sublocations[0]` are the collection. That lookahead works because the members
 // and the field that follow are in this same rule; in the head rules a trailing repetition is decided on its first
 // token alone, which cannot tell `. sublocations "B"` from `. Torches`.

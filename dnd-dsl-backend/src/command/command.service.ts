@@ -4,7 +4,7 @@ import { LangiumInterpreterService, type EvalContext, type InterpreterEvent } fr
 import { StateSyncGateway } from '../state-sync/state-sync.gateway.js';
 
 import { isVariableDeclaration, type Model } from '@dnd-language/index.js';
-import { encodeStatePath, resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
+import { canonicalStatePath, encodeStatePath, resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
 import { assertValidStatusWrite } from '@dnd-language/evaluation/dnd-dsl-status.js';
 import { resolveRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
@@ -341,7 +341,11 @@ export class CommandService {
     const model = this.worldStateService.getModel();
     if (!model) throw new Error('No model loaded');
 
-    const node = statePathToNode(model, cmd.path);
+    // A client may still send a sublocation by its own name alone; the overlay is keyed by the full path.
+    const path = canonicalStatePath(model, cmd.path);
+    if (!path) throw new Error(`Unresolved state path for ASSIGN_VARIABLE: ${JSON.stringify(cmd.path)}`);
+
+    const node = statePathToNode(model, path);
     if (node) {
       if (!isVariableDeclaration(node)) {
         throw new Error(`Path does not point to a variable: ${JSON.stringify(cmd.path)}`);
@@ -349,12 +353,12 @@ export class CommandService {
       if (node.isComputed === 'computed') {
         throw new Error(`Cannot assign to computed variable at path: ${JSON.stringify(cmd.path)}`);
       }
-    } else if (!resolveVariableContainer(model, cmd.path)) {
+    } else if (!resolveVariableContainer(model, path)) {
       throw new Error(`Unresolved state path for ASSIGN_VARIABLE: ${JSON.stringify(cmd.path)}`);
     }
 
-    assertValidStatusWrite(cmd.path, cmd.newValue);
-    this.worldStateService.setOverlayEntry(cmd.path, cmd.newValue);
+    assertValidStatusWrite(path, cmd.newValue);
+    this.worldStateService.setOverlayEntry(path, cmd.newValue);
   }
 
   private getRuntimeVariables(): Record<string, unknown> {

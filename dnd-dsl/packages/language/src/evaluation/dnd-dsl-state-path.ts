@@ -82,6 +82,9 @@ export function parentOwningObject(owner: OwningObject): OwningObject {
  * keyed by a user-authored NAME, so a path stays valid across `.dnd` edits that
  * reorder or insert siblings — the whole point of using this instead of a positional
  * `$ref` for anything that needs to survive being persisted across parses.
+ *
+ * A sublocation is addressed through its parents, as a run of `location` segments from a top-level location down
+ * (`[Dungeon 1, Entrance]`), so two parents may each have a child of the same name.
  */
 export type StatePathSegment =
     | { kind: 'location'; name: string }
@@ -115,7 +118,8 @@ export function decodeStatePath(key: string): StatePath {
 
 /**
  * Walks up from `node` to build its StatePath, stopping at the first named root
- * ancestor (Location/Quest/Objective/Event/FunctionDeclaration). Returns `undefined`
+ * ancestor (a top-level Location/Quest/Objective/Event/FunctionDeclaration; a sublocation
+ * continues up through its parent locations). Returns `undefined`
  * if `node` isn't reachable from one of those roots (e.g. a CodeBlock-local `let`
  * inside a function/event body — those aren't addressable state, see the
  * state-management plan's Phase C.3).
@@ -145,7 +149,7 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
             segments.unshift({ kind: 'relation', predicate, targetKind, targetName });
         } else if (isLocation(current)) {
             segments.unshift({ kind: 'location', name: current.name });
-            return segments;
+            if (!isLocation(current.$container)) return segments;
         } else if (isNpc(current)) {
             segments.unshift({ kind: 'npc', name: current.name });
             return segments;
@@ -182,14 +186,18 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
  *  path was recorded). Callers decide how to treat that — see the state-management
  *  plan's Phase A.3 error-handling convention. */
 export function statePathToNode(model: Model, path: StatePath): AstNode | undefined {
-    const [head, ...rest] = path;
+    const [head] = path;
     if (!head) return undefined;
 
+    let rest = path.slice(1);
     let root: AstNode | undefined;
     switch (head.kind) {
-        case 'location':
-            root = findLocationByName(model.World.locations, head.name);
+        case 'location': {
+            const names = leadingLocationNames(path);
+            root = findLocationByPath(model.World.locations, names);
+            rest = path.slice(names.length);
             break;
+        }
         case 'quest':
             root = model.World.quests.find(q => q.name === head.name);
             break;
@@ -292,13 +300,53 @@ export function unwrapExpression(node: AstNode | undefined): AstNode | undefined
     return node;
 }
 
-function findLocationByName(locations: Location[], name: string): Location | undefined {
-    for (const location of locations) {
-        if (location.name === name) return location;
-        const found = findLocationByName(location.sublocations, name);
-        if (found) return found;
+/** The names of the leading run of `location` segments of a path. */
+function leadingLocationNames(path: StatePath): string[] {
+    const names: string[] = [];
+    for (const segment of path) {
+        if (segment.kind !== 'location') break;
+        names.push(segment.name);
     }
-    return undefined;
+    return names;
+}
+
+function locationsNamed(locations: readonly Location[], name: string): Location[] {
+    return locations.flatMap(location => [...(location.name === name ? [location] : []), ...locationsNamed(location.sublocations, name)]);
+}
+
+/**
+ * The location a run of names addresses: the first among the top-level locations, each next among the sublocations
+ * of the one before. A lone name that is not a top-level location is an old-style address, written before a
+ * sublocation was addressed through its parents; it is found by searching the whole tree, and only when exactly one
+ * location has that name (otherwise it is not telling which, so it does not resolve).
+ */
+export function findLocationByPath(locations: readonly Location[], names: readonly string[]): Location | undefined {
+    if (names.length === 0) return undefined;
+    let current = locations.find(location => location.name === names[0]);
+    if (!current) {
+        if (names.length !== 1) return undefined;
+        const matches = locationsNamed(locations, names[0]);
+        return matches.length === 1 ? matches[0] : undefined;
+    }
+    for (const name of names.slice(1)) {
+        current = current.sublocations.find(location => location.name === name);
+        if (!current) return undefined;
+    }
+    return current;
+}
+
+/**
+ * `path` with its location segments written the way `nodeToStatePath` writes them: an old-style address of a
+ * sublocation (`[Entrance, Torches]`) becomes `[Dungeon 1, Entrance, Torches]`. Only the leading location segments
+ * change, so a variable that does not exist yet at the end is fine. Undefined when the location does not resolve.
+ * Needs the live parsed model (the served JSON has no `$container`).
+ */
+export function canonicalStatePath(model: Model, path: StatePath): StatePath | undefined {
+    const names = leadingLocationNames(path);
+    if (names.length === 0) return path;
+    const location = findLocationByPath(model.World.locations, names);
+    const prefix = location && nodeToStatePath(location);
+    return prefix && [...prefix, ...path.slice(names.length)];
 }
 
 function getVariablesArray(node: AstNode): VariableDeclaration[] | undefined {

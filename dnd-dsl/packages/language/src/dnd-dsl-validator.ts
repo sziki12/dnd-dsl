@@ -233,8 +233,13 @@ export function registerValidationChecks(services: DndDslServices) {
 export class DndDslValidator {
 
     checkUniqueNames(world: World, accept: ValidationAcceptor): void {
+        // Two parents may each have a sublocation of the same name: it is addressed through its parent
+        // (`location "A" -> "B"`), and a bare name that more than one location has is reported where it is written (see DndLinker).
         const locations = this.collectAllLocations(world.locations);
-        this.checkUnique(locations, accept, 'Location');
+        this.checkUnique(world.locations, accept, 'Location', 'names must be unique among the top-level locations.');
+        for (const location of locations) {
+            this.checkUnique(location.sublocations, accept, 'Location', 'names must be unique within a location.');
+        }
         // The world map files its layout, view settings and image under this name.
         for (const location of locations) {
             if (location.name === WORLD_MAP_KEY) {
@@ -577,11 +582,7 @@ export class DndDslValidator {
         }
     }
 
-    // Location.sublocations nests arbitrarily. Langium's default scope provider resolves
-    // LocationRef/LocationExit.exit/LocationEntry.entry GLOBALLY (DndScopeProvider only
-    // overrides getScope for VariableRef, see scope-provider.ts), so uniqueness must be
-    // checked across the full nested tree, not just per-sibling-group, to match actual
-    // link resolution semantics.
+    // Location.sublocations nests arbitrarily: every location of the tree, parents before their children.
     private collectAllLocations(locations: Location[]): Location[] {
         return locations.flatMap(l => [l, ...this.collectAllLocations(l.sublocations)]);
     }

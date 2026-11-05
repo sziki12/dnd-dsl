@@ -10,6 +10,7 @@ import {
     isForStatement,
     isLocation,
     isLocationEntry,
+    isLocationExit,
     isLocationRef,
     isLocationRefItem,
     isFactionRefItem,
@@ -55,44 +56,53 @@ function stepBase(step: AstNode): AstNode | undefined
 
 export interface ChildSlot
 {
-    owner: Location | Quest;
+    /** Undefined when the name this one follows did not link (that error is enough). */
+    owner: Location | Quest | undefined;
     /** What the children are called in a message: `sublocation` or `objective`. */
     noun: string;
     children: Array<Location | Objective>;
 }
 
+const slotOf = (owner: Location | Quest | undefined, noun: string): ChildSlot =>
+    ({ owner, noun, children: !owner ? [] : isLocation(owner) ? owner.sublocations : owner.objectives });
+
 /**
  * The children a name may pick, when `ref` is a step down to a child, an `entry`, or the objective of a status form
  * that names its quest (`complete quest "Q" -> "O"`, `objective completed quest "Q" -> "O"`). After `location "A" ->` /
  * `. sublocations` they are A's own sublocations, after `quest "Q" ->` / `. objectives` Q's own objectives, and for
- * `entry` the sublocations of the location it sits in. The global scope would also link a name that is not a child,
- * or pick the wrong one of two that share a name; scoping to these is what makes a step a check. Undefined when
- * `ref` is not such a reference, or the name before it did not link (that error is enough).
+ * `entry` the sublocations of the location it sits in. In an exit target (`to "A" -> "B" -> "C"`) every name after the
+ * first is a child of the one before it; `property` and `index` say which of the exit's references is asked about.
+ * The global scope would also link a name that is not a child, or pick the wrong one of two that share a name;
+ * scoping to these is what makes a step a check. Undefined when `ref` is not such a reference; a slot with no owner
+ * when it is one but the name before it did not link.
  */
-export function childSlot(ref: AstNode): ChildSlot | undefined
+export function childSlot(ref: AstNode, property?: string, index?: number): ChildSlot | undefined
 {
+    if (isLocationExit(ref) && (property === "via" || property === "exit"))
+    {
+        const previous = property === "exit" ? ref.via[ref.via.length - 1] : ref.via[(index ?? 0) - 1];
+        // The first name of the target is not a child of anything: it is found by the ordinary scoping.
+        return previous ? slotOf(previous.ref, "sublocation") : undefined;
+    }
     const step = ref.$container;
     if (isLocationRef(ref) && isLocationRefItem(step) && step.$containerProperty === "steps")
     {
         const base = stepBase(step);
-        const owner = isLocationRefItem(base) ? base.val.val.ref : undefined;
-        return owner && { owner, noun: "sublocation", children: owner.sublocations };
+        return slotOf(isLocationRefItem(base) ? base.val.val.ref : undefined, "sublocation");
     }
     if (isObjectiveRef(ref) && isObjectiveRefItem(step) && step.$containerProperty === "steps")
     {
         const base = stepBase(step);
-        const owner = isQuestRefItem(base) ? base.val.val.ref : undefined;
-        return owner && { owner, noun: "objective", children: owner.objectives };
+        return slotOf(isQuestRefItem(base) ? base.val.val.ref : undefined, "objective");
     }
     if (isObjectiveRef(ref) && ref.$containerProperty === "target"
         && (isObjectiveCompletedExpression(step) || isObjectiveFailedExpression(step) || isQuestStatements(step)))
     {
-        const owner = step.quest?.val.ref;
-        return owner && { owner, noun: "objective", children: owner.objectives };
+        return step.quest ? slotOf(step.quest.val.ref, "objective") : undefined;
     }
     if (isLocationEntry(ref) && isLocation(ref.$container))
     {
-        return { owner: ref.$container, noun: "sublocation", children: ref.$container.sublocations };
+        return slotOf(ref.$container, "sublocation");
     }
     return undefined;
 }
@@ -158,8 +168,8 @@ export class DndScopeProvider extends DefaultScopeProvider
     /** See `childSlot`: the children a step or `entry` may name, as a scope, so the global pool never links a name that is not one. */
     private getStepScope(context: ReferenceInfo): Scope | undefined
     {
-        const slot = childSlot(context.container);
-        if (!slot) return undefined;
+        const slot = childSlot(context.container, context.property, context.index);
+        if (!slot?.owner) return undefined;
         return new MapScope(stream(slot.children).map(child => this.descriptions.createDescription(child, child.name)));
     }
 

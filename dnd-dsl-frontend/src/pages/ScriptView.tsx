@@ -6,25 +6,10 @@ import { DslContext, type ScriptRunResult } from '../contexts/DslContext';
 import { ScriptStateContext, type ScriptHistoryItem } from '../contexts/ScriptStateContext';
 import { useScriptEditor } from '../common/useScriptEditor';
 import { useResizablePane } from '../common/useResizablePane';
+import { statePathText } from '../common/state-path-text';
 import type { ScriptEvent } from '@dnd-language/evaluation/dnd-dsl-commands';
 
 const HEADER_LINE = /^\s*reference\s+world\b.*$/m;
-
-/** `encodeStatePath` output -> a readable `location "X" . var` string. */
-function formatPath(encoded: string): string {
-  try {
-    const segs = JSON.parse(encoded) as { kind: string; name?: string; target?: string }[];
-    return segs
-      .map(s =>
-        s.kind === 'variable' ? `. ${s.target}`
-        : s.kind === 'world' ? 'world'
-        : `${s.kind} "${s.name}"`,
-      )
-      .join(' ');
-  } catch {
-    return encoded;
-  }
-}
 
 /** "2 print · 1 write · 1 trigger" - a one-line count of a run's events, for the
  *  history sidebar. Empty string when there's nothing to summarize. */
@@ -326,7 +311,7 @@ function EventRow({ node }: { node: EventNode }) {
     return (
       <div>
         <span style={{ color: 'var(--fg-secondary)' }}>set </span>
-        <span className="tok-variable">{formatPath(node.path)}</span>
+        <span className="tok-variable">{statePathText(node.path)}</span>
         <span style={{ color: 'var(--fg-secondary)' }}> = </span>
         <span className="tok-number">{JSON.stringify(node.value)}</span>
       </div>
