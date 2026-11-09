@@ -9,6 +9,9 @@ import getThemeServiceOverride from '@codingame/monaco-vscode-theme-service-over
 import { BaseLanguageClient } from 'vscode-languageclient';
 import { Uri } from 'vscode';
 import tmGrammarUrl from './dnd-language/extension/syntaxes/dnd-dsl.tmLanguage.json?url';
+import { kindTokenRules, withKindScopes } from './common/kind-colors';
+
+const GRAMMAR_PATH = './syntaxes/dnd-dsl.tmLanguage.json';
 
 export function toMonacoUri(path: string): string {
     return 'file:///' + path
@@ -41,6 +44,7 @@ const vscodeApiConfig: MonacoVscodeApiConfig = {
         json: JSON.stringify({
             // Editor appearance
             'workbench.colorTheme': 'Default Dark Modern',
+            'editor.tokenColorCustomizations': { textMateRules: kindTokenRules() },
             'editor.fontSize': 14,
             'editor.fontFamily': 'Consolas, monospace',
 
@@ -91,7 +95,7 @@ const vscodeApiConfig: MonacoVscodeApiConfig = {
         },
         filesOrContents: new Map([
         [
-            './syntaxes/dnd-dsl.tmLanguage.json',
+            GRAMMAR_PATH,
             new URL(tmGrammarUrl, window.location.origin)
         ]
         ])
@@ -158,6 +162,13 @@ export function getMonacoInit() {
         g[MONACO_INIT_KEY] = (async () => {
             console.log('Starting Monaco API (once)');
             try {
+                // The grammar is generated, so the per-kind colour rules are added here. Without them the editor still works, just uncoloured.
+                try {
+                    const grammar = withKindScopes(await (await fetch(new URL(tmGrammarUrl, window.location.origin))).json());
+                    vscodeApiConfig.extensions?.[0]?.filesOrContents?.set(GRAMMAR_PATH, JSON.stringify(grammar));
+                } catch (e) {
+                    console.warn('Could not add the name colours to the grammar', e);
+                }
                 const apiWrapper = new MonacoVscodeApiWrapper(vscodeApiConfig);
                 console.log('MonacoVscodeApiWrapper created');
                 

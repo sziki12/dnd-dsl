@@ -10,7 +10,7 @@ export default function EntityLink({ kind, name, children }: {
   children?: ReactNode;
 }) {
   return (
-    <Link className="entity-link" to={`/${SECTION[kind]}/${encodeURIComponent(name)}`}>
+    <Link className="entity-link" style={{ color: `var(--kind-${kind})` }} to={`/${SECTION[kind]}/${encodeURIComponent(name)}`}>
       {children ?? name}
     </Link>
   );
