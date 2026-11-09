@@ -1280,6 +1280,14 @@ export class LangiumInterpreterService {
      **/
     private resolveFieldValue(ctx: EvalContext, chain: RefChain): unknown {
         const start = chainHead(chain);
+        if (isVariableRefItem(start)) {
+            const decl = start.val.val.ref;
+            const value = decl ? ctx.scope[decl.target ?? decl.name ?? ''] : undefined;
+            // A loop variable over `exits` is a plain record, not an entity handle (see fieldValueOf).
+            if (typeof value === 'object' && value !== null && !isLoopEntityHandle(value) && chain.field! in value) {
+                return (value as Record<string, unknown>)[chain.field!];
+            }
+        }
         const head = this.resolveCollectionHead(ctx, start);
         if (!head) throw new Error(`Unresolved collection head: ${start.$type}`);
         return this.fieldValueOf(ctx, head, chain.field!);
@@ -1311,7 +1319,13 @@ export class LangiumInterpreterService {
             // LocationExit - not StatePath-addressable, so a small plain record instead
             // of a live handle; `target` resolves the exit's own cross-reference.
             case 'exits':
-                return (items as LocationExit[]).map(exit => ({ name: exit.name, target: exit.exit?.ref?.name }));
+                return (items as LocationExit[]).map(exit => ({
+                    name: exit.name,
+                    source: exit.$container.name,
+                    target: exit.exit?.ref?.name,
+                    // `["Locked"]` has no value, so it reads as true.
+                    identifiers: exit.identifiers.map(i => ({ tag: i.tag, value: i.value ? this.evaluateExpression(ctx, i.value as unknown as Expression) : true })),
+                }));
             // The VariableDeclarations themselves - bind each one's current value.
             case 'variables':
                 return (items as VariableDeclaration[]).map(v => {

@@ -128,11 +128,13 @@ export enum STATEMENT_KIND {
     None = 'None'
 }
 
-/** 
+/**
  *  Collection fields whose elements are real named entities with their own
- *  `.variables`, mapped to the ObjectKind those elements resolve to
+ *  `.variables` (plus `exits`, whose elements have fields but no variables),
+ *  mapped to the ObjectKind those elements resolve to
  **/
 const ENTITY_COLLECTION_KIND: Partial<Record<string, ObjectKind>> = {
+    exits: ObjectKind.Exit,
     npcs: ObjectKind.Npc,
     factions: ObjectKind.Faction,
     locations: ObjectKind.Location,
