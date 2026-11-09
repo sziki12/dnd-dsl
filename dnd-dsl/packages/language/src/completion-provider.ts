@@ -48,9 +48,12 @@ const EXIT_SLOT = /\bexit[ \t]+"[^"\n]*"[ \t]+to[ \t]+((?:"[^"\n]*"[ \t]*->[ \t]
  * the type has to start from.
  */
 const FACT_SLOT = /^[ \t]*"([^"\n]*)$/;
-const QUERY_SLOT = /\brelation[ \t]+(npc|faction)[ \t]+"[^"\n]*"[ \t]+("?)([^"\n]*)$/;
-// `relation npc "Mem`: the string is a name, or the relation type of an open subject.
-const OPEN_QUERY_SLOT = /\brelation[ \t]+(npc|faction)[ \t]+"([^"\n]*)$/;
+const QUERY_SLOT = /\brelation[ \t]+(npc|faction)[ \t]+"([^"\n]*)"[ \t]+(?:"([^"\n]*)|(\w*))$/;
+const RELATION_END_KINDS = ["npc", "faction"];
+/** `for i in relation npc "Ann" "Member of" faction ` / `... faction "Guards" d`: the query is complete, so `do` can follow. */
+const FOR_QUERY_END = /\bfor[ \t]+\w+[ \t]+in[ \t]+relation\b.*"[^"\n]*"[ \t]+(?:npc|faction)(?:[ \t]+"[^"\n]*")?[ \t]+(\w*)$/;
+// `relation npc "Mem` / `relation npc `: the string is a name, or the relation type of an open subject.
+const OPEN_QUERY_SLOT = /\brelation[ \t]+(npc|faction)[ \t]+(?:"([^"\n]*))?$/;
 
 export class DndCompletionProvider extends DefaultCompletionProvider {
     //We would like completion for:
@@ -90,7 +93,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return CompletionList.create(this.deduplicateItems(relationTypes), true);
         }
 
-        const names = this.entityNameCompletions(document, params);
+        const names = this.entityNameCompletions(document, params).concat(this.doKeyword(document, params));
         if (names.length > 0) {
             return CompletionList.create(this.deduplicateItems(names), true);
         }
@@ -391,13 +394,15 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const open = query ? undefined : OPEN_QUERY_SLOT.exec(line);
         const fact = query || open ? undefined : FACT_SLOT.exec(line);
         if (query) {
+            // `relation npc "Member of" `: the string already is the relation type of an open subject, so the target comes next.
+            hasOpenQuote = query[3] !== undefined;
+            partial = query[3] ?? query[4];
+            if (!hasOpenQuote && this.isOpenSubjectPredicate(query[2])) return this.endKindItems(document, params, partial);
             hostKind = query[1];
-            hasOpenQuote = query[2] === '"';
-            partial = query[3];
         } else if (open) {
             hostKind = open[1];
-            partial = open[2];
-            hasOpenQuote = true;
+            partial = open[2] ?? "";
+            hasOpenQuote = open[2] !== undefined;
         } else if (fact) {
             partial = fact[1];
             hasOpenQuote = true;
@@ -416,6 +421,37 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         }
         const types = this.nameItems(document, params, partial, hasOpenQuote, "RelationType", names);
         return open ? [...types, ...this.entityNameCompletions(document, params)] : types;
+    }
+
+    /** `do` after a complete `for ... in relation ...` header. Langium's completion is skipped when names are offered, so it is added here. */
+    private doKeyword(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
+        const td = document.textDocument;
+        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+        const match = FOR_QUERY_END.exec(line);
+        if (!match || (match[1] && !this.fuzzyMatcher.match(match[1], "do"))) return [];
+        const range = { start: td.positionAt(td.offsetAt(params.position) - match[1].length), end: params.position };
+        return [{ label: "do", kind: CompletionItemKind.Keyword, sortText: "1", textEdit: { range, newText: "do" } }];
+    }
+
+    /**
+     * The kind keywords a query's target may start with. Langium's own completion cannot offer them here: it reads
+     * `npc "Member of"` as a named subject and expects a relation type next.
+     */
+    private endKindItems(document: LangiumDocument, params: CompletionParams, partial: string): CompletionItem[] {
+        const td = document.textDocument;
+        const range = { start: td.positionAt(td.offsetAt(params.position) - partial.length), end: params.position };
+        return RELATION_END_KINDS
+            .filter(kind => !partial || this.fuzzyMatcher.match(partial, kind))
+            .map(kind => ({ label: kind, kind: CompletionItemKind.Keyword, sortText: "0", textEdit: { range, newText: kind } }));
+    }
+
+    /**
+     * A string after `relation npc` is the subject's name or, for an open subject, the relation type. It is the type when
+     * a relation type has that name. shortcut: an entity named like a relation type is read as the type; the half-typed
+     * line itself parses into a bogus entity of that name, so the entity names cannot settle it.
+     */
+    private isOpenSubjectPredicate(text: string): boolean {
+        return Array.from(this.indexManager.allElements("RelationType")).some(d => d.name === text);
     }
 
     private findByName(type: ObjectKind, name: string): AstNode | undefined {
