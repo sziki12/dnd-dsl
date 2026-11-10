@@ -4,6 +4,7 @@ import { EditorApp } from 'monaco-languageclient/editorApp';
 import { createModelReference } from '@codingame/monaco-vscode-api/monaco';
 import { getMonacoInit } from '../MonacoInit';
 import { FileContext } from '../contexts/FileContext';
+import { DslContext } from '../contexts/DslContext';
 
 const SCRIPT_URI = 'file:///dnd-script.dnd';
 const WORLD_URI = 'file:///dnd-script-world.dnd';
@@ -74,6 +75,7 @@ export function useScriptEditor(
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const fileContext = useContext(FileContext);
+  const { worldState } = useContext(DslContext);
   const [ready, setReady] = useState(false);
 
   const getValue = useCallback(
@@ -160,6 +162,20 @@ export function useScriptEditor(
       })();
     };
   }, [adventure, world, fileContext]);
+
+  // A save in another page reparses the world and broadcasts the new state here; the world source this
+  // editor links against is only read at mount, so it is re-read on every state change (identical text is skipped).
+  useEffect(() => {
+    const model = worldRef.current?.object.textEditorModel;
+    if (!model) return;
+    let cancelled = false;
+    fileContext.loadFile(adventure, world)
+      .then(file => {
+        if (!cancelled && model.getValue() !== file.content) model.setValue(file.content);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [worldState]);
 
   return { containerRef, getValue, setValue, ready };
 }
