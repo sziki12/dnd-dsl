@@ -94,6 +94,7 @@ export type StatePathSegment =
     | { kind: 'function'; name: string }
     | { kind: 'npc'; name: string }
     | { kind: 'faction'; name: string }
+    | { kind: 'party'; name: string }
     | { kind: 'relation'; predicate: string; targetKind: string; targetName: string }
     | { kind: 'world' }
     | { kind: 'variable'; target: string };
@@ -136,7 +137,7 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
             // is not, so bail out rather than returning a bogus path.
             const container = current.$container;
             if (!container || !(isLocation(container) || isObjectDeclaration(container)
-                || isNpc(container) || isFaction(container) || isRelation(container) || isQuest(container) || isObjective(container) || isWorld(container))) {
+                || isNpc(container) || isFaction(container) || isParty(container) || isRelation(container) || isQuest(container) || isObjective(container) || isWorld(container))) {
                 return undefined;
             }
             segments.unshift({ kind: 'variable', target: current.target ?? current.name ?? '' });
@@ -155,6 +156,9 @@ export function nodeToStatePath(node: AstNode): StatePath | undefined {
             return segments;
         } else if (isFaction(current)) {
             segments.unshift({ kind: 'faction', name: current.name });
+            return segments;
+        } else if (isParty(current)) {
+            segments.unshift({ kind: 'party', name: current.name });
             return segments;
         } else if (isObjective(current)) {
             segments.unshift({ kind: 'objective', questName: current.$container.name, name: current.name });
@@ -217,6 +221,9 @@ export function statePathToNode(model: Model, path: StatePath): AstNode | undefi
             break;
         case 'faction':
             root = model.World.factions.find(f => f.name === head.name);
+            break;
+        case 'party':
+            root = model.World.parties.find(p => p.name === head.name);
             break;
         case 'world':
             root = model.World;
@@ -354,6 +361,7 @@ function getVariablesArray(node: AstNode): VariableDeclaration[] | undefined {
     if (isObjectDeclaration(node)) return node.variables;
     if (isNpc(node)) return node.variables;
     if (isFaction(node)) return node.variables;
+    if (isParty(node)) return node.variables;
     if (isRelation(node)) return node.variables;
     if (isQuest(node)) return node.variables;
     if (isObjective(node)) return node.variables;

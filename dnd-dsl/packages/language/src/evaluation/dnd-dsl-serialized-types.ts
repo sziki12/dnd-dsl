@@ -29,6 +29,7 @@ export type SerializedObjective      = SerializedNode<ast.Objective>;
 export type SerializedEvent          = SerializedNode<ast.Event>;
 export type SerializedNpc            = SerializedNode<ast.Npc>;
 export type SerializedFaction        = SerializedNode<ast.Faction>;
+export type SerializedParty          = SerializedNode<ast.Party>;
 export type SerializedState           = SerializedNode<ast.State>;
 export type SerializedStateValueDecl  = SerializedNode<ast.StateValueDecl>;
 export type SerializedStateValueRef   = SerializedNode<ast.StateValueRef>;

@@ -5,6 +5,7 @@ import type {
     SerializedModel,
     SerializedNpc,
     SerializedObjective,
+    SerializedParty,
     SerializedQuest,
     SerializedRef,
     SerializedVariableDecl,
@@ -42,7 +43,7 @@ export type JsonRuntimeValue =
 
 export type RefChainTarget =
     | { kind: 'location'; node: SerializedLocation }
-    | { kind: 'entity'; node: SerializedNpc | SerializedFaction | SerializedQuest | SerializedObjective }
+    | { kind: 'entity'; node: SerializedNpc | SerializedFaction | SerializedParty | SerializedQuest | SerializedObjective }
     | { kind: 'variable'; node: SerializedVariableDecl };
 
 /**
@@ -69,9 +70,9 @@ export function resolveSerializedRefChain(model: SerializedModel, chain: Seriali
         return { kind: 'location', node: loc };
     }
 
-    if ((first.$type === 'QuestRefItem' || first.$type === 'ObjectiveRefItem' || first.$type === 'NpcRefItem' || first.$type === 'FactionRefItem') && chain.rest.length === 0) {
+    if ((first.$type === 'QuestRefItem' || first.$type === 'ObjectiveRefItem' || first.$type === 'NpcRefItem' || first.$type === 'FactionRefItem' || first.$type === 'PartyRefItem') && chain.rest.length === 0) {
         const ref = (first as unknown as { val: { val: { $ref: string } } }).val.val;
-        const node = parseReferenceFromSerializedModel<SerializedNpc | SerializedFaction | SerializedQuest | SerializedObjective>(model, ref);
+        const node = parseReferenceFromSerializedModel<SerializedNpc | SerializedFaction | SerializedParty | SerializedQuest | SerializedObjective>(model, ref);
         if (!node) throw new Error(`Unresolved entity ref: ${ref.$ref}`);
         return { kind: 'entity', node };
     }

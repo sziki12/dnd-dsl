@@ -29,6 +29,8 @@ import {
     isLocationRefItem,
     isFaction,
     isFactionRefItem,
+    isParty,
+    isPartyRefItem,
     isRelation,
     isRelationRefItem,
     isNpc,
@@ -207,7 +209,7 @@ export class LangiumInterpreterService {
             throw new Error(`Cannot resolve a '${head.$type}' reference to a StatePath`);
         }
         if (chain.rest.length === 0
-            && (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head))) {
+            && (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head) || isPartyRefItem(head))) {
             const node = head.val.val.ref;
             if (!node) throw new Error(`Unresolved ref: ${head.val.val.$refText}`);
             return nodeToStatePath(node)!;
@@ -406,6 +408,11 @@ export class LangiumInterpreterService {
                 if (!f) throw new Error(`Unresolved faction ref: ${head.val.val.$refText}`);
                 return this.readPath(ctx, [{ kind: 'faction', name: f.name }]);
             }
+            if (isPartyRefItem(head)) {
+                const p = head.val.val.ref;
+                if (!p) throw new Error(`Unresolved party ref: ${head.val.val.$refText}`);
+                return this.readPath(ctx, [{ kind: 'party', name: p.name }]);
+            }
             if (isRelationRefItem(head)) return this.relationExists(ctx, head);
             if (isThisRefItem(head)) {
                 if (!ctx.thisEntity) throw new Error(`'this' is not available here`);
@@ -549,7 +556,7 @@ export class LangiumInterpreterService {
         const chain = unwrapExpression(expression);
         if (!isRefChain(chain) || chain.rest.length > 0 || chain.field || chain.indexes.length > 0 || chain.next || depth > 4) return undefined;
         const head = chainHead(chain);
-        if (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head)) {
+        if (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head) || isPartyRefItem(head)) {
             return head.val.val.ref?.name;
         }
         const named = (node: AstNode | undefined) => node && !isEvent(node) ? (node as { name?: string }).name : undefined;
@@ -636,7 +643,7 @@ export class LangiumInterpreterService {
     private readPersistentValue(worldState: SerializedModel, path: StatePath): any {
         const node = statePathToNode(worldState as unknown as Model, path) as any;
         if (!node) return undefined; // renamed/removed since linking - soft-fail
-        if (isLocation(node) || isObjectDeclaration(node) || isNpc(node) || isFaction(node) || isRelation(node) || isQuest(node) || isObjective(node) || isWorld(node)) {
+        if (isLocation(node) || isObjectDeclaration(node) || isNpc(node) || isFaction(node) || isParty(node) || isRelation(node) || isQuest(node) || isObjective(node) || isWorld(node)) {
             return buildVariablesRecord(worldState, node.variables as any);
         }
         return evaluateSerializedExpression(worldState, node.value);
@@ -1305,7 +1312,7 @@ export class LangiumInterpreterService {
         switch (field) {
             // Entities with their own `.variables` - bind a live handle so `x.member`
             // reads/writes persist through the entity's real StatePath.
-            case 'npcs': case 'factions': case 'locations': case 'quests': case 'objectives': case 'sublocations':
+            case 'npcs': case 'factions': case 'parties': case 'locations': case 'quests': case 'objectives': case 'sublocations':
                 return (items as AstNode[])
                     .map(node => this.makeEntityHandle(node))
                     .filter((handle): handle is LoopEntityHandle => handle !== undefined);
@@ -1340,7 +1347,7 @@ export class LangiumInterpreterService {
 
     /** 
      *  Resolves a CollectionRef's head to the concrete node its field is read off.
-     *  Location/Quest/Npc/Faction reuse their existing cross-reference; World has none 
+     *  Location/Quest/Npc/Faction/Party reuse their existing cross-reference; World has none 
      *  (only one per document); State's is a direct [State:ID] reference 
      *  (see the grammar comment on StateRefItem) resolved by Langium's own default scoping.
      *  A VariableRefItem head is only meaningful here when it's a `for`-loop variable
@@ -1352,6 +1359,7 @@ export class LangiumInterpreterService {
         if (isObjectiveRefItem(start)) return start.val.val.ref;
         if (isNpcRefItem(start)) return start.val.val.ref;
         if (isFactionRefItem(start)) return start.val.val.ref;
+        if (isPartyRefItem(start)) return start.val.val.ref;
         if (isWorldRefItem(start)) return ctx.model?.World;
         if (isStateRefItem(start)) return start.val.ref;
         if (isThisRefItem(start)) return ctx.thisEntity;

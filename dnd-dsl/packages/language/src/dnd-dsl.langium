@@ -321,7 +321,7 @@ ChainTail:
 
 ChainField returns string:
     //Collection fields
-    'locations' | 'npcs' | 'factions' | 'quests' | 'events' | 'functions'
+    'locations' | 'npcs' | 'factions' | 'parties' | 'quests' | 'events' | 'functions'
     | 'states' | 'variables' | 'sublocations' | 'exits' | 'objectives' | 'values'
     //Single-value fields
     | 'name' | 'description';
@@ -392,7 +392,7 @@ ThisRefItem:
 ParentRefItem:
     isParent='parent';
 PartyRefItem:
-    isParty='party' name?=STRING;
+    isParty='party' val=PartyRef;
 
 //val is declared, property is generated
 VariableRef:        
@@ -409,6 +409,8 @@ NpcRef:
     val=[Npc:STRING];
 FactionRef:
     val=[Faction:STRING];
+PartyRef:
+    val=[Party:STRING];
 FunctionRef:
     val=[FunctionDeclaration:ID];
 
