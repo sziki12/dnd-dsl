@@ -11,6 +11,8 @@ type DslContext = {
   updateWorld: (newWorld: string) => Promise<void>;
   adventure: string;
   updateAdventure: (newAdventure: string) => Promise<void>;
+  /** The folder that holds the adventures: undefined until the server has been asked, null while none is chosen. */
+  sourceFolder: string | null | undefined;
   worldState: SerializedModel | undefined;
   updateWorldState: () => Promise<void>;
   reloadWorld: () => Promise<{ ok: boolean; errors?: string[] }>;
@@ -57,6 +59,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   const [adventure, setAdventure] = useState('');
   // The "adventure/world" the server announced as already loaded, so this page does not parse it again.
   const announcedRef = useRef('');
+  const [sourceFolder, setSourceFolder] = useState<string | null | undefined>(undefined);
   const [worldState, setWorldState] = useState<SerializedModel | undefined>(undefined);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -96,7 +99,8 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     console.log(`Status: ${response.status}`);
     const responseJson = await response.json();
     console.log('World State loaded');
-    setWorldState(responseJson);
+    // A server with nothing loaded answers with an empty state.
+    setWorldState(responseJson?.World ? responseJson : undefined);
   };
 
   const applyCommandResponse = (res: CommandResponse) => {
@@ -115,7 +119,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     setFiredReminders(prev => prev.filter(r => r.id !== id));
   };
 
-  const fetchActiveWorld = async (): Promise<{ adventure?: string; world?: string; loaded: boolean }> =>
+  const fetchActiveWorld = async (): Promise<{ adventure?: string; world?: string; loaded: boolean; sourceFolder: string | null }> =>
     (await fetch(`${BackendURL}/adventure/active`)).json();
 
   // The reminders on screen belong to the world that was open.
@@ -127,16 +131,34 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     setCommandError(null);
   };
 
-  // After a dropped connection: follow whatever world the server has open now. A server with nothing loaded
-  // (it restarted) is given this page's world instead.
+  // A new source folder leaves no world open: the pages wait for one to be chosen from it.
+  const adoptSourceFolder = (folder: string | null) => {
+    announcedRef.current = '';
+    setSourceFolder(folder);
+    setAdventure('');
+    setWorld('');
+    setWorldState(undefined);
+    setCanUndo(false);
+    setCanRedo(false);
+    setFiredReminders([]);
+    setCommandError(null);
+  };
+
+  // After a dropped connection: follow the folder and the world the server has now. A server that lost its world
+  // (it could not reopen it) is given this page's world instead.
   const catchUp = async () => {
     const active = await fetchActiveWorld().catch(() => undefined);
-    if (active?.loaded && active.adventure && active.world) {
+    if (!active) return;
+    const folderChanged = active.sourceFolder !== (sourceFolder ?? null);
+    if (folderChanged) adoptSourceFolder(active.sourceFolder);
+    if (!active.sourceFolder) return;
+
+    if (active.loaded && active.adventure && active.world) {
       if (active.adventure !== adventure || active.world !== world) adoptWorld(active.adventure, active.world);
       await updateWorldState();
-    } else if (adventure && world) {
+    } else if (adventure && world && !folderChanged) {
       await reloadWorld();
-    } else if (active?.adventure && active.world) {
+    } else if (active.adventure && active.world) {
       setAdventure(active.adventure);
       setWorld(active.world);
     }
@@ -144,7 +166,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
 
   // Live sync across every open page/tab/device: applyCommandResponse handles a broadcast from another page exactly like
   // one from this page's own request; catchUp handles anything missed while this page was disconnected.
-  const { isController, controllerName, claimControl, clientId } = useStateSync(applyCommandResponse, catchUp, adoptWorld);
+  const { isController, controllerName, claimControl, clientId } = useStateSync(applyCommandResponse, catchUp, adoptWorld, adoptSourceFolder);
 
   // A rejected command (HTTP 400) carries `{ message }` instead of a CommandResponse. Applying it would
   // replace the world state with undefined and blank every page, so it is shown as an error instead
@@ -218,6 +240,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     fetchActiveWorld()
       .then(active => {
+        setSourceFolder(active.sourceFolder ?? null);
         if (!active.adventure || !active.world) return;
         setAdventure(active.adventure);
         setWorld(active.world);
@@ -234,6 +257,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     <DslContext.Provider value={{
       world, updateWorld,
       adventure, updateAdventure,
+      sourceFolder,
       worldState, updateWorldState, reloadWorld,
       getByReference,
       execute, runScript, undo, redo, canUndo, canRedo,

@@ -3,6 +3,7 @@ import TitleBar from './TitleBar';
 import ActivityBar from './ActivityBar';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
+import NoWorldGate from './NoWorldGate';
 
 export default function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -29,7 +30,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       </div>
       <div style={{ gridArea: 'main', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
         <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-          {children}
+          <NoWorldGate>{children}</NoWorldGate>
         </div>
       </div>
       <div style={{ gridArea: 'statusbar' }}>

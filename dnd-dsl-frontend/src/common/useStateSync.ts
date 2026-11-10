@@ -42,7 +42,8 @@ export function setDisplayName(name: string): void {
 type ServerMessage =
   | { type: 'WORLD_STATE'; payload: CommandResponse }
   | { type: 'CONTROLLER_CHANGED'; controllerId: string | null; controllerName: string | null }
-  | { type: 'ACTIVE_WORLD'; adventure: string; world: string };
+  | { type: 'ACTIVE_WORLD'; adventure: string; world: string }
+  | { type: 'SOURCE_FOLDER'; sourceFolder: string };
 
 /**
  * Opens the live-sync WebSocket (backend StateSyncGateway, /state-sync) and keeps it
@@ -53,12 +54,14 @@ type ServerMessage =
  * it - see the multi-page-live-sync-roadmap memory. On reconnect (after a dropped
  * connection), calls `onReconnected` so the page can catch up on anything it missed
  * while disconnected (wired to DslContext.catchUp). `onActiveWorld` hears that some page opened
- * another adventure or world; it arrives just before that world's first WORLD_STATE.
+ * another adventure or world; it arrives just before that world's first WORLD_STATE. `onSourceFolder` hears that
+ * the source folder changed, which leaves no world open.
  */
 export function useStateSync(
   onWorldState: (response: CommandResponse) => void,
   onReconnected: () => void,
   onActiveWorld: (adventure: string, world: string) => void,
+  onSourceFolder: (sourceFolder: string) => void,
 ) {
   const [isController, setIsController] = useState(false);
   const [controllerName, setControllerName] = useState<string | null>(null);
@@ -75,6 +78,8 @@ export function useStateSync(
   onReconnectedRef.current = onReconnected;
   const onActiveWorldRef = useRef(onActiveWorld);
   onActiveWorldRef.current = onActiveWorld;
+  const onSourceFolderRef = useRef(onSourceFolder);
+  onSourceFolderRef.current = onSourceFolder;
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +112,8 @@ export function useStateSync(
           onWorldStateRef.current(msg.payload);
         } else if (msg.type === 'ACTIVE_WORLD') {
           onActiveWorldRef.current(msg.adventure, msg.world);
+        } else if (msg.type === 'SOURCE_FOLDER') {
+          onSourceFolderRef.current(msg.sourceFolder);
         } else if (msg.type === 'CONTROLLER_CHANGED') {
           setIsController(msg.controllerId === clientIdRef.current);
           setControllerName(msg.controllerName);

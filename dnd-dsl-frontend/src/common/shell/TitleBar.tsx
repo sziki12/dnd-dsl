@@ -51,10 +51,14 @@ export default function TitleBar() {
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifySelf: 'center' }}>
-        <span>{adventure}</span>
-        <span style={{ color: 'var(--fg-muted)' }}>&rsaquo;</span>
-        <span>{world}</span>
-        {entityName && (
+        {adventure && world && (
+          <>
+            <span>{adventure}</span>
+            <span style={{ color: 'var(--fg-muted)' }}>&rsaquo;</span>
+            <span>{world}</span>
+          </>
+        )}
+        {adventure && world && entityName && (
           <>
             <span style={{ color: 'var(--fg-muted)' }}>&rsaquo;</span>
             <span style={{ color: 'var(--fg-primary)' }}>{entityName}</span>
