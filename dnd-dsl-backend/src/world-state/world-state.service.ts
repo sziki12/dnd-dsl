@@ -101,6 +101,20 @@ export class WorldStateService {
     return this._worldState;
   }
 
+  /** Forgets the loaded world, so nothing more is written to its files. */
+  unload(): void {
+    this._model = undefined;
+    this._worldSource = '';
+    this._statePath = undefined;
+    this._overlay = {};
+    this._clock = 0;
+    this._reminders = [];
+    this._firedReminders = [];
+    this._changeHandlers = new Map();
+    this._triggerHandlers = new Map();
+    this.rebuildWorldState();
+  }
+
   /** Replaces the whole runtime state (overrides, clock, reminders) with a saved one and rebuilds the served world. */
   applyOverlayFile(overlayFile: StateOverlayFile | undefined): void {
     // State saved before sublocations were addressed through their parents carries the old, name-only form.

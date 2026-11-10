@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { spawn } from 'child_process';
 import fs from 'fs';
-import { ConfigurationService } from '../configuration/configuration.service.js';
+import os from 'os';
+import path from 'path';
+import { SettingsService } from '../settings/settings.service.js';
 import { FileService } from '../file/file.service.js';
 import { WorldStateService } from '../world-state/world-state.service.js';
 import { CommandService } from '../command/command.service.js';
@@ -11,21 +13,22 @@ import {
     AdventureError, assertName, copyWorld, createWorld, listAdventures, listNamedStates, readNamedState, saveNamedState,
     statesDir, type AdventureEntry, type NamedState, type WorldRef,
 } from './adventure-store.js';
+import { listFolders, windowsDrives, type FolderListing } from './folder-browser.js';
 
-export type ActiveWorld = { adventure?: string; world?: string; loaded: boolean };
+export type ActiveWorld = { adventure?: string; world?: string; loaded: boolean; sourceFolder: string | null };
 
 /**
  * Which adventure and world the server has loaded, and everything the File menu does around it.
  * The loaded world is one for the whole server, so opening another one tells every connected page.
  */
 @Injectable()
-export class AdventureService {
+export class AdventureService implements OnApplicationBootstrap {
     private adventure: string | undefined;
     private world: string | undefined;
     private loaded = false;
 
     constructor(
-        private readonly configurationService: ConfigurationService,
+        private readonly settingsService: SettingsService,
         private readonly fileService: FileService,
         private readonly worldStateService: WorldStateService,
         private readonly commandService: CommandService,
@@ -33,15 +36,28 @@ export class AdventureService {
     ) {}
 
     private get root(): string {
-        return this.configurationService.DefaultFilePath!;
+        return this.settingsService.requireSourceFolder();
     }
 
-    /** Before anything is loaded this is the world named in config.json. */
+    /** Opens the world that was open when the server last ran, so a restart does not leave every page without one. */
+    async onApplicationBootstrap(): Promise<void> {
+        const last = this.settingsService.lastWorld;
+        if (!this.settingsService.sourceFolder || !last) return;
+        try {
+            await this.open(last.adventure, last.world);
+        } catch (e) {
+            console.warn(`Could not reopen ${last.adventure} / ${last.world}:`, e instanceof Error ? e.message : e);
+        }
+    }
+
+    /** Before anything is loaded the names are the remembered ones, which may not exist any more. */
     active(): ActiveWorld {
+        const last = this.settingsService.lastWorld;
         return {
-            adventure: this.adventure ?? this.configurationService.AdventureName,
-            world: this.world ?? this.configurationService.WorldName,
+            adventure: this.adventure ?? last?.adventure,
+            world: this.world ?? last?.world,
             loaded: this.loaded,
+            sourceFolder: this.settingsService.sourceFolder ?? null,
         };
     }
 
@@ -49,6 +65,36 @@ export class AdventureService {
         this.adventure = adventure;
         this.world = world;
         this.loaded = true;
+        this.settingsService.setLastWorld({ adventure, world });
+    }
+
+    folders(requested: string | undefined): FolderListing {
+        return listFolders(requested, os.homedir(), process.platform === 'win32' ? windowsDrives : undefined);
+    }
+
+    /** Unloads the open world: its files belong to the old folder. A new folder starts with nothing open. */
+    setSourceFolder(folder: string, create: boolean): void {
+        if (typeof folder !== 'string' || !path.isAbsolute(folder)) throw new AdventureError('Give the full path of a folder.');
+        const chosen = path.resolve(folder);
+        if (!fs.existsSync(chosen)) {
+            if (!create) throw new AdventureError(`"${chosen}" does not exist.`);
+            try {
+                fs.mkdirSync(chosen, { recursive: true });
+            } catch {
+                throw new AdventureError(`Could not create "${chosen}".`);
+            }
+        } else if (!fs.statSync(chosen).isDirectory()) {
+            throw new AdventureError(`"${chosen}" is not a folder.`);
+        }
+        if (chosen === this.settingsService.sourceFolder) return;
+
+        this.settingsService.setSourceFolder(chosen);
+        this.worldStateService.unload();
+        this.commandService.resetHistory();
+        this.adventure = undefined;
+        this.world = undefined;
+        this.loaded = false;
+        this.stateSyncGateway.broadcastSourceFolder(chosen);
     }
 
     list(): AdventureEntry[] {
@@ -103,9 +149,9 @@ export class AdventureService {
         this.commandService.notifyWorldReloaded();
     }
 
-    /** Shows the save folder in the machine's file explorer: the server runs on the DM's own machine. */
+    /** Shows the source folder in the machine's file explorer: the server runs on the DM's own machine. */
     reveal(): Promise<void> {
-        if (!fs.existsSync(this.root)) throw new AdventureError('The save folder does not exist.');
+        if (!fs.existsSync(this.root)) throw new AdventureError('The source folder does not exist.');
         const [command, args] = process.platform === 'win32' ? ['explorer.exe', [this.root]]
             : process.platform === 'darwin' ? ['open', [this.root]]
             : ['xdg-open', [this.root]];

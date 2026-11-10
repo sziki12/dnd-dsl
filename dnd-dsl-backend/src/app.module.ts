@@ -5,7 +5,7 @@ import { LangiumParserService } from './langium-parser/langium-parser.service.js
 import { LangiumInterpreterService } from './langium-interpreter/langium-interpreter.service.js';
 import { LangiumConnectionGateway } from './langium-connection/langium-connection.service.js';
 import { FileController } from './file/file.controller.js';
-import { ConfigurationService } from './configuration/configuration.service.js';
+import { SettingsService } from './settings/settings.service.js';
 import { ImageController } from './image/image.controller.js';
 import { LangiumExportService } from './langium-export/langium-export.service.js';
 import { FileService } from './file/file.service.js';
@@ -25,7 +25,7 @@ import { AdventureService } from './adventure/adventure.service.js';
     LangiumParserService,
     LangiumInterpreterService,
     LangiumConnectionGateway,
-    ConfigurationService,
+    SettingsService,
     LangiumExportService,
     FileService,
     ImageService,

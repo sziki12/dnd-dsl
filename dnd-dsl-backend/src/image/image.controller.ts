@@ -15,24 +15,19 @@ import { createReadStream } from 'fs';
 import type { IncomingMessage } from 'http';
 import { join } from 'path';
 import { isSafeSegment } from '../common/safe-segment.js';
-import { ConfigurationService } from '../configuration/configuration.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { MAX_IMAGE_BYTES, contentTypeFor, isImageUploadType, readBody, resolveMapImage, saveMapImage } from './map-image-store.js';
 
 @Controller('image')
 export class ImageController {
 
-    world: string = ""
-    adventure: string = ""
     constructor(
-        private readonly configurationService: ConfigurationService
-      ) {
-        this.world = configurationService.WorldName!
-        this.adventure = configurationService.AdventureName!
-      }
+        private readonly settingsService: SettingsService
+      ) {}
 
     private adventurePath(adventure: string): string {
       if (!isSafeSegment(adventure)) throw new BadRequestException('Invalid adventure.')
-      return join(this.configurationService.DefaultFilePath!, adventure)
+      return join(this.settingsService.requireSourceFolder(), adventure)
     }
 
     // no-cache: a replaced image keeps its URL, so it has to be re-checked every time.

@@ -1,30 +1,29 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigurationService } from '../configuration/configuration.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 @Injectable()
 export class FileService {
     constructor(
-            private readonly configurationService: ConfigurationService
+            private readonly settingsService: SettingsService
           ) { }
 
     getDnDFilePath(adventure: string, world: string): string
     {
-        const dndFilePath = `${this.configurationService.DefaultFilePath}/${adventure}/${world}.dnd`
-        return dndFilePath
+        return `${this.settingsService.requireSourceFolder()}/${adventure}/${world}.dnd`
     }
 
     getLayoutFilePath(adventure: string, world: string): string
     {
-        return `${this.configurationService.DefaultFilePath}/${adventure}/${world}.layout.json`
+        return `${this.settingsService.requireSourceFolder()}/${adventure}/${world}.layout.json`
     }
 
     getViewFilePath(adventure: string, world: string): string
     {
-        return `${this.configurationService.DefaultFilePath}/${adventure}/${world}.mapview.json`
+        return `${this.settingsService.requireSourceFolder()}/${adventure}/${world}.mapview.json`
     }
 
     getStateFilePath(adventure: string, world: string): string
     {
-        return `${this.configurationService.DefaultFilePath}/${adventure}/${world}.state.json`
+        return `${this.settingsService.requireSourceFolder()}/${adventure}/${world}.state.json`
     }
 }

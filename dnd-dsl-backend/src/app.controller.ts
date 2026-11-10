@@ -3,7 +3,6 @@ import { AppService } from './app.service.js';
 import { LangiumParserService } from './langium-parser/langium-parser.service.js';
 import { pathToFileURL } from 'url';
 import { LangiumInterpreterService } from './langium-interpreter/langium-interpreter.service.js';
-import { ConfigurationService } from './configuration/configuration.service.js';
 import { FileService } from './file/file.service.js';
 import { WorldStateService } from './world-state/world-state.service.js';
 import { CommandService } from './command/command.service.js';
@@ -16,14 +15,11 @@ export class AppController {
     private readonly appService: AppService,
     private readonly parserService: LangiumParserService,
     private readonly interpreterService: LangiumInterpreterService,
-    private readonly configurationService: ConfigurationService,
     private readonly fileService: FileService,
     private readonly worldStateService: WorldStateService,
     private readonly commandService: CommandService,
     private readonly adventureService: AdventureService,
-  ) {
-    configurationService.readConfig()
-  }
+  ) {}
 
   @Get()
   getHello(): string {

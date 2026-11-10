@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { DndDslParseError } from '@dnd-cli/main.js';
+import { LoopbackGuard } from '../common/loopback.guard.js';
 import { AdventureService } from './adventure.service.js';
 import { AdventureError, type WorldRef } from './adventure-store.js';
 
@@ -14,7 +15,20 @@ export class AdventureController {
 
     @Get('list')
     list() {
-        return this.adventureService.list();
+        return this.run(() => this.adventureService.list());
+    }
+
+    // The two folder requests touch the server machine's own disk, so only that machine may make them.
+    @Get('folders')
+    @UseGuards(LoopbackGuard)
+    folders(@Query('path') path?: string) {
+        return this.run(() => this.adventureService.folders(path));
+    }
+
+    @Post('source-folder')
+    @UseGuards(LoopbackGuard)
+    sourceFolder(@Body() body: { path: string; create?: boolean }) {
+        return this.run(() => this.adventureService.setSourceFolder(body?.path, body?.create === true));
     }
 
     @Post('open')
@@ -48,6 +62,7 @@ export class AdventureController {
     }
 
     @Post('reveal')
+    @UseGuards(LoopbackGuard)
     reveal() {
         return this.run(() => this.adventureService.reveal());
     }

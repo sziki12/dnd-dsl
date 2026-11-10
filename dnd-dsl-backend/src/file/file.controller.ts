@@ -1,7 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs/common';
 import fs from "fs"
 import { type FileDto } from "./dto/save-file.dto.js"
-import { ConfigurationService } from '../configuration/configuration.service.js';
 import { FileService } from './file.service.js';
 import { WorldStateService } from '../world-state/world-state.service.js';
 import { EMPTY_STATE_OVERLAY, type StateOverlayFile } from '../world-state/state-overlay.types.js';
@@ -11,16 +10,10 @@ import { readLayout, writeLayout, type Layout } from './layout-store.js';
 @Controller('file')
 export class FileController {
 
-    world: string = ""
-    adventure: string = ""
     constructor(
-        private readonly configurationService: ConfigurationService,
         private readonly fileService: FileService,
         private readonly worldStateService: WorldStateService,
-      ) {
-        this.world = configurationService.WorldName!
-        this.adventure = configurationService.AdventureName!
-      }
+      ) {}
 
     @Post('save')
     saveDnDFile(@Body() dto: FileDto): { success: boolean } {
