@@ -41,7 +41,8 @@ export function setDisplayName(name: string): void {
 
 type ServerMessage =
   | { type: 'WORLD_STATE'; payload: CommandResponse }
-  | { type: 'CONTROLLER_CHANGED'; controllerId: string | null; controllerName: string | null };
+  | { type: 'CONTROLLER_CHANGED'; controllerId: string | null; controllerName: string | null }
+  | { type: 'ACTIVE_WORLD'; adventure: string; world: string };
 
 /**
  * Opens the live-sync WebSocket (backend StateSyncGateway, /state-sync) and keeps it
@@ -51,9 +52,14 @@ type ServerMessage =
  * holds control of the shared undo/redo history and exposes `claimControl()` to take
  * it - see the multi-page-live-sync-roadmap memory. On reconnect (after a dropped
  * connection), calls `onReconnected` so the page can catch up on anything it missed
- * while disconnected (wired to DslContext.reloadWorld).
+ * while disconnected (wired to DslContext.catchUp). `onActiveWorld` hears that some page opened
+ * another adventure or world; it arrives just before that world's first WORLD_STATE.
  */
-export function useStateSync(onWorldState: (response: CommandResponse) => void, onReconnected: () => void) {
+export function useStateSync(
+  onWorldState: (response: CommandResponse) => void,
+  onReconnected: () => void,
+  onActiveWorld: (adventure: string, world: string) => void,
+) {
   const [isController, setIsController] = useState(false);
   const [controllerName, setControllerName] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
@@ -67,6 +73,8 @@ export function useStateSync(onWorldState: (response: CommandResponse) => void, 
   onWorldStateRef.current = onWorldState;
   const onReconnectedRef = useRef(onReconnected);
   onReconnectedRef.current = onReconnected;
+  const onActiveWorldRef = useRef(onActiveWorld);
+  onActiveWorldRef.current = onActiveWorld;
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +105,8 @@ export function useStateSync(onWorldState: (response: CommandResponse) => void, 
         }
         if (msg.type === 'WORLD_STATE') {
           onWorldStateRef.current(msg.payload);
+        } else if (msg.type === 'ACTIVE_WORLD') {
+          onActiveWorldRef.current(msg.adventure, msg.world);
         } else if (msg.type === 'CONTROLLER_CHANGED') {
           setIsController(msg.controllerId === clientIdRef.current);
           setControllerName(msg.controllerName);

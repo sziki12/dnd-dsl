@@ -14,10 +14,12 @@ import { WorldStateService } from './world-state/world-state.service.js';
 import { CommandController } from './command/command.controller.js';
 import { CommandService } from './command/command.service.js';
 import { StateSyncGateway } from './state-sync/state-sync.gateway.js';
+import { AdventureController } from './adventure/adventure.controller.js';
+import { AdventureService } from './adventure/adventure.service.js';
 
 @Module({
   imports: [],
-  controllers: [AppController, FileController, ImageController, CommandController],
+  controllers: [AppController, FileController, ImageController, CommandController, AdventureController],
   providers: [
     AppService,
     LangiumParserService,
@@ -30,6 +32,7 @@ import { StateSyncGateway } from './state-sync/state-sync.gateway.js';
     WorldStateService,
     CommandService,
     StateSyncGateway,
+    AdventureService,
   ],
 })
 export class AppModule {}

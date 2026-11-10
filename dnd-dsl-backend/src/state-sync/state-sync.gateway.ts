@@ -8,7 +8,8 @@ type ClientInfo = { id: string; name: string };
 
 type ServerMessage =
   | { type: 'WORLD_STATE'; payload: CommandResponse }
-  | { type: 'CONTROLLER_CHANGED'; controllerId: string | null; controllerName: string | null };
+  | { type: 'CONTROLLER_CHANGED'; controllerId: string | null; controllerName: string | null }
+  | { type: 'ACTIVE_WORLD'; adventure: string; world: string };
 
 type ClientMessage = { type: 'CLAIM_CONTROL' };
 
@@ -55,6 +56,11 @@ export class StateSyncGateway implements OnGatewayConnection, OnGatewayDisconnec
   /** Sent to every connected page after any command, undo, redo, or /parse reparse. */
   broadcastState(response: CommandResponse): void {
     this.broadcast({ type: 'WORLD_STATE', payload: response });
+  }
+
+  /** Sent to every page when another adventure or world is opened, before the new world's state. */
+  broadcastActiveWorld(adventure: string, world: string): void {
+    this.broadcast({ type: 'ACTIVE_WORLD', adventure, world });
   }
 
   isController(clientId: string): boolean {

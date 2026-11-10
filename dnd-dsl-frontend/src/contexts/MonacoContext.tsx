@@ -81,7 +81,8 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         return editorAppConfig
     }
 
-    let editorAppConfig = getEditorConfig("//Initial content")
+    // The world file's text as last loaded or saved: what a freshly started editor opens with.
+    const sourceTextRef = useRef("//Initial content");
 
     const savedVersionRef = useRef<number | undefined>(undefined);
 
@@ -131,10 +132,13 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
             await editorAppRef.current.dispose().catch(() => {});
             editorAppRef.current = null;
         }
-        const app = new EditorApp(editorAppConfig);
+        const app = new EditorApp(getEditorConfig(sourceTextRef.current));
 
         editorAppRef.current = app;
         await app.start(element);
+        // A model left from an earlier editor may hold the text of another world.
+        const source = app.getTextModels().modified;
+        if (source && source.getValue() !== sourceTextRef.current) source.setValue(sourceTextRef.current);
         const editor = app.getEditor();
         if (editor && entityActions) registerEntityAction(editor, entityActions);
         markSaved();
@@ -226,21 +230,26 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         if (!content) return { ok: false, errors: ['Nothing to save.'] };
 
         await fileContext?.saveFile({identifier: {adventure: dlsContext.adventure, world:dlsContext.world}, content: content})
+        sourceTextRef.current = content;
         markSaved();
         return await dlsContext.reloadWorld();
     };
 
+    // Also when another adventure or world is opened (by any page): the editor then shows that file.
     useEffect(()=>{
-        if(!fileContext.loaded)
+        if(!fileContext.loaded || !dlsContext.adventure || !dlsContext.world)
             return
 
+        let cancelled = false
         fileContext.loadFile(dlsContext.adventure, dlsContext.world).then(file => {
+            if (cancelled) return
+            sourceTextRef.current = file.content
             // The text the file holds is the saved baseline, whenever updateCode finishes applying it.
             Promise.resolve(editorAppRef.current?.updateCode({modified:file.content})).then(markSaved)
             if (viewModeRef.current === 'source') restoreScroll('source')
-            editorAppConfig = getEditorConfig(file.content)
         });
-    },[fileContext.loaded])
+        return () => { cancelled = true }
+    },[fileContext.loaded, dlsContext.adventure, dlsContext.world])
 
     return (
         <MonacoContext.Provider value={{ startEditor, hasUnsavedChanges, disposeEditor, saveFile, showMergedView, showSourceView }}>

@@ -89,6 +89,7 @@ export function useScriptEditor(
   useEffect(() => {
     let cancelled = false;
     setReady(false);
+    if (!adventure || !world) return;
 
     (async () => {
       await getMonacoInit();

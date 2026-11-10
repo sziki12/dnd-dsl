@@ -8,6 +8,7 @@ import { FileService } from './file/file.service.js';
 import { WorldStateService } from './world-state/world-state.service.js';
 import { CommandService } from './command/command.service.js';
 import { DndDslParseError } from '@dnd-cli/main.js';
+import { AdventureService } from './adventure/adventure.service.js';
 
 @Controller()
 export class AppController {
@@ -19,6 +20,7 @@ export class AppController {
     private readonly fileService: FileService,
     private readonly worldStateService: WorldStateService,
     private readonly commandService: CommandService,
+    private readonly adventureService: AdventureService,
   ) {
     configurationService.readConfig()
   }
@@ -35,6 +37,7 @@ export class AppController {
         this.fileService.getDnDFilePath(adventure, world),
         this.fileService.getStateFilePath(adventure, world),
       )
+      this.adventureService.markLoaded(adventure, world)
       this.commandService.notifyWorldReloaded()
       return 'Model generated successfully'
     } catch (e) {

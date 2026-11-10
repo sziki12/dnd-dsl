@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useEffect, useRef, useState } from 'react';
 import { BackendURL } from './BackendContext';
 import type { Command, CommandResponse, ScriptEvent } from '@dnd-language/evaluation/dnd-dsl-commands';
 import type { SerializedAstNode, SerializedModel, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types';
@@ -52,8 +52,11 @@ function describeCommandError(body: unknown, status: number): string {
 }
 
 export function DslContextNode({ children }: { children: React.ReactNode }) {
-  const [world, setWorld] = useState('World');
-  const [adventure, setAdventure] = useState('Adventure');
+  // Which adventure and world are open is the server's to say (it holds one for every page); empty until it has.
+  const [world, setWorld] = useState('');
+  const [adventure, setAdventure] = useState('');
+  // The "adventure/world" the server announced as already loaded, so this page does not parse it again.
+  const announcedRef = useRef('');
   const [worldState, setWorldState] = useState<SerializedModel | undefined>(undefined);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -112,9 +115,36 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     setFiredReminders(prev => prev.filter(r => r.id !== id));
   };
 
+  const fetchActiveWorld = async (): Promise<{ adventure?: string; world?: string; loaded: boolean }> =>
+    (await fetch(`${BackendURL}/adventure/active`)).json();
+
+  // The reminders on screen belong to the world that was open.
+  const adoptWorld = (nextAdventure: string, nextWorld: string) => {
+    announcedRef.current = `${nextAdventure}/${nextWorld}`;
+    setAdventure(nextAdventure);
+    setWorld(nextWorld);
+    setFiredReminders([]);
+    setCommandError(null);
+  };
+
+  // After a dropped connection: follow whatever world the server has open now. A server with nothing loaded
+  // (it restarted) is given this page's world instead.
+  const catchUp = async () => {
+    const active = await fetchActiveWorld().catch(() => undefined);
+    if (active?.loaded && active.adventure && active.world) {
+      if (active.adventure !== adventure || active.world !== world) adoptWorld(active.adventure, active.world);
+      await updateWorldState();
+    } else if (adventure && world) {
+      await reloadWorld();
+    } else if (active?.adventure && active.world) {
+      setAdventure(active.adventure);
+      setWorld(active.world);
+    }
+  };
+
   // Live sync across every open page/tab/device: applyCommandResponse handles a broadcast from another page exactly like
-  // one from this page's own request; reloadWorld catches up on anything missed while this page was disconnected.
-  const { isController, controllerName, claimControl, clientId } = useStateSync(applyCommandResponse, reloadWorld);
+  // one from this page's own request; catchUp handles anything missed while this page was disconnected.
+  const { isController, controllerName, claimControl, clientId } = useStateSync(applyCommandResponse, catchUp, adoptWorld);
 
   // A rejected command (HTTP 400) carries `{ message }` instead of a CommandResponse. Applying it would
   // replace the world state with undefined and blank every page, so it is shown as an error instead
@@ -186,7 +216,17 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   }, [canUndo, canRedo, isController]);
 
   useEffect(() => {
-    if (!world || !adventure) return;
+    fetchActiveWorld()
+      .then(active => {
+        if (!active.adventure || !active.world) return;
+        setAdventure(active.adventure);
+        setWorld(active.world);
+      })
+      .catch(() => console.warn('Could not ask the server which world is open'));
+  }, []);
+
+  useEffect(() => {
+    if (!world || !adventure || announcedRef.current === `${adventure}/${world}`) return;
     reloadWorld();
   }, [world, adventure]);
 

@@ -96,14 +96,30 @@ export class WorldStateService {
     const overlayFile = statePath && fs.existsSync(statePath)
       ? (JSON.parse(fs.readFileSync(statePath, 'utf-8')) as StateOverlayFile)
       : undefined;
+    this.applyOverlayFile(overlayFile);
+    this.buildHandlerIndex();
+    return this._worldState;
+  }
+
+  /** Replaces the whole runtime state (overrides, clock, reminders) with a saved one and rebuilds the served world. */
+  applyOverlayFile(overlayFile: StateOverlayFile | undefined): void {
     // State saved before sublocations were addressed through their parents carries the old, name-only form.
-    this._overlay = canonicalOverlayEntries(this._model, overlayFile?.entries ?? {});
+    this._overlay = canonicalOverlayEntries(this._model!, overlayFile?.entries ?? {});
     this._clock = overlayFile?.clock ?? 0;
     this._reminders = (overlayFile?.reminders ?? []).map(reminder => canonicalReminder(this._model!, reminder));
     this._firedReminders = (overlayFile?.firedReminders ?? []).map(reminder => canonicalReminder(this._model!, reminder));
     this.rebuildWorldState();
-    this.buildHandlerIndex();
-    return this._worldState;
+  }
+
+  /** The runtime state in the shape of the `.state.json` file. */
+  snapshotOverlayFile(): StateOverlayFile {
+    return {
+      version: 1,
+      entries: this._overlay,
+      clock: this._clock,
+      reminders: this._reminders,
+      firedReminders: this._firedReminders,
+    };
   }
 
   /**
@@ -178,14 +194,7 @@ export class WorldStateService {
    */
   persistOverlay(): void {
     if (!this._statePath) return;
-    const overlayFile: StateOverlayFile = {
-      version: 1,
-      entries: this._overlay,
-      clock: this._clock,
-      reminders: this._reminders,
-      firedReminders: this._firedReminders,
-    };
-    fs.writeFileSync(this._statePath, JSON.stringify(overlayFile, null, 2), 'utf-8');
+    fs.writeFileSync(this._statePath, JSON.stringify(this.snapshotOverlayFile(), null, 2), 'utf-8');
   }
 
   getClock(): number {

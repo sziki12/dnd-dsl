@@ -134,7 +134,13 @@ export class CommandService {
     }
   }
 
-  /** 
+  /** Forgets every undo and redo step: they describe a world or state that is no longer loaded. */
+  resetHistory(): void {
+    this.history.length = 0;
+    this.future.length = 0;
+  }
+
+  /**
    *  Pushes the current state to every connected page with no change of its own.
    *  Used after a POST /parse reparse, which doesn't go through execute(). 
    **/

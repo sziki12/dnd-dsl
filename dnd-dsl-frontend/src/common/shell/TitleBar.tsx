@@ -2,8 +2,9 @@ import { useContext, useEffect } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { DslContext } from '../../contexts/DslContext';
 import { useLocationRoute } from '../useLocationIndex';
+import FileMenu from './FileMenu';
 
-const MENU_ITEMS = ['File', 'Edit', 'View', 'Help'];
+const MENU_ITEMS = ['Edit', 'View', 'Help'];
 
 /** The current view's display name - what the tab strip used to show per-tab,
  *  now driving the browser tab title instead since there is no tab strip anymore. */
@@ -43,6 +44,7 @@ export default function TitleBar() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ fontWeight: 600, color: 'var(--fg-bright)' }}>DnD DSL</span>
         <div style={{ display: 'flex', gap: 2 }}>
+          <FileMenu />
           {MENU_ITEMS.map((m) => (
             <span key={m} style={{ padding: '3px 8px', borderRadius: 3 }}>{m}</span>
           ))}
