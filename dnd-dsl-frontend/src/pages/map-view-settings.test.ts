@@ -11,11 +11,13 @@ import {
   isDefaultSettings,
   isHexColor,
   resolveColor,
+  sanitizeExpanded,
   sanitizeSettings,
   setColor,
   settingsToClasses,
   settingsToCssVars,
   settingsToStored,
+  toggleExpanded,
   type MapViewSettings,
 } from './map-view-settings';
 
@@ -27,6 +29,8 @@ describe('defaults', () => {
       nodes: { visible: true, opacity: 1, sizeMode: 'map', size: 1 },
       edges: { visible: true },
       colors: {},
+      tagRules: [],
+      expanded: [],
     });
   });
 
@@ -53,8 +57,20 @@ describe('sanitizeSettings', () => {
       nodes: { visible: false, opacity: 0.4, sizeMode: 'screen', size: 1.5 },
       edges: { visible: false },
       colors: { all: '#112233', exit: '#abcdef' },
+      tagRules: [{ tag: 'Hidden', value: 'true', style: { color: '#445566', dash: true, opacity: 0.4, suffix: '!' } }],
+      expanded: ['Castle', 'Docks'],
     };
     expect(sanitizeSettings(wanted)).toEqual(wanted);
+  });
+
+  test('settings saved before tag rules existed load with none', () => {
+    const old = { version: 1, labels: false, nodes: { visible: true, opacity: 1, sizeMode: 'map', size: 1 }, edges: { visible: true }, colors: {} };
+    expect(sanitizeSettings(old).tagRules).toEqual([]);
+  });
+
+  test('bad tag rules are dropped, good ones kept', () => {
+    const s = sanitizeSettings({ tagRules: [{ tag: 'A', style: { color: 'red' } }, { tag: 'B', style: { dash: true } }, 'x'] });
+    expect(s.tagRules).toEqual([{ tag: 'B', style: { dash: true } }]);
   });
 
   test('numbers are clamped, NaN and strings fall back', () => {
@@ -197,6 +213,7 @@ describe('what gets stored', () => {
   test('any change is not the defaults', () => {
     expect(isDefaultSettings({ ...defaultSettings(), labels: false })).toBe(false);
     expect(isDefaultSettings(setColor(defaultSettings(), 'all', '#111111'))).toBe(false);
+    expect(isDefaultSettings({ ...defaultSettings(), tagRules: [{ tag: 'Hidden', style: { dash: true } }] })).toBe(false);
     expect(isDefaultSettings({ ...defaultSettings(), nodes: { ...defaultSettings().nodes, size: 1.5 } })).toBe(false);
   });
 
@@ -208,5 +225,34 @@ describe('what gets stored', () => {
     const changed = setColor({ ...defaultSettings(), labels: false }, 'nodes', '#abcdef');
     expect(settingsToStored(changed)).toEqual(changed);
     expect(sanitizeSettings(JSON.parse(JSON.stringify(settingsToStored(changed))))).toEqual(changed);
+  });
+});
+
+describe('expanded groups', () => {
+  test('settings saved before groups existed load with none open', () => {
+    expect(sanitizeSettings({ version: 1, labels: true }).expanded).toEqual([]);
+  });
+
+  test('only non-empty strings are kept, once each', () => {
+    expect(sanitizeExpanded(['A', 'A', '', 3, null, 'B', { x: 1 }])).toEqual(['A', 'B']);
+    expect(sanitizeExpanded('A')).toEqual([]);
+    expect(sanitizeExpanded(undefined)).toEqual([]);
+  });
+
+  test('the list is bounded', () => {
+    const many = Array.from({ length: 2000 }, (_, i) => `L${i}`);
+    expect(sanitizeExpanded(many).length).toBeLessThanOrEqual(500);
+    expect(sanitizeExpanded(['x'.repeat(500)])).toEqual([]);
+  });
+
+  test('an open group is something worth storing', () => {
+    expect(isDefaultSettings({ ...defaultSettings(), expanded: ['A'] })).toBe(false);
+    expect(settingsToStored({ ...defaultSettings(), expanded: ['A'] })).toMatchObject({ expanded: ['A'] });
+  });
+
+  test('toggling opens a group, then closes it', () => {
+    const opened = toggleExpanded(['A'], 'B');
+    expect(opened).toEqual(['A', 'B']);
+    expect(toggleExpanded(opened, 'A')).toEqual(['B']);
   });
 });

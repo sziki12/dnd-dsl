@@ -18,6 +18,7 @@ import { arrowMarkerId, markerColors } from './exit-tags';
 import type { MapGraph } from './map-graph';
 import { sanitizeLayout } from './map-flow-support';
 import { placeNodes, type NormPos } from './auto-layout';
+import { locationRoute, readWithLegacy, withLegacyKeys } from '../common/location-identity';
 import { fitViewport, mapRectFor, normalizedToPixel, paddedRect, pixelToNormalized, resizedViewport, zoomLimits, type Size, type Viewport } from './map-coords';
 
 // Module-level so ReactFlow doesn't see a new object every render (which would
@@ -34,20 +35,22 @@ const mapControlStyle: React.CSSProperties = {
 };
 
 export interface MapFlowProps {
-  /** What the saved layout is filed under: a location's name, or `$world`. Nothing loads or saves while it is undefined. */
+  /** What the saved layout is filed under: a location's key, or `$world`. Nothing loads or saves while it is undefined. */
   scopeKey: string | undefined;
+  /** The key the layout was filed under before, read when nothing is saved under `scopeKey` yet. */
+  legacyScopeKey?: string;
   graph: MapGraph | undefined;
   mode: 'map' | 'tree';
-  /** The node the tree view hangs everything from. */
+  /** The id of the node the tree view hangs everything from. */
   treeRoot?: string;
   settings: MapViewSettings;
   settingsReady: boolean;
   mapImage: MapImage | null;
-  /** Shows a chevron on nodes that have children; it calls this with the node's name. */
-  onToggleGroup?: (name: string) => void;
+  /** Shows a chevron on nodes that have children; it calls this with the node's id. */
+  onToggleGroup?: (id: string) => void;
 }
 
-const MapFlow = ({ scopeKey, graph, mode, treeRoot, settings, settingsReady, mapImage, onToggleGroup }: MapFlowProps) => {
+const MapFlow = ({ scopeKey, legacyScopeKey, graph, mode, treeRoot, settings, settingsReady, mapImage, onToggleGroup }: MapFlowProps) => {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
   const { adventure, world } = useContext(DslContext);
@@ -135,7 +138,8 @@ const MapFlow = ({ scopeKey, graph, mode, treeRoot, settings, settingsReady, map
   );
 
   const onNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
-    navigate(`/location/${encodeURIComponent(String(node.data.location))}`);
+    const path = node.data.path;
+    if (Array.isArray(path)) navigate(locationRoute(path.map(String)));
   }, [navigate]);
 
   const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
@@ -172,18 +176,19 @@ const MapFlow = ({ scopeKey, graph, mode, treeRoot, settings, settingsReady, map
     setLayoutReady(false);
     if (!scopeKey) return;
     let cancelled = false;
-    fetch(`${BackendURL}/file/layout/load?adventure=${adventure}&world=${world}&location=${encodeURIComponent(scopeKey)}`)
-      .then(r => r.json())
-      .then((saved: Record<string, NormPos>) => {
+    const read = (key: string): Promise<Record<string, NormPos>> =>
+      fetch(`${BackendURL}/file/layout/load?adventure=${adventure}&world=${world}&location=${encodeURIComponent(key)}`).then(r => r.json());
+    readWithLegacy(read, scopeKey, legacyScopeKey)
+      .then(({ value }) => {
         if (cancelled) return;
-        const clean = sanitizeLayout(saved);
+        const clean = sanitizeLayout(value);
         positionsRef.current = { ...clean };
         setSavedLayout(clean);
       })
       .catch(() => { /* no saved layout - the nodes are placed by the auto layout */ })
       .finally(() => { if (!cancelled) setLayoutReady(true); });
     return () => { cancelled = true; };
-  }, [scopeKey, adventure, world]);
+  }, [scopeKey, legacyScopeKey, adventure, world]);
 
   // Build the graph and project every node into map space. Re-runs whenever the graph's content, the view
   // mode, or the map rect changes (an image resolving or being replaced). Nodes that have a position keep it;
@@ -200,7 +205,10 @@ const MapFlow = ({ scopeKey, graph, mode, treeRoot, settings, settingsReady, map
     if (mode === 'tree') {
       source = layoutAsTree(graph.nodes, treeRoot ?? '');
     } else {
-      const known = { ...savedLayout, ...positionsRef.current };
+      const known = withLegacyKeys(
+        { ...savedLayout, ...positionsRef.current },
+        graph.nodes.map(n => ({ id: n.id, legacyId: typeof n.data.legacyId === 'string' ? n.data.legacyId : undefined })),
+      );
       const near: Record<string, string> = {};
       for (const edge of graph.edges) if (edge.data?.kind === 'sublocation') near[edge.target] = edge.source;
       const placed = placeNodes(
@@ -211,7 +219,7 @@ const MapFlow = ({ scopeKey, graph, mode, treeRoot, settings, settingsReady, map
         near,
       );
       for (const node of graph.nodes) {
-        if (!Object.prototype.hasOwnProperty.call(known, node.id)) positionsRef.current[node.id] = placed[node.id];
+        if (!Object.prototype.hasOwnProperty.call(positionsRef.current, node.id)) positionsRef.current[node.id] = placed[node.id];
       }
       source = graph.nodes.map(node => ({ ...node, position: placed[node.id] }));
     }

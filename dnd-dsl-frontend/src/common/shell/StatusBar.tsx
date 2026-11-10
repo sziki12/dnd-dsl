@@ -1,5 +1,4 @@
 import { useContext, useState } from 'react';
-import { useParams } from 'react-router-dom';
 import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
 import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
@@ -8,6 +7,7 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import LockOpenOutlinedIcon from '@mui/icons-material/LockOpenOutlined';
 import { DslContext } from '../../contexts/DslContext';
 import { BackendURL } from '../../contexts/BackendContext';
+import { useLocationRoute } from '../useLocationIndex';
 import { formatClock } from '@dnd-language/evaluation/dnd-dsl-clock';
 import type { FiredReminder, ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders';
 import { getDisplayName, setDisplayName } from '../useStateSync';
@@ -30,7 +30,7 @@ const severityColor = { info: 'var(--accent)', warning: 'var(--warn)', urgent: '
 
 export default function StatusBar() {
   const { adventure, world, worldState, canUndo, canRedo, undo, redo, execute, isController, controllerName, claimControl } = useContext(DslContext);
-  const { locationName } = useParams();
+  const locationNames = useLocationRoute();
   const [agendaOpen, setAgendaOpen] = useState(false);
   const [agenda, setAgenda] = useState<Agenda | null>(null);
   const [controlOpen, setControlOpen] = useState(false);
@@ -65,7 +65,7 @@ export default function StatusBar() {
     <div className="shell-statusbar" style={{ position: 'relative' }}>
       <div style={itemStyle}>
         {adventure} / {world}
-        {locationName && ` · ${locationName}`}
+        {locationNames && ` · ${locationNames.join(' \u203a ')}`}
       </div>
       <button
         style={{ ...itemStyle, background: 'transparent', border: 0, color: 'inherit', cursor: (canUndo && isController) ? 'pointer' : 'default', opacity: (canUndo && isController) ? 1 : 0.5 }}

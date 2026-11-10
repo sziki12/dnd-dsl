@@ -6,6 +6,8 @@ import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 import type { SerializedLocation, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 import { DslContext } from '../contexts/DslContext.js';
+import { canonicalKeys } from '../common/location-identity';
+import { useLocationIndex } from '../common/useLocationIndex';
 import VariableEditor from '../common/VariableEditor';
 import MapFlow from './MapFlow';
 import MapSettingsPanel from './MapSettingsPanel';
@@ -38,9 +40,14 @@ const WorldMapView = () => {
     [locations],
   );
 
+  // A node's id is the key of its location. The saved list may still hold bare names, which become keys on this write.
+  const index = useLocationIndex();
   const toggleGroup = useCallback(
-    (name: string) => setViewSettings({ ...viewSettings, expanded: toggleExpanded(viewSettings.expanded, name) }),
-    [viewSettings, setViewSettings],
+    (id: string) => {
+      const open = index ? canonicalKeys(index, viewSettings.expanded) : viewSettings.expanded;
+      setViewSettings({ ...viewSettings, expanded: toggleExpanded(open, id) });
+    },
+    [index, viewSettings, setViewSettings],
   );
 
   return (

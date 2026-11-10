@@ -8,7 +8,7 @@ import { MapGroupContext } from '../pages/MapViewContext';
 const CAPTION: Record<NodeKind, string> = { root: 'location', sub: 'sub', entry: 'sub', external: 'external' };
 
 // Colours, fade and size come from CSS (.map-node in darkplus.css), driven by the settings MapFlow puts on its container.
-function MapNode({ data }: any) {
+function MapNode({ id, data }: any) {
   const kind: NodeKind = data.kind ?? (data.type === 'group' ? 'root' : data.isEntry ? 'entry' : 'sub');
   const toggleGroup = useContext(MapGroupContext);
   const childCount: number = typeof data.childCount === 'number' ? data.childCount : 0;
@@ -35,7 +35,7 @@ function MapNode({ data }: any) {
             className="nodrag nopan map-node-toggle"
             title={data.expanded ? 'Hide the sublocations' : 'Show the sublocations'}
             aria-expanded={!!data.expanded}
-            onClick={e => { e.stopPropagation(); toggleGroup(String(data.location)); }}
+            onClick={e => { e.stopPropagation(); toggleGroup(String(id)); }}
             onDoubleClick={e => e.stopPropagation()}
           >
             {data.expanded ? <ExpandMoreIcon style={{ fontSize: 16 }} /> : <ChevronRightIcon style={{ fontSize: 16 }} />}

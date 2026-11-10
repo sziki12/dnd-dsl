@@ -9,10 +9,11 @@ import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined';
 import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 
-import { useParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { DslContext } from '../contexts/DslContext.js';
-import type { SerializedModel, SerializedLocation, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
-import { findLocation } from '../common/location-tree';
+import type { SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import { locationRoute } from '../common/location-identity';
+import { useLocationIndex, useLocationRoute } from '../common/useLocationIndex';
 import VariableEditor from '../common/VariableEditor';
 import MapSettingsPanel from './MapSettingsPanel';
 import MapFlow from './MapFlow';
@@ -23,20 +24,25 @@ import { useMapImage } from './useMapImage';
 import { collectExitTags } from './exit-tags';
 
 const LocationView = () => {
-  let {locationName} = useParams()
+  const names = useLocationRoute()
+  const index = useLocationIndex()
   const {worldState, adventure, world} = useContext(DslContext)
 
-  let [locationData, setLocationData] = useState<SerializedLocation | undefined>(undefined)
+  // The address names a location by its path; an old one-name address still finds a sublocation only one location has.
+  const match = useMemo(() => (names && index ? index.resolve(names) : undefined), [names, index])
+  const entry = match?.kind === 'found' ? match.entry : undefined
+  const locationData = entry?.location
+  const locationKey = entry?.key
   const [leftTab, setLeftTab] = useState<'variables' | 'npcs'>('variables')
   const [viewMode, setViewMode] = useState<'map' | 'tree'>('map')
   // Live view settings of the map: per location, saved on the server, applied as they change.
-  const [viewSettings, setViewSettings, settingsReady] = useMapViewSettings(adventure, world, locationName ?? '')
+  const [viewSettings, setViewSettings, settingsReady] = useMapViewSettings(adventure, world, locationKey ?? '', entry?.legacyKey)
   // The location's background image, and the means to replace it (from the settings panel).
-  const mapImage = useMapImage(adventure, locationName ?? '')
+  const mapImage = useMapImage(adventure, locationKey ?? '', entry?.legacyKey)
   // The tags the exits shown on the map carry, so the settings panel can offer a style for each.
   const exitTagList = useMemo(() => collectExitTags(locationData), [locationData])
   const resolve = useReferenceResolver()
-  const graph = useStableGraph(useMemo(() => (locationData ? buildLocationGraph(locationData, resolve) : undefined), [locationData, resolve]))
+  const graph = useStableGraph(useMemo(() => (locationData && index ? buildLocationGraph(locationData, resolve, index) : undefined), [locationData, index, resolve]))
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // What the doc panel below the tree currently shows - `path` is a dot-joined name
@@ -98,13 +104,33 @@ const LocationView = () => {
   )
 
   useEffect(()=>{
-
-    const newLocation = getLocationData(worldState, locationName ?? "Location")
-    if(typeof(newLocation) == "undefined")
-      return
-    setLocationData(newLocation)
     setSelectedVariable(null)
-  },[worldState, locationName])
+  },[worldState, locationKey])
+
+  if (match?.kind === 'ambiguous') {
+    return (
+      <div className="h-full w-full" style={{ background: 'var(--bg-editor)', color: 'var(--fg-primary)', overflow: 'auto' }}>
+        <div className="var-banner"><h1>{names?.join(' › ')}</h1></div>
+        <div className="npc-stub">More than one location is called this. Choose one:</div>
+        <ul style={{ padding: '0 24px 24px 40px', lineHeight: 1.8 }}>
+          {match.candidates.map(candidate => (
+            <li key={candidate.key}>
+              <Link to={locationRoute(candidate.path)} style={{ color: 'var(--accent)' }}>{candidate.path.join(' › ')}</Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+
+  if (match?.kind === 'missing') {
+    return (
+      <div className="h-full w-full" style={{ background: 'var(--bg-editor)', color: 'var(--fg-primary)' }}>
+        <div className="var-banner"><h1>{names?.join(' › ')}</h1></div>
+        <div className="npc-stub">The world has no such location.</div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full w-full flex flex-col lg:flex-row" style={{ background: 'var(--bg-editor)', color: 'var(--fg-primary)' }}>
@@ -126,7 +152,7 @@ const LocationView = () => {
           {leftTab === 'variables' ? (
             <>
               <div className="var-banner">
-                <h1>{locationName}</h1>
+                <h1>{(entry?.path ?? names)?.join(' › ')}</h1>
               </div>
               <div style={{ padding: '8px 0' }}>
                 {locationData && locationData.variables.map((variable: SerializedVariableDecl, i: number) => {
@@ -168,7 +194,7 @@ const LocationView = () => {
                     <VariableEditor
                       key={variable.target}
                       variable={variable}
-                      owner={[{ kind: 'location', name: locationData.name }]}
+                      owner={(entry?.path ?? [locationData.name]).map(name => ({ kind: 'location' as const, name }))}
                       index={i + 1}
                       selection={{ selected: selectedVariable?.path ?? null, toggle: toggleSelected }}
                     />
@@ -221,9 +247,10 @@ const LocationView = () => {
         <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           <ReactFlowProvider>
             <MapFlow
-              scopeKey={locationData?.name}
+              scopeKey={locationKey}
+              legacyScopeKey={entry?.legacyKey}
               graph={graph}
-              treeRoot={locationData?.name}
+              treeRoot={locationKey}
               mode={viewMode}
               settings={viewSettings}
               settingsReady={settingsReady}
@@ -247,10 +274,5 @@ const LocationView = () => {
     </div>
   );
 };
-
-const getLocationData = (worldState: SerializedModel | undefined, locationName: string) => {
-  if (worldState?.World == undefined) return undefined;
-  return findLocation(worldState.World.locations, locationName);
-}
 
 export default LocationView;

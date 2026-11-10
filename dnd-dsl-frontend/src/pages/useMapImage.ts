@@ -10,10 +10,15 @@ type Loaded = { adventure: string; location: string; image: MapImage | null };
 const query = (adventure: string, location: string) =>
   `adventure=${encodeURIComponent(adventure)}&location=${encodeURIComponent(location)}`;
 
-/** Fetches the location's map image and decodes it, so its natural size is known before it is drawn. */
-async function fetchImage(adventure: string, location: string, version: number): Promise<MapImage> {
+/**
+ * Fetches the location's map image and decodes it, so its natural size is known before it is drawn. With no image under
+ * `location`, the one under `legacyLocation` (the key it was filed under before) is used until a new one is uploaded.
+ */
+async function fetchImage(adventure: string, location: string, version: number, legacyLocation: string | undefined): Promise<MapImage> {
   // `v` changes after an upload; the URL is otherwise the same, and a cached copy must not be reused.
-  const response = await fetch(`${BackendURL}/image/load?${query(adventure, location)}&v=${version}`);
+  const request = (key: string) => fetch(`${BackendURL}/image/load?${query(adventure, key)}&v=${version}`);
+  let response = await request(location);
+  if (!response.ok && legacyLocation !== undefined) response = await request(legacyLocation);
   if (!response.ok) throw new Error('no map image');
   const url = URL.createObjectURL(await response.blob());
   return new Promise<MapImage>((resolve, reject) => {
@@ -29,7 +34,7 @@ async function fetchImage(adventure: string, location: string, version: number):
  * After an upload the old image stays on screen until the new one has loaded; moving to another
  * location shows no image until that location's own has loaded.
  */
-export function useMapImage(adventure: string, location: string) {
+export function useMapImage(adventure: string, location: string, legacyLocation?: string) {
   const [version, setVersion] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [upload, setUpload] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
@@ -38,7 +43,7 @@ export function useMapImage(adventure: string, location: string) {
   useEffect(() => {
     if (!adventure || !location) return;
     let cancelled = false;
-    fetchImage(adventure, location, version)
+    fetchImage(adventure, location, version, legacyLocation)
       .then(image => {
         if (cancelled) { URL.revokeObjectURL(image.url); return; }
         const previous = urlRef.current;
@@ -55,7 +60,7 @@ export function useMapImage(adventure: string, location: string) {
         if (previous) setTimeout(() => URL.revokeObjectURL(previous), 1000);
       });
     return () => { cancelled = true; };
-  }, [adventure, location, version]);
+  }, [adventure, location, legacyLocation, version]);
 
   useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
 

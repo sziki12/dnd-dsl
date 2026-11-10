@@ -39,7 +39,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           {createRoute({path:"/", element:<Home />})}
-          {createRoute({path:"/location/:locationName", element:<LocationView />})}
+          {createRoute({path:"/location/*", element:<LocationView />})}
           {createRoute({path:"/map", element:<WorldMapView />})}
           {createRoute({path:"/npcs", element:<NpcsView />})}
           {createRoute({path:"/factions", element:<FactionsView />})}

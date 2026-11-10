@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
 import MapOutlinedIcon from '@mui/icons-material/MapOutlined';
@@ -10,14 +10,17 @@ import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined';
 import TerminalOutlinedIcon from '@mui/icons-material/TerminalOutlined';
 import { DslContext } from '../../contexts/DslContext';
+import { locationRoute } from '../location-identity';
+import { useLocationRoute } from '../useLocationIndex';
 
 export default function ActivityBar() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { locationName } = useParams();
+  const locationNames = useLocationRoute();
   const { worldState } = useContext(DslContext);
 
-  const fallbackLocation = locationName ?? worldState?.World?.locations[0]?.name;
+  const firstLocation = worldState?.World?.locations[0]?.name;
+  const fallbackLocation = locationNames ?? (firstLocation === undefined ? undefined : [firstLocation]);
 
   const items = [
     {
@@ -33,7 +36,7 @@ export default function ActivityBar() {
       icon: <RoomOutlinedIcon />,
       label: 'Locations',
       active: pathname.startsWith('/location/'),
-      onClick: () => fallbackLocation && navigate(`/location/${encodeURIComponent(fallbackLocation)}`),
+      onClick: () => fallbackLocation && navigate(locationRoute(fallbackLocation)),
       disabled: !fallbackLocation,
     },
     {

@@ -1,6 +1,7 @@
 import { useContext, useEffect } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { DslContext } from '../../contexts/DslContext';
+import { useLocationRoute } from '../useLocationIndex';
 
 const MENU_ITEMS = ['File', 'Edit', 'View', 'Help'];
 
@@ -8,11 +9,12 @@ const MENU_ITEMS = ['File', 'Edit', 'View', 'Help'];
  *  now driving the browser tab title instead since there is no tab strip anymore. */
 function useViewName(): string {
   const { pathname } = useLocation();
-  const { locationName, questName, eventName } = useParams();
+  const { questName, eventName } = useParams();
+  const locationNames = useLocationRoute();
   const { worldState } = useContext(DslContext);
 
   if (pathname === '/') return 'Home';
-  if (pathname.startsWith('/location/')) return locationName ?? worldState?.World?.locations[0]?.name ?? 'Location';
+  if (pathname.startsWith('/location/')) return locationNames?.join(' \u203a ') ?? worldState?.World?.locations[0]?.name ?? 'Location';
   if (pathname === '/map') return 'World map';
   if (pathname === '/npcs') return 'NPCs';
   if (pathname === '/factions') return 'Factions';
@@ -27,8 +29,9 @@ function useViewName(): string {
 
 export default function TitleBar() {
   const { adventure, world } = useContext(DslContext);
-  const { locationName, questName, eventName } = useParams();
-  const entityName = locationName ?? questName ?? eventName;
+  const { questName, eventName } = useParams();
+  const locationNames = useLocationRoute();
+  const entityName = locationNames?.join(' \u203a ') ?? questName ?? eventName;
   const viewName = useViewName();
 
   useEffect(() => {

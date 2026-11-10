@@ -44,7 +44,7 @@ export interface MapViewSettings {
   colors: Partial<Record<ColorScope, string>>;
   /** How exits with certain tags look, in order; later rules win. */
   tagRules: TagRule[];
-  /** World map only: the locations whose sublocations are shown. */
+  /** World map only: the keys of the locations whose sublocations are shown (older saves hold their bare names). */
   expanded: string[];
 }
 
@@ -128,9 +128,9 @@ export function sanitizeExpanded(raw: unknown): string[] {
   return [...seen];
 }
 
-/** The open groups after opening or closing `name`. */
-export function toggleExpanded(expanded: readonly string[], name: string): string[] {
-  return expanded.includes(name) ? expanded.filter(n => n !== name) : [...expanded, name];
+/** The open groups after opening or closing the group with this key. */
+export function toggleExpanded(expanded: readonly string[], key: string): string[] {
+  return expanded.includes(key) ? expanded.filter(n => n !== key) : [...expanded, key];
 }
 
 /**

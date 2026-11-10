@@ -1,36 +1,41 @@
 import { useContext, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ArrowOutwardIcon from '@mui/icons-material/ArrowOutward';
 import { DslContext } from '../../contexts/DslContext';
-import { findPathToLocation } from '../location-tree';
+import { locationKey, locationRoute, type LocationIndex } from '../location-identity';
+import { useLocationIndex, useLocationRoute } from '../useLocationIndex';
 import type { SerializedLocation } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
+/** A row is a location by the names that lead to it, so sublocations that share a name are separate rows. */
 function LocationRow({
-  loc, depth, activeName, expanded, onToggle, onSelect,
+  loc, path, index, activeKey, expanded, onToggle, onSelect,
 }: {
   loc: SerializedLocation;
-  depth: number;
-  activeName: string | undefined;
+  path: readonly string[];
+  index: LocationIndex<SerializedLocation>;
+  activeKey: string | undefined;
   expanded: Set<string>;
-  onToggle: (name: string) => void;
-  onSelect: (name: string) => void;
+  onToggle: (key: string) => void;
+  onSelect: (path: readonly string[]) => void;
 }) {
   const { getByReference } = useContext(DslContext);
+  const depth = path.length - 1;
+  const key = locationKey(path);
   const hasChildren = loc.sublocations.length > 0;
-  const isOpen = expanded.has(loc.name);
-  const isActive = loc.name === activeName;
+  const isOpen = expanded.has(key);
+  const isActive = key === activeKey;
 
   return (
     <div>
       <div
         className="tree-row"
         onClick={() => {
-          if (hasChildren) onToggle(loc.name);
-          onSelect(loc.name);
+          if (hasChildren) onToggle(key);
+          onSelect(path);
         }}
         style={{
           display: 'flex', alignItems: 'center', gap: 4,
@@ -54,8 +59,9 @@ function LocationRow({
         <LocationRow
           key={sub.name}
           loc={sub}
-          depth={depth + 1}
-          activeName={activeName}
+          path={[...path, sub.name]}
+          index={index}
+          activeKey={activeKey}
           expanded={expanded}
           onToggle={onToggle}
           onSelect={onSelect}
@@ -65,11 +71,13 @@ function LocationRow({
       {isActive && loc.exits.length > 0 && (
         <div>
           {loc.exits.map((exit) => {
-            const target = getByReference<SerializedLocation>(exit.exit)?.name;
+            const targetEntry = index.entryOf(getByReference<SerializedLocation>(exit.exit));
+            // The bare name tells the place apart unless another location has it too; then the whole path does.
+            const target = targetEntry && (index.isUnique(targetEntry.location.name) ? targetEntry.location.name : targetEntry.path.join(' \u203a '));
             return (
               <div
                 key={exit.name}
-                onClick={(e) => { e.stopPropagation(); if (target) onSelect(target); }}
+                onClick={(e) => { e.stopPropagation(); if (targetEntry) onSelect(targetEntry.path); }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 4,
                   padding: `2px 8px 2px ${8 + (depth + 1) * 14}px`,
@@ -93,32 +101,33 @@ function LocationRow({
 
 export default function Sidebar() {
   const { worldState } = useContext(DslContext);
-  const { locationName } = useParams();
+  const names = useLocationRoute();
+  const index = useLocationIndex();
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const locations = worldState?.World?.locations;
+  const active = names && index ? index.resolve(names) : undefined;
+  const activeEntry = active?.kind === 'found' ? active.entry : undefined;
 
   useEffect(() => {
-    if (!locations || !locationName) return;
-    const path = findPathToLocation(locations, locationName);
-    if (!path) return;
+    if (!activeEntry) return;
     setExpanded((prev) => {
       const next = new Set(prev);
-      path.forEach((loc) => next.add(loc.name));
+      for (let at: typeof activeEntry | undefined = activeEntry; at; at = at.parent) next.add(at.key);
       return next;
     });
-  }, [locations, locationName]);
+  }, [activeEntry]);
 
-  const toggleExpand = (name: string) => {
+  const toggleExpand = (key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   };
 
-  const selectLocation = (name: string) => navigate(`/location/${encodeURIComponent(name)}`);
+  const selectLocation = (path: readonly string[]) => navigate(locationRoute(path));
 
   return (
     <aside className="shell-sidebar">
@@ -134,12 +143,13 @@ export default function Sidebar() {
             No world loaded
           </div>
         )}
-        {locations?.map((loc) => (
+        {index && locations?.map((loc) => (
           <LocationRow
             key={loc.name}
             loc={loc}
-            depth={0}
-            activeName={locationName}
+            path={[loc.name]}
+            index={index}
+            activeKey={activeEntry?.key}
             expanded={expanded}
             onToggle={toggleExpand}
             onSelect={selectLocation}

@@ -5,6 +5,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { SerializedAstNode, SerializedLocation, SerializedRef } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { assignParallelSlots } from '../edges/edge-geometry';
+import { canonicalKeys, indexLocations, locationKey, type LocationEntry, type LocationIndex } from '../common/location-identity';
 import { exitTags } from './exit-tags';
 
 export type Resolver = <T extends SerializedAstNode>(ref: SerializedRef | undefined) => T | undefined;
@@ -49,100 +50,103 @@ function spreadParallelExits(edges: Edge[]): void {
   assignParallelSlots(exits).forEach((slot, i) => { exits[i].data = { ...exits[i].data, slot }; });
 }
 
+// legacyId is set only while the location's old bare-name id is its alone.
+const identityData = (entry: LocationEntry<SerializedLocation>) => ({
+  location: entry.location.name,
+  path: entry.path,
+  ...(entry.legacyKey === undefined ? {} : { legacyId: entry.legacyKey }),
+});
+
 /** One location (the root), its sublocations as children of it, and a placeholder for every other place an exit leads to. */
-export function buildLocationGraph(location: SerializedLocation, resolve: Resolver): MapGraph {
-  const nodes: Node[] = [nodeAt(location.name, { location: location.name, type: 'group', kind: 'root' })];
+export function buildLocationGraph(location: SerializedLocation, resolve: Resolver, worldIndex: LocationIndex<SerializedLocation>): MapGraph {
+  // A location the world does not hold is drawn as a top-level one, with the sublocations it carries.
+  const index = worldIndex.entryOf(location) ? worldIndex : indexLocations([location]);
+  const here = index.entryOf(location)!;
+  const entryOf = (node: SerializedLocation) => index.entryOf(node);
+
+  const nodes: Node[] = [nodeAt(here.key, { ...identityData(here), type: 'group', kind: 'root' })];
   const edges: Edge[] = [];
-  const knownIds = new Set(location.sublocations.map(s => s.name));
+  const knownIds = new Set(location.sublocations.flatMap(sub => entryOf(sub)?.key ?? []));
 
   const addExit = (from: string, exit: SerializedLocation['exits'][number]) => {
-    const targetName = resolve<SerializedLocation>(exit.exit)?.name ?? 'Unknown';
-    if (!knownIds.has(targetName)) {
-      knownIds.add(targetName);
-      nodes.push(nodeAt(targetName, { location: targetName, kind: 'external' }));
+    const target = resolve<SerializedLocation>(exit.exit);
+    const entry = target && entryOf(target);
+    const id = entry?.key ?? locationKey([target?.name ?? 'Unknown']);
+    if (!knownIds.has(id)) {
+      knownIds.add(id);
+      nodes.push(nodeAt(id, entry ? { ...identityData(entry), kind: 'external' } : { location: target?.name ?? 'Unknown', kind: 'external' }));
     }
-    edges.push(exitEdge(from, targetName, exit));
+    edges.push(exitEdge(from, id, exit));
   };
 
-  for (const exit of location.exits ?? []) addExit(location.name, exit);
+  for (const exit of location.exits ?? []) addExit(here.key, exit);
 
   for (const sub of location.sublocations) {
-    const isEntry = resolve<SerializedLocation>(location.entry?.entry)?.name === sub.name;
-    nodes.push(nodeAt(sub.name, { location: sub.name, isEntry, kind: isEntry ? 'entry' : 'sub' }, location.name));
-    edges.push(containsEdge(location.name, sub.name));
-    for (const exit of sub.exits ?? []) addExit(sub.name, exit);
+    const entry = entryOf(sub);
+    if (!entry) continue;
+    const isEntry = resolve<SerializedLocation>(location.entry?.entry) === sub;
+    nodes.push(nodeAt(entry.key, { ...identityData(entry), isEntry, kind: isEntry ? 'entry' : 'sub' }, here.key));
+    edges.push(containsEdge(here.key, entry.key));
+    for (const exit of sub.exits ?? []) addExit(entry.key, exit);
   }
 
   spreadParallelExits(edges);
   return { nodes, edges };
 }
 
-interface Entry {
-  location: SerializedLocation;
-  parent: string | undefined;
-}
-
 /**
  * Every location of the world as a node when it is shown: the top-level ones always, a deeper one when every group above
  * it is open. Contains edges join an open group to its children. An exit is drawn between the nearest shown places on its
  * two ends: inside one node it is dropped, and several that join the same two nodes the same way become one edge.
+ * `expanded` holds the keys of the open groups (an old bare name is read as the key of the one location that had it).
  * `isVisible` lets a caller hide a location (and everything under it) from the map.
  */
 export function buildWorldGraph(
   locations: readonly SerializedLocation[],
   expanded: Iterable<string>,
   resolve: Resolver,
-  isVisible: (name: string) => boolean = () => true,
+  isVisible: (key: string) => boolean = () => true,
 ): MapGraph {
-  const open = new Set(expanded);
-  const entries = new Map<string, Entry>();
-  const order: string[] = [];
-  const collect = (list: readonly SerializedLocation[], parent: string | undefined) => {
-    for (const location of list) {
-      if (entries.has(location.name)) continue;
-      entries.set(location.name, { location, parent });
-      order.push(location.name);
-      collect(location.sublocations, location.name);
-    }
-  };
-  collect(locations, undefined);
+  const index = indexLocations(locations);
+  const open = new Set(canonicalKeys(index, [...expanded]));
+  const entries = new Map(index.entries.map(entry => [entry.key, entry]));
 
   const shownCache = new Map<string, boolean>();
-  const shown = (name: string): boolean => {
-    const cached = shownCache.get(name);
+  const shown = (key: string): boolean => {
+    const cached = shownCache.get(key);
     if (cached !== undefined) return cached;
-    const entry = entries.get(name)!;
-    const parentOpen = entry.parent === undefined || (shown(entry.parent) && open.has(entry.parent));
-    const result = parentOpen && isVisible(name);
-    shownCache.set(name, result);
+    const parent = entries.get(key)!.parent;
+    const parentOpen = parent === undefined || (shown(parent.key) && open.has(parent.key));
+    const result = parentOpen && isVisible(key);
+    shownCache.set(key, result);
     return result;
   };
-  const nearestShown = (name: string): string | undefined => {
-    for (let at: string | undefined = name; at !== undefined; at = entries.get(at)?.parent) {
-      if (shown(at)) return at;
+  const nearestShown = (key: string): string | undefined => {
+    for (let at: LocationEntry<SerializedLocation> | undefined = entries.get(key); at !== undefined; at = at.parent) {
+      if (shown(at.key)) return at.key;
     }
     return undefined;
   };
 
   const nodes: Node[] = [];
   const edges: Edge[] = [];
-  for (const name of order) {
-    if (!shown(name)) continue;
-    const { location, parent } = entries.get(name)!;
+  for (const entry of index.entries) {
+    if (!shown(entry.key)) continue;
+    const { location, parent } = entry;
     const childCount = location.sublocations.length;
-    const isEntry = parent !== undefined && resolve<SerializedLocation>(entries.get(parent)!.location.entry?.entry)?.name === name;
+    const isEntry = parent !== undefined && resolve<SerializedLocation>(parent.location.entry?.entry) === location;
     const kind = parent === undefined ? 'root' : isEntry ? 'entry' : 'sub';
-    nodes.push(nodeAt(name, { location: name, kind, isEntry, childCount, expanded: childCount > 0 && open.has(name) }));
-    if (parent !== undefined) edges.push(containsEdge(parent, name));
+    nodes.push(nodeAt(entry.key, { ...identityData(entry), kind, isEntry, childCount, expanded: childCount > 0 && open.has(entry.key) }));
+    if (parent !== undefined) edges.push(containsEdge(parent.key, entry.key));
   }
 
   const bundles = new Map<string, { from: string; to: string; exits: SerializedLocation['exits'] }>();
-  for (const name of order) {
-    for (const exit of entries.get(name)!.location.exits ?? []) {
-      const targetName = resolve<SerializedLocation>(exit.exit)?.name;
-      if (targetName === undefined || !entries.has(targetName)) continue;
-      const from = nearestShown(name);
-      const to = nearestShown(targetName);
+  for (const entry of index.entries) {
+    for (const exit of entry.location.exits ?? []) {
+      const target = index.entryOf(resolve<SerializedLocation>(exit.exit));
+      if (!target) continue;
+      const from = nearestShown(entry.key);
+      const to = nearestShown(target.key);
       if (from === undefined || to === undefined || from === to) continue;
       const key = `${from}\u0000${to}`;
       const bundle = bundles.get(key);
