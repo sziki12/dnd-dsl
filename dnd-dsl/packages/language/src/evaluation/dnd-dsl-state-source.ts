@@ -7,6 +7,7 @@ import {
     decodeStatePath, encodeStatePath, nodeToStatePath, resolveVariableContainer, statePathToNode, type StatePath,
 } from "./dnd-dsl-state-path.js";
 import { objectiveStatusPath, questStatusPath, STATUS_VARIABLE } from "./dnd-dsl-status.js";
+import { CURRENT_PARTY_VARIABLE, currentPartyPath, resolveCurrentPartyName } from "./dnd-dsl-party.js";
 
 export type StateSourceChange = {
     kind: "changed" | "inserted" | "computed";   // value replaced in place / whole line added / current value noted after a computed variable
@@ -46,12 +47,13 @@ export function renderSourceWithState(
     const modifications: Modification[] = [];
     const stale: StatePath[] = [];
 
-    const insertion = (owner: AstNode, target: string, rendered: string, path: StatePath): Modification | undefined => {
+    const insertion = (owner: AstNode, target: string, rendered: string, path: StatePath, asComment = false): Modification | undefined => {
         const anchor = insertionAnchor(owner);
         if (!anchor) return undefined;
         const offset = lineEnd(source, anchor.node.end);
         const indent = lineIndent(source, anchor.node.offset) + (anchor.isHeader ? unit : "");
-        return { kind: "inserted", offset, end: offset, text: `${eol}${indent}let ${target} = ${rendered}`, path };
+        const text = asComment ? `${eol}${indent}// ${target} = ${rendered}` : `${eol}${indent}let ${target} = ${rendered}`;
+        return { kind: "inserted", offset, end: offset, text, path };
     };
 
     // Pushed before any insertion so, when a new line follows a computed variable, the comment stays on its line.
@@ -76,6 +78,18 @@ export function renderSourceWithState(
             const mod = insertion(owner, STATUS_VARIABLE, renderValue(value), path);
             if (mod) modifications.push(mod);
         }
+    }
+
+    // The hidden current-party pointer has no source text either. It is shown as a comment under the world, since
+    // `$party.current` is not a name the language accepts; the generic loop below skips it like it skips `Status`.
+    const pointer = model.World.variables.find(v => v.target === CURRENT_PARTY_VARIABLE && !v.$cstNode);
+    if (pointer) {
+        const path = currentPartyPath();
+        const key = encodeStatePath(path);
+        const stored = key in overlay ? overlay[key] : (pointer.value as unknown as StringVal).val;
+        const current = resolveCurrentPartyName(model.World.parties.map(party => party.name), stored);
+        const mod = insertion(model.World, "current party", JSON.stringify(current), path, true);
+        if (mod) modifications.push(mod);
     }
 
     for (const [encoded, value] of Object.entries(overlay)) {

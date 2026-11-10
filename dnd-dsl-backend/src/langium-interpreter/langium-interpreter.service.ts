@@ -28,6 +28,7 @@ import {
     isLocation,
     isLocationRefItem,
     isFaction,
+    isCurrentPartyRefItem,
     isFactionRefItem,
     isParty,
     isPartyRefItem,
@@ -71,6 +72,7 @@ import {
 import { Injectable } from '@nestjs/common';
 import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
 import { findRelation, queryEnd, refName, relationTarget } from '@dnd-language/evaluation/dnd-dsl-relations.js';
+import { CURRENT_PARTY_MEMBER, currentPartyPath, isHiddenVariable, resolveCurrentPartyName } from '@dnd-language/evaluation/dnd-dsl-party.js';
 import { chainHead, encodeStatePath, nodeToStatePath, parentOwningObject, statePathToNode, unwrapExpression, type ChainHead, type OwningObject, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefined-signatures.js';
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
@@ -207,6 +209,11 @@ export class LangiumInterpreterService {
         const head = chainHead(chain);
         if (isEventRefItem(head)) {
             throw new Error(`Cannot resolve a '${head.$type}' reference to a StatePath`);
+        }
+        if (isCurrentPartyRefItem(head)) {
+            // Only the pointer has a fixed address; which party the rest names is only known when the code runs.
+            if (this.isCurrentPartyPointer(chain)) return currentPartyPath();
+            throw new Error(`The current party has no fixed address; name the party: party "Name"`);
         }
         if (chain.rest.length === 0
             && (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head) || isPartyRefItem(head))) {
@@ -382,6 +389,8 @@ export class LangiumInterpreterService {
             throw new Error(`RefChain heads of kind '${head.$type}' are not supported yet`);
         }
 
+        if (isCurrentPartyRefItem(head)) return this.readCurrentParty(ctx, chain);
+
         if (chain.rest.length === 0) {
             if (isLocationRefItem(head)) {
                 const loc = head.val.val.ref;
@@ -483,6 +492,49 @@ export class LangiumInterpreterService {
         return current;
     }
 
+    /** `party . current`: the pointer itself, the only form of a bare party with a fixed address. */
+    private isCurrentPartyPointer(chain: RefChain): boolean {
+        return isCurrentPartyRefItem(chainHead(chain))
+            && chain.rest.length === 1
+            && chain.rest[0].val.val.$refText === CURRENT_PARTY_MEMBER
+            && !chain.field && chain.indexes.length === 0 && !chain.next;
+    }
+
+    /** The name of the party a bare `party` means now: the one `$party.current` names (a write earlier in this run counts), else the first. */
+    private currentPartyName(ctx: EvalContext): string {
+        const names = (ctx.model?.World.parties ?? []).map(party => party.name);
+        const name = resolveCurrentPartyName(names, names.length ? this.readPath(ctx, currentPartyPath()) : undefined);
+        if (name === undefined) throw new Error(`There is no party in this world.`);
+        return name;
+    }
+
+    private currentPartyNode(ctx: EvalContext): AstNode | undefined {
+        const name = this.currentPartyName(ctx);
+        return ctx.model?.World.parties.find(party => party.name === name);
+    }
+
+    /** The members after a bare `party`, by the names written, under whichever party is current. */
+    private currentPartyMemberPath(ctx: EvalContext, chain: RefChain): StatePath {
+        const party: StatePath = [{ kind: 'party', name: this.currentPartyName(ctx) }];
+        return [...party, ...chain.rest.map(item => ({ kind: 'variable' as const, target: item.val.val.$refText }))];
+    }
+
+    private readCurrentParty(ctx: EvalContext, chain: RefChain): unknown {
+        if (this.isCurrentPartyPointer(chain)) return this.currentPartyName(ctx);
+        return this.readPath(ctx, chain.rest.length === 0
+            ? [{ kind: 'party', name: this.currentPartyName(ctx) }]
+            : this.currentPartyMemberPath(ctx, chain));
+    }
+
+    /** The value of `set party . current to <party "Name">`: that party's name, not its variables. */
+    private namedParty(ctx: EvalContext, expression: Expression): string {
+        const name = this.entityNameOf(ctx, expression);
+        if (name === undefined || !ctx.model?.World.parties.some(party => party.name === name)) {
+            throw new Error(`'party . current' is set to a declared party: set party . current to party "Name".`);
+        }
+        return name;
+    }
+
     /** Whether the fact a `relation ...` head names is written in the world. Facts are source, so the live model answers. */
     private relationExists(ctx: EvalContext, head: RelationRefItem): boolean {
         const { host, targetKind, targetName, type } = this.relationEnds(ctx, head);
@@ -556,6 +608,7 @@ export class LangiumInterpreterService {
         const chain = unwrapExpression(expression);
         if (!isRefChain(chain) || chain.rest.length > 0 || chain.field || chain.indexes.length > 0 || chain.next || depth > 4) return undefined;
         const head = chainHead(chain);
+        if (isCurrentPartyRefItem(head)) return this.currentPartyName(ctx);
         if (isLocationRefItem(head) || isQuestRefItem(head) || isObjectiveRefItem(head) || isNpcRefItem(head) || isFactionRefItem(head) || isPartyRefItem(head)) {
             return head.val.val.ref?.name;
         }
@@ -748,7 +801,7 @@ export class LangiumInterpreterService {
             }
             case 'SetStatement': {
                 const c = code as unknown as SetStatement;
-                const value = this.evaluateExpression(ctx, c.value);
+                const value = this.isCurrentPartyPointer(c.target) ? this.namedParty(ctx, c.value) : this.evaluateExpression(ctx, c.value);
                 const { path, indexes } = this.resolveSetTarget(ctx, c.target);
                 if (path[path.length - 1]?.kind !== 'variable') {
                     const local = indexes.length === 0 ? this.localVariableName(c.target) : undefined;
@@ -1073,6 +1126,10 @@ export class LangiumInterpreterService {
     private resolveRefChainToStatePath(ctx: EvalContext, chain: RefChain): StatePath {
         const head = chainHead(chain);
         if (this.isItemChain(chain)) return this.resolveItemTarget(ctx, chain).path;
+        if (isCurrentPartyRefItem(head)) {
+            if (this.isCurrentPartyPointer(chain)) return currentPartyPath();
+            return this.currentPartyMemberPath(ctx, chain);
+        }
         // A for-loop-bound entity - same shortcut evaluateRefChain's fallback uses.
         if (isVariableRefItem(head)) {
             const headDecl = head.val.val.ref;
@@ -1335,7 +1392,7 @@ export class LangiumInterpreterService {
                 }));
             // The VariableDeclarations themselves - bind each one's current value.
             case 'variables':
-                return (items as VariableDeclaration[]).map(v => {
+                return (items as VariableDeclaration[]).filter(v => !isHiddenVariable(v.target)).map(v => {
                     // The declaration's own value is the initial one; the current value is in the served state.
                     const path = nodeToStatePath(v);
                     return path ? this.readPath(ctx, path) : v.value ? this.evaluateExpression(ctx, v.value) : undefined;
@@ -1360,6 +1417,7 @@ export class LangiumInterpreterService {
         if (isNpcRefItem(start)) return start.val.val.ref;
         if (isFactionRefItem(start)) return start.val.val.ref;
         if (isPartyRefItem(start)) return start.val.val.ref;
+        if (isCurrentPartyRefItem(start)) return this.currentPartyNode(ctx);
         if (isWorldRefItem(start)) return ctx.model?.World;
         if (isStateRefItem(start)) return start.val.ref;
         if (isThisRefItem(start)) return ctx.thisEntity;

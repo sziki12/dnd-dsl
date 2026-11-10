@@ -13,7 +13,8 @@ import type {
 } from './dnd-dsl-serialized-types.js';
 import { isStatusExpressionType, STATUS_VARIABLE, statusExpressionHolds, type StatusExpressionType } from './dnd-dsl-status.js';
 import { parseReferenceFromSerializedModel, serializedRefName } from './dnd-dsl-reference.js';
-import { chainHead } from './dnd-dsl-state-path.js';
+import { chainHead, unwrapExpression } from './dnd-dsl-state-path.js';
+import { CURRENT_PARTY_MEMBER, CURRENT_PARTY_VARIABLE, resolveCurrentPartyName } from './dnd-dsl-party.js';
 import { ENDPOINT_KIND, findRelation, refName } from './dnd-dsl-relations.js';
 import type { Model } from '../generated/ast.js';
 import {
@@ -63,6 +64,8 @@ export function resolveSerializedRefChain(model: SerializedModel, chain: Seriali
         throw new Error(`RefChain heads of kind '${first.$type}' are not supported yet`);
     }
 
+    if (first.$type === 'CurrentPartyRefItem') return resolveCurrentPartyChain(model, chain);
+
     if (first.$type === 'LocationRefItem' && chain.rest.length === 0) {
         const ref = (first as unknown as { val: { val: { $ref: string } } }).val.val;
         const loc = parseReferenceFromSerializedModel<SerializedLocation>(model, ref);
@@ -84,6 +87,38 @@ export function resolveSerializedRefChain(model: SerializedModel, chain: Seriali
     const decl = parseReferenceFromSerializedModel<SerializedVariableDecl>(model, ref);
     if (!decl) throw new Error(`Unresolved variable ref in chain: ${ref.$ref}`);
     return { kind: 'variable', node: decl };
+}
+
+/** The party a bare `party` means in the served state: the one `$party.current` names, else the first. */
+export function currentPartyOf(model: SerializedModel): SerializedParty | undefined {
+    const parties = model.World.parties ?? [];
+    const holder = model.World.variables.find(v => v.target === CURRENT_PARTY_VARIABLE);
+    const stored = holder ? evaluateSerializedExpression(model, holder.value) : undefined;
+    const name = resolveCurrentPartyName(parties.map(p => p.name), stored);
+    return parties.find(p => p.name === name);
+}
+
+/** `party`, `party . current`, `party . Var` and `party . Obj . Var`, read by name off whichever party is current. */
+function resolveCurrentPartyChain(model: SerializedModel, chain: SerializedRefChain): RefChainTarget {
+    const party = currentPartyOf(model);
+    if (!party) throw new Error('There is no party in this world.');
+    if (chain.rest.length === 0) return { kind: 'entity', node: party };
+
+    const names = chain.rest.map(item => (item as unknown as { val: { val: { $refText: string } } }).val.val.$refText);
+    if (names.length === 1 && names[0] === CURRENT_PARTY_MEMBER) {
+        const named = { $type: 'VariableDeclaration', target: CURRENT_PARTY_MEMBER, value: { $type: 'StringVal', val: party.name } };
+        return { kind: 'variable', node: named as unknown as SerializedVariableDecl };
+    }
+
+    let variables = party.variables;
+    let decl: SerializedVariableDecl | undefined;
+    for (const name of names) {
+        decl = variables.find(v => v.target === name);
+        if (!decl) throw new Error(`The party '${party.name}' has no variable '${name}'.`);
+        const value = unwrapExpression(decl.value as never) as unknown as { $type?: string; variables?: SerializedVariableDecl[] } | undefined;
+        variables = value?.$type === 'ObjectDeclaration' ? value.variables ?? [] : [];
+    }
+    return { kind: 'variable', node: decl! };
 }
 
 /**

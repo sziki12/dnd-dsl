@@ -14,6 +14,8 @@ import {
     isLocationRef,
     isLocationRefItem,
     isFactionRefItem,
+    isCurrentPartyRefItem,
+    isParty,
     isPartyRefItem,
     isNpcRefItem,
     isObjectDeclaration,
@@ -39,6 +41,7 @@ import {
     type VariableDeclaration,
 } from "./generated/ast.js";
 import { ENDPOINT_KIND, findRelation } from "./evaluation/dnd-dsl-relations.js";
+import { CURRENT_PARTY_MEMBER, isHiddenVariable } from "./evaluation/dnd-dsl-party.js";
 import { chainHead, lastChainSegment, nearestOwningObject, parentOwningObject, unwrapExpression, type OwningObject } from "./evaluation/dnd-dsl-state-path.js";
 
 /** 
@@ -246,6 +249,10 @@ export class DndScopeProvider extends DefaultScopeProvider
             const kind = ENDPOINT_KIND[target.$type];
             members = host && type && targetNode && kind ? findRelation(undefined, host, type.name, kind, targetNode.name)?.variables : undefined;
         }
+        else if (isCurrentPartyRefItem(prev))
+        {
+            return this.currentPartyScope(chain);
+        }
         else if (isWorldRefItem(prev))
         {
             members = this.worldVariables(prev, context);
@@ -305,14 +312,36 @@ export class DndScopeProvider extends DefaultScopeProvider
     private worldVariables(head: AstNode, context: ReferenceInfo): VariableDeclaration[] | undefined
     {
         const own = AstUtils.getContainerOfType(head, isWorld);
-        if (!own || !own.isReference) return own?.variables;
+        if (!own || !own.isReference) return own?.variables.filter(v => !isHiddenVariable(v.target));
 
         for (const description of this.getGlobalScope("World", context).getElements(own.name))
         {
             const node = description.node;
-            if (isWorld(node) && !node.isReference) return node.variables;
+            if (isWorld(node) && !node.isReference) return node.variables.filter(v => !isHiddenVariable(v.target));
         }
         return undefined;
+    }
+
+    /**
+     * The members of a bare `party`: every variable declared on any party (the first one of each name), and `current`.
+     * Which party is current is only known when the code runs, so this is just enough to link names and offer them;
+     * the interpreter reads the name off the written text, as for a loop variable.
+     */
+    private currentPartyScope(chain: AstNode): Scope
+    {
+        const byName = new Map<string, AstNodeDescription>();
+        for (const description of this.indexManager.allElements("Party"))
+        {
+            const party = description.node;
+            if (!isParty(party)) continue;
+            for (const decl of party.variables)
+            {
+                const name = decl.target ?? decl.name ?? "";
+                if (name && !byName.has(name)) byName.set(name, this.descriptions.createDescription(decl, name));
+            }
+        }
+        byName.set(CURRENT_PARTY_MEMBER, this.dynamicMemberScope(chain).getElement(CURRENT_PARTY_MEMBER) as AstNodeDescription);
+        return new MapScope(stream(byName.values()));
     }
 
     /** `chain` is a variable's own value expression. If it's a bare `location "X"` /

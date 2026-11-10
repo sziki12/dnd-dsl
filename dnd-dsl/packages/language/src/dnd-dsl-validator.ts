@@ -4,6 +4,7 @@ import {
     isBoolVal,
     isChangeOccurrence,
     isChainTail,
+    isCurrentPartyRefItem,
     isCodeBlock,
 
     isStateRefItem,
@@ -42,6 +43,7 @@ import {
     type DndDslAstType,
     type ChainField,
     type ChainTail,
+    type CurrentPartyRefItem,
     type State,
     type StateValueDecl,
     type Event,
@@ -71,6 +73,7 @@ import { AstUtils } from 'langium';
 import { NAMED_COLLECTION_FIELDS } from './evaluation/dnd-dsl-expression-operations.js';
 import { OBJECTIVE_STATUSES, QUEST_STATUSES, STATUS_VARIABLE } from './evaluation/dnd-dsl-status.js';
 import { isBuiltInStatus } from './builtin-status.js';
+import { CURRENT_PARTY_MEMBER } from './evaluation/dnd-dsl-party.js';
 import { BUILTIN_WORLD_NAME } from './builtin-documents.js';
 import { ENDPOINT_KIND, HOST_KIND, queryEnd } from './evaluation/dnd-dsl-relations.js';
 
@@ -170,7 +173,7 @@ export function collectionHeadKind(head: ChainHead): ObjectKind | undefined {
     if (isObjectiveRefItem(head)) return ObjectKind.Objective;
     if (isNpcRefItem(head)) return ObjectKind.Npc;
     if (isFactionRefItem(head)) return ObjectKind.Faction;
-    if (isPartyRefItem(head)) return ObjectKind.Party;
+    if (isPartyRefItem(head) || isCurrentPartyRefItem(head)) return ObjectKind.Party;
     if (isStateRefItem(head)) return ObjectKind.State;
     if (isThisRefItem(head)) return owningObjectKind(nearestOwningObject(head));
     if (isParentRefItem(head)) {
@@ -222,8 +225,9 @@ export function registerValidationChecks(services: DndDslServices) {
         Relation: validator.checkRelation,
         RelationRefItem: validator.checkRelationQuery,
         State: validator.checkUniqueStateValues,
-        VariableDeclaration: [validator.checkStateValue, validator.checkStatusDeclaration],
-        SetStatement: validator.checkStatusAssignment,
+        VariableDeclaration: [validator.checkStateValue, validator.checkStatusDeclaration, validator.checkReservedPartyVariable],
+        SetStatement: [validator.checkStatusAssignment, validator.checkCurrentPartyAssignment],
+        CurrentPartyRefItem: validator.checkCurrentParty,
         IntToBoolExpression: validator.checkStateComparison,
         RemindStatement: validator.checkRemindPlacement,
         RefChain: [validator.checkRefChainField, validator.checkRefChainIndexes],
@@ -683,7 +687,45 @@ export class DndDslValidator {
         return false;
     }
 
+    /** `party . current`, the pointer itself: the one part of a bare `party` with a fixed address. */
+    private isCurrentPartyPointer(chain: RefChain): boolean {
+        return isCurrentPartyRefItem(chainHead(chain))
+            && chain.rest.length === 1
+            && chain.rest[0].val.val.$refText === CURRENT_PARTY_MEMBER
+            && !chain.field && chain.indexes.length === 0 && !chain.next;
+    }
+
+    /** A world with no party has nothing for a bare `party` to mean. A script is checked when it runs: it declares no parties. */
+    checkCurrentParty(item: CurrentPartyRefItem, accept: ValidationAcceptor): void {
+        const world = AstUtils.getContainerOfType(item, isWorld);
+        if (world && !world.isReference && world.parties.length === 0) {
+            accept('error', `There is no party in this world. Declare one with: party "Name".`, { node: item });
+        }
+    }
+
+    /** `set party . current to party "Name"`: the value has to name one party, not be computed. */
+    checkCurrentPartyAssignment(stmt: SetStatement, accept: ValidationAcceptor): void {
+        if (!this.isCurrentPartyPointer(stmt.target)) return;
+        const value = unwrapExpression(stmt.value);
+        const named = isRefChain(value) && isPartyRefItem(chainHead(value))
+            && value.rest.length === 0 && !value.field && value.indexes.length === 0 && !value.next;
+        if (!named) {
+            accept('error', `'party . current' is set to a party: set party . current to party "Name".`, { node: stmt, property: 'value' });
+        }
+    }
+
+    /** A party's `current` would be unreachable: `party . current` already names the current party. */
+    checkReservedPartyVariable(decl: VariableDeclaration, accept: ValidationAcceptor): void {
+        if (isParty(decl.$container) && decl.target === CURRENT_PARTY_MEMBER) {
+            accept('error', `'${CURRENT_PARTY_MEMBER}' is reserved: 'party . ${CURRENT_PARTY_MEMBER}' names the current party.`, { node: decl, property: 'target' });
+        }
+    }
+
     checkChangeOccurrenceTarget(occ: ChangeOccurrence, accept: ValidationAcceptor): void {
+        if (isCurrentPartyRefItem(chainHead(occ.target)) && !this.isCurrentPartyPointer(occ.target)) {
+            accept('error', `'on change' cannot watch the current party's variables. Watch 'party . current', or name the party: 'on change party "Name" . Var'.`, { node: occ, property: 'target' });
+            return;
+        }
         if (!this.endsInVariable(occ.target)) {
             accept('error', `'on change' must target a variable, e.g. 'on change npc "X" . mood do ... end'.`, { node: occ, property: 'target' });
         } else if (occ.target.indexes.length > 0 || occ.target.next) {

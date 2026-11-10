@@ -338,7 +338,8 @@ RefChainHead infers RefChainStart:
     | StateRefItem
     | ThisRefItem
     | ParentRefItem
-    | PartyRefItem;
+    | PartyRefItem
+    | CurrentPartyRefItem;
 
 VariableRefItem:
     val=VariableRef;
@@ -393,6 +394,10 @@ ParentRefItem:
     isParent='parent';
 PartyRefItem:
     isParty='party' val=PartyRef;
+// The party the DM is playing right now, held in the `$party.current` World variable. The parser tells it from
+// `party "Name"` by the string that follows the keyword, so a bare `party` must not be followed by a string.
+CurrentPartyRefItem:
+    isCurrentParty='party';
 
 //val is declared, property is generated
 VariableRef:        

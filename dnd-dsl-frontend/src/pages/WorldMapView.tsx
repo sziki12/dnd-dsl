@@ -4,6 +4,7 @@ import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import RoomOutlinedIcon from '@mui/icons-material/RoomOutlined';
 import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 import type { SerializedLocation, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import { isHiddenVariable } from '@dnd-language/evaluation/dnd-dsl-party.js';
 
 import { DslContext } from '../contexts/DslContext.js';
 import { canonicalKeys } from '../common/location-identity';
@@ -30,6 +31,8 @@ const WorldMapView = () => {
 
   const worldNode = worldState?.World;
   const locations = worldNode?.locations;
+  // The system's own variables (the current party's pointer) are not the author's to edit here.
+  const variables = worldNode?.variables.filter(variable => !isHiddenVariable(variable.target)) ?? [];
   // Held back until the saved settings arrive, so the groups the DM left open are built open the first time.
   const graph = useStableGraph(useMemo(
     () => (locations && settingsReady ? buildWorldGraph(locations, viewSettings.expanded, resolve) : undefined),
@@ -58,7 +61,7 @@ const WorldMapView = () => {
           <div className="pane-tabs">
             <button className="pane-tab active">
               <CodeOutlinedIcon style={{ fontSize: 13 }} /> Variables
-              <span className="cnt">{worldNode?.variables.length ?? 0}</span>
+              <span className="cnt">{variables.length}</span>
             </button>
           </div>
         </div>
@@ -67,10 +70,10 @@ const WorldMapView = () => {
             <h1>{worldNode?.name ?? world}</h1>
           </div>
           <div style={{ padding: '8px 0' }}>
-            {worldNode && worldNode.variables.map((variable: SerializedVariableDecl, i: number) => (
+            {worldNode && variables.map((variable: SerializedVariableDecl, i: number) => (
               <VariableEditor key={variable.target} variable={variable} owner={[{ kind: 'world' }]} index={i + 1} />
             ))}
-            {worldNode && worldNode.variables.length === 0 && (
+            {worldNode && variables.length === 0 && (
               <div className="npc-stub">The world declares no variables.</div>
             )}
           </div>
