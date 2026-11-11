@@ -22,6 +22,8 @@ import {
 } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { canonicalOverlayEntries, canonicalReminder } from '@dnd-language/evaluation/dnd-dsl-state-migration.js';
 import { evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
+import { applyOverlayToServed, spliceOverlayValue as spliceOverlayInto } from '@dnd-language/evaluation/dnd-dsl-overlay.js';
+import { foreignWorldNames, type ForeignWorlds } from '@dnd-language/evaluation/dnd-dsl-foreign.js';
 import type { FiredReminder, ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import { LangiumInterpreterService } from '../langium-interpreter/langium-interpreter.service.js';
 import { predefinedFunctions, predefinedFunctionsAsMap } from '../predefined/predefined-functions.js';
@@ -79,6 +81,10 @@ export class WorldStateService {
   
   private _statePath: string | undefined = undefined;
 
+  // The other worlds of the adventure this world reads, and how to read more of them.
+  private _foreign = new Map<string, ReturnType<ForeignWorlds['read']>>();
+  private _foreignSource: ((worlds: string[]) => Promise<ForeignWorlds>) | undefined = undefined;
+
   
   
   private _clock: number = 0;
@@ -95,10 +101,35 @@ export class WorldStateService {
     return this.install(model, fs.readFileSync(dndFilePath, 'utf-8'), statePath);
   }
 
-  /** The world `worldName` from its files: one, or the equal parts of a folder, each saying `world "<worldName>"`. */
-  async loadFromFiles(files: string[], worldName: string, statePath?: string): Promise<any> {
-    const { model, source } = await parseWorld(files, worldName);
-    return this.install(model, source, statePath);
+  /**
+   * The world `worldName` from its files: one, or the equal parts of a folder, each saying `world "<worldName>"`.
+   * `prepareForeign` gives the state of other worlds of the adventure that it reads or leads into; without it, it
+   * cannot read them.
+   */
+  async loadFromFiles(
+    files: string[],
+    worldName: string,
+    statePath?: string,
+    prepareForeign?: (worlds: string[]) => Promise<ForeignWorlds>,
+  ): Promise<any> {
+    const { model, source, foreign } = await parseWorld(files, worldName, prepareForeign);
+    const state = this.install(model, source, statePath);
+    this._foreignSource = prepareForeign;
+    this._foreign = new Map(foreign ? foreignWorldNames(model, worldName).map(name => [name, foreign.read(name)] as const) : []);
+    return state;
+  }
+
+  /** The other worlds this world can read, as they were when it loaded. */
+  getForeignWorlds(): ForeignWorlds {
+    return { read: world => this._foreign.get(world) ?? { problem: `"${world}" is not another world of this adventure that was read when this world loaded.` } };
+  }
+
+  /** Makes more worlds readable: a script may mention one the world itself does not. */
+  async prepareForeign(worlds: string[]): Promise<void> {
+    const missing = worlds.filter(name => !this._foreign.has(name));
+    if (missing.length === 0 || !this._foreignSource) return;
+    const prepared = await this._foreignSource(missing);
+    for (const name of missing) this._foreign.set(name, prepared.read(name));
   }
 
   /** The source of the loaded world: its files glued together when it has several. */
@@ -110,6 +141,8 @@ export class WorldStateService {
     this._model = model;
     this._worldSource = source;
     this._statePath = statePath;
+    this._foreign = new Map();
+    this._foreignSource = undefined;
     const overlayFile = statePath && fs.existsSync(statePath)
       ? (JSON.parse(fs.readFileSync(statePath, 'utf-8')) as StateOverlayFile)
       : undefined;
@@ -129,6 +162,8 @@ export class WorldStateService {
     this._firedReminders = [];
     this._changeHandlers = new Map();
     this._triggerHandlers = new Map();
+    this._foreign = new Map();
+    this._foreignSource = undefined;
     this.rebuildWorldState();
   }
 
@@ -409,32 +444,10 @@ export class WorldStateService {
   }
 
   private applyOverlay(): StatePath[] {
-    const stale: StatePath[] = [];
-    for (const [encodedPath, value] of Object.entries(this._overlay)) {
-      const path = decodeStatePath(encodedPath);
-      
-      if (!this.spliceOverlayValue(path, value)) 
-        stale.push(path);
-    }
-    return stale;
+    return applyOverlayToServed(this._worldState, this._overlay);
   }
 
-  /** 
-   *  Resolves `path` against the serialized `_worldState` and if it points at a non-computed variable, writes `value` into it.
-   *  If the leaf doesn't exist yet but its parent container does, creates it.
-   *  Returns false without writing anything if neither the leaf nor its parent resolve.
-   **/
   private spliceOverlayValue(path: StatePath, value: unknown): boolean {
-    const node = statePathToNode(this._worldState, path);
-    if (node) {
-      if (!isVariableDeclaration(node) || node.isComputed === 'computed') return false;
-      (node as any).value = value;
-      return true;
-    }
-
-    const containerInfo = resolveVariableContainer(this._worldState, path);
-    if (!containerInfo) return false;
-    containerInfo.variables.push({ $type: 'VariableDeclaration', target: containerInfo.target, value } as any);
-    return true;
+    return spliceOverlayInto(this._worldState, path, value);
   }
 }

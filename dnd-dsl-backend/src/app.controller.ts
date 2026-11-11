@@ -9,6 +9,7 @@ import { CommandService } from './command/command.service.js';
 import { DndDslParseError } from '@dnd-cli/main.js';
 import { AdventureService } from './adventure/adventure.service.js';
 import { AdventureError } from './adventure/adventure-store.js';
+import { WorldRegistry } from './adventure/world-registry.service.js';
 
 @Controller()
 export class AppController {
@@ -20,6 +21,7 @@ export class AppController {
     private readonly worldStateService: WorldStateService,
     private readonly commandService: CommandService,
     private readonly adventureService: AdventureService,
+    private readonly worldRegistry: WorldRegistry,
   ) {}
 
   @Get()
@@ -34,6 +36,7 @@ export class AppController {
         this.fileService.getWorldFiles(adventure, world).files,
         world,
         this.fileService.getStateFilePath(adventure, world),
+        this.worldRegistry.preparer(adventure, world),
       )
       this.adventureService.markLoaded(adventure, world)
       this.commandService.notifyWorldReloaded()

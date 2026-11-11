@@ -32,8 +32,13 @@ export class AdventureController {
     }
 
     @Post('open')
-    open(@Query('adventure') adventure: string, @Query('world') world: string) {
-        return this.run(() => this.adventureService.open(adventure, world));
+    open(@Query('adventure') adventure: string, @Query('world') world?: string) {
+        return this.run(() => this.adventureService.open(adventure, world || undefined));
+    }
+
+    @Get('outline')
+    outline(@Query('adventure') adventure: string, @Query('skip') skip?: string) {
+        return this.run(async () => ({ worlds: await this.adventureService.outline(adventure, skip || undefined) }));
     }
 
     @Post('new')

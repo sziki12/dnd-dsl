@@ -25,6 +25,11 @@ export class FileController {
         return { kind, files: files.map(file => basename(file)) };
     }
 
+    @Get('adventure')
+    adventureFiles(@Query('adventure') adventure: string) {
+        return { worlds: this.fileService.readAdventureFiles(adventure) };
+    }
+
     @Post('save')
     saveDnDFile(@Body() dto: FileDto): { success: boolean } {
         const dndFilePath = this.fileService.getWorldFilePath(dto.identifier.adventure, dto.identifier.world, dto.file)

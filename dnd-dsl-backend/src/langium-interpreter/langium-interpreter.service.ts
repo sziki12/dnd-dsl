@@ -29,6 +29,8 @@ import {
     isLocationRefItem,
     isFaction,
     isCurrentPartyRefItem,
+    isForeignRefItem,
+    type ForeignRefItem,
     isFactionRefItem,
     isParty,
     isPartyRefItem,
@@ -72,6 +74,7 @@ import {
 import { Injectable } from '@nestjs/common';
 import { predefinedFunctionsAsMap } from '../predefined/predefined-functions';
 import { findRelation, queryEnd, refName, relationTarget } from '@dnd-language/evaluation/dnd-dsl-relations.js';
+import { foreignPath, type ForeignWorlds } from '@dnd-language/evaluation/dnd-dsl-foreign.js';
 import { CURRENT_PARTY_MEMBER, currentPartyPath, isHiddenVariable, resolveCurrentPartyName } from '@dnd-language/evaluation/dnd-dsl-party.js';
 import { chainHead, encodeStatePath, nodeToStatePath, parentOwningObject, statePathToNode, unwrapExpression, type ChainHead, type OwningObject, type StatePath } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefined-signatures.js';
@@ -123,6 +126,8 @@ export type EvalContext = {
     handlerDepth?: number;
     thisEntity?: OwningObject;
     parentEntity?: OwningObject;
+    /** The other worlds of the adventure this world reads. */
+    foreign?: ForeignWorlds;
 };
 
 class ReturnSignal {
@@ -210,6 +215,7 @@ export class LangiumInterpreterService {
         if (isEventRefItem(head)) {
             throw new Error(`Cannot resolve a '${head.$type}' reference to a StatePath`);
         }
+        if (isForeignRefItem(head)) throw new Error(`Another world can only be read for now.`);
         if (isCurrentPartyRefItem(head)) {
             // Only the pointer has a fixed address; which party the rest names is only known when the code runs.
             if (this.isCurrentPartyPointer(chain)) return currentPartyPath();
@@ -381,6 +387,7 @@ export class LangiumInterpreterService {
 
     private evaluateRefChainBase(ctx: EvalContext, chain: RefChain): any {
         const head = chainHead(chain);
+        if (isForeignRefItem(head)) return this.readForeign(ctx, head, chain);
         if (chain.field) 
             return this.resolveFieldValue(ctx, chain);
 
@@ -490,6 +497,21 @@ export class LangiumInterpreterService {
             current = current?.[name];
         }
         return current;
+    }
+
+    /** `world "Other" . npc "Ann" . Gold`: read off the state the other world had when this one loaded. */
+    private readForeign(ctx: EvalContext, head: ForeignRefItem, chain: RefChain): unknown {
+        if (chain.field) throw new Error(`Only the variables of another world can be read, not its collections.`);
+        const read = ctx.foreign?.read(head.world);
+        if (!read) throw new Error(`The world "${head.world}" cannot be read here.`);
+        if ('problem' in read) throw new Error(read.problem);
+
+        const members = chain.rest.map(item => item.val.val.$refText);
+        const path = foreignPath(head.kind, head.name, members);
+        if (!statePathToNode(read.served as unknown as Model, path)) {
+            throw new Error(`The ${head.kind} "${head.name}" of world "${head.world}" has no variable ${members.join(' . ')}.`);
+        }
+        return this.readPersistentValue(read.served, path);
     }
 
     /** `party . current`: the pointer itself, the only form of a bare party with a fixed address. */
@@ -760,6 +782,7 @@ export class LangiumInterpreterService {
             handlerDepth: callerCtx.handlerDepth,
             thisEntity: callerCtx.thisEntity,
             parentEntity: callerCtx.parentEntity,
+            foreign: callerCtx.foreign,
         };
 
         decl.params.forEach((param, i) => {
@@ -1125,6 +1148,7 @@ export class LangiumInterpreterService {
      **/
     private resolveRefChainToStatePath(ctx: EvalContext, chain: RefChain): StatePath {
         const head = chainHead(chain);
+        if (isForeignRefItem(head)) throw new Error(`Another world can only be read for now.`);
         if (this.isItemChain(chain)) return this.resolveItemTarget(ctx, chain).path;
         if (isCurrentPartyRefItem(head)) {
             if (this.isCurrentPartyPointer(chain)) return currentPartyPath();

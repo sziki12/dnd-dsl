@@ -16,6 +16,7 @@ import { CommandService } from './command/command.service.js';
 import { StateSyncGateway } from './state-sync/state-sync.gateway.js';
 import { AdventureController } from './adventure/adventure.controller.js';
 import { AdventureService } from './adventure/adventure.service.js';
+import { WorldRegistry } from './adventure/world-registry.service.js';
 
 @Module({
   imports: [],
@@ -33,6 +34,7 @@ import { AdventureService } from './adventure/adventure.service.js';
     CommandService,
     StateSyncGateway,
     AdventureService,
+    WorldRegistry,
   ],
 })
 export class AppModule {}

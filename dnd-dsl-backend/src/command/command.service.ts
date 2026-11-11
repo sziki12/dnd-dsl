@@ -6,6 +6,7 @@ import { StateSyncGateway } from '../state-sync/state-sync.gateway.js';
 import { isVariableDeclaration, type Model } from '@dnd-language/index.js';
 import { canonicalStatePath, encodeStatePath, resolveVariableContainer, statePathToNode } from '@dnd-language/evaluation/dnd-dsl-state-path.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
+import { foreignWorldNames } from '@dnd-language/evaluation/dnd-dsl-foreign.js';
 import { assertValidStatusWrite } from '@dnd-language/evaluation/dnd-dsl-status.js';
 import { resolveRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import {
@@ -252,6 +253,7 @@ export class CommandService {
     if (errors.length || !codeBlock) {
       throw new Error(errors.map(e => `line ${e.line + 1}: ${e.message}`).join('\n') || 'Empty script');
     }
+    await this.worldStateService.prepareForeign(foreignWorldNames(codeBlock, model.World.name));
 
     const state = this.worldStateService.getWorldState();
     const ctx = this.newEvalContext(model, { ...(state.runtimeVariables ?? {}) }, {
@@ -303,6 +305,7 @@ export class CommandService {
       changeHandlers,
       triggerHandlers,
       firedHandlers: new Set(),
+      foreign: this.worldStateService.getForeignWorlds(),
       ...extras,
     };
   }

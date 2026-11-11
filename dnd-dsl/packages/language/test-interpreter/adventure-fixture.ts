@@ -8,6 +8,7 @@ import { CommandService } from "../../../../dnd-dsl-backend/src/command/command.
 import { AdventureService } from "../../../../dnd-dsl-backend/src/adventure/adventure.service";
 import { FileService } from "../../../../dnd-dsl-backend/src/file/file.service";
 import { SettingsService } from "../../../../dnd-dsl-backend/src/settings/settings.service";
+import { WorldRegistry } from "../../../../dnd-dsl-backend/src/adventure/world-registry.service";
 
 export const WORLD = `world "W"\nlocation "Town"\n    let Alarm = 0\n`;
 export const OTHER = `world "Other"\nlocation "Town"\n    let Alarm = 100\n`;
@@ -35,7 +36,7 @@ export function server(settingsFile: string, root: string) {
     const files = new FileService(settings);
     const worldState = new WorldStateService(interpreter);
     const commands = new CommandService(worldState, interpreter, gateway as any);
-    const adventures = new AdventureService(settings, files, worldState, commands, gateway as any);
+    const adventures = new AdventureService(settings, files, worldState, commands, gateway as any, new WorldRegistry(files, settings));
     const served = () => worldState.getWorldState();
     const alarm = () => variableOf(served(), "Town", "Alarm");
     const setAlarm = (newValue: number) => commands.execute({ type: "ASSIGN_VARIABLE", path: alarmPath as any, newValue });

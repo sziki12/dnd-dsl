@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service.js';
-import { addWorldFile, worldFilePath, worldFiles, type WorldFiles } from '../adventure/adventure-store.js';
+import { addWorldFile, readAdventureFiles, worldFilePath, worldFiles, type WorldFiles } from '../adventure/adventure-store.js';
 
 @Injectable()
 export class FileService {
@@ -12,6 +12,12 @@ export class FileService {
     getWorldFiles(adventure: string, world: string): WorldFiles
     {
         return worldFiles(this.settingsService.requireSourceFolder(), { adventure, world })
+    }
+
+    /** Every world of an adventure with the text of its files. */
+    readAdventureFiles(adventure: string)
+    {
+        return readAdventureFiles(this.settingsService.requireSourceFolder(), adventure)
     }
 
     /** One of the world's files by name, or its only file when no name is given. */

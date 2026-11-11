@@ -79,6 +79,27 @@ export function listAdventures(root: string): AdventureEntry[] {
         .sort((a, b) => byName(a.name, b.name));
 }
 
+export type AdventureWorldFiles = { world: string; files: { name: string; content: string }[]; problem?: string };
+
+/**
+ * Every world of an adventure with the text of its files, for an editor that shows them all. A world whose files cannot
+ * be told (both a file and a folder) is reported on its own and does not stop the rest.
+ */
+export function readAdventureFiles(root: string, adventure: string): AdventureWorldFiles[] {
+    assertName('adventure', adventure);
+    const entry = listAdventures(root).find(a => a.name === adventure);
+    if (!entry) throw new AdventureError(`There is no adventure "${adventure}".`);
+    return entry.worlds.map(world => {
+        try {
+            const { files } = worldFiles(root, { adventure, world });
+            return { world, files: files.map(file => ({ name: path.basename(file), content: fs.readFileSync(file, 'utf-8') })) };
+        } catch (e) {
+            if (e instanceof AdventureError) return { world, files: [], problem: e.message };
+            throw e;
+        }
+    });
+}
+
 /** A new, empty world: the adventure folder is created when it is new. */
 export function createWorld(root: string, target: WorldRef): void {
     assertName('adventure', target.adventure);

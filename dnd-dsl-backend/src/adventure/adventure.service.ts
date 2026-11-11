@@ -7,6 +7,9 @@ import { setWorldName } from '@dnd-language/world-files.js';
 import os from 'os';
 import path from 'path';
 import { SettingsService } from '../settings/settings.service.js';
+import { describeError, WorldRegistry } from './world-registry.service.js';
+import { parseWorld } from '@dnd-cli/main.js';
+import { locationOutline, type OutlineNode } from '@dnd-language/evaluation/dnd-dsl-outline.js';
 import { FileService } from '../file/file.service.js';
 import { WorldStateService } from '../world-state/world-state.service.js';
 import { CommandService } from '../command/command.service.js';
@@ -36,6 +39,7 @@ export class AdventureService implements OnApplicationBootstrap {
         private readonly worldStateService: WorldStateService,
         private readonly commandService: CommandService,
         private readonly stateSyncGateway: StateSyncGateway,
+        private readonly worldRegistry: WorldRegistry,
     ) {}
 
     private get root(): string {
@@ -104,12 +108,26 @@ export class AdventureService implements OnApplicationBootstrap {
         return listAdventures(this.root);
     }
 
-    /** A world that fails to parse throws before anything changes, so the previous one stays loaded. */
-    async open(adventure: string, world: string): Promise<void> {
+    /** The world an adventure opens on: the one open last when it is of this adventure, else the first by name. */
+    defaultWorld(adventure: string): string {
         assertName('adventure', adventure);
+        const worlds = listAdventures(this.root).find(a => a.name === adventure)?.worlds;
+        if (!worlds) throw new AdventureError(`There is no adventure "${adventure}".`);
+        if (worlds.length === 0) throw new AdventureError(`${adventure} has no worlds yet. Add one with New.`);
+        const last = this.settingsService.lastWorld;
+        return last?.adventure === adventure && worlds.includes(last.world) ? last.world : worlds[0];
+    }
+
+    /**
+     * Opens a world, or with no world named the one the adventure opens on. A world that fails to parse throws before
+     * anything changes, so the previous one stays loaded.
+     */
+    async open(adventure: string, world?: string): Promise<void> {
+        assertName('adventure', adventure);
+        world ??= this.defaultWorld(adventure);
         assertName('world', world);
         const { files } = this.fileService.getWorldFiles(adventure, world);
-        await this.worldStateService.loadFromFiles(files, world, this.fileService.getStateFilePath(adventure, world));
+        await this.worldStateService.loadFromFiles(files, world, this.fileService.getStateFilePath(adventure, world), this.worldRegistry.preparer(adventure, world));
         this.markLoaded(adventure, world);
         this.commandService.resetHistory();
         this.stateSyncGateway.broadcastActiveWorld(adventure, world);
@@ -166,6 +184,24 @@ export class AdventureService implements OnApplicationBootstrap {
     /** Only the parser is needed, to find the world line of a file. */
     private parserServices() {
         return (this.parser ??= createDndDslServices(EmptyFileSystem).DndDsl);
+    }
+
+    /** The locations of every world of the adventure but `skip` (the open one, whose locations the pages already show), each with its file and line. */
+    async outline(adventure: string, skip: string | undefined): Promise<{ world: string; locations: OutlineNode[]; problem?: string }[]> {
+        assertName('adventure', adventure);
+        const worlds = listAdventures(this.root).find(a => a.name === adventure)?.worlds;
+        if (!worlds) throw new AdventureError(`There is no adventure "${adventure}".`);
+
+        const outlines: { world: string; locations: OutlineNode[]; problem?: string }[] = [];
+        for (const world of worlds.filter(name => name !== skip)) {
+            try {
+                const { model, fileAt } = await parseWorld(this.fileService.getWorldFiles(adventure, world).files, world);
+                outlines.push({ world, locations: locationOutline(model, fileAt) });
+            } catch (e) {
+                outlines.push({ world, locations: [], problem: describeError(e) });
+            }
+        }
+        return outlines;
     }
 
     private openWorld(): WorldRef {
