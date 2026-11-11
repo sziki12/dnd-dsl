@@ -43,7 +43,8 @@ type ServerMessage =
   | { type: 'WORLD_STATE'; payload: CommandResponse }
   | { type: 'CONTROLLER_CHANGED'; controllerId: string | null; controllerName: string | null }
   | { type: 'ACTIVE_WORLD'; adventure: string; world: string }
-  | { type: 'SOURCE_FOLDER'; sourceFolder: string };
+  | { type: 'SOURCE_FOLDER'; sourceFolder: string }
+  | { type: 'FILES_CHANGED' };
 
 /**
  * Opens the live-sync WebSocket (backend StateSyncGateway, /state-sync) and keeps it
@@ -62,6 +63,7 @@ export function useStateSync(
   onReconnected: () => void,
   onActiveWorld: (adventure: string, world: string) => void,
   onSourceFolder: (sourceFolder: string) => void,
+  onFilesChanged: () => void,
 ) {
   const [isController, setIsController] = useState(false);
   const [controllerName, setControllerName] = useState<string | null>(null);
@@ -80,6 +82,8 @@ export function useStateSync(
   onActiveWorldRef.current = onActiveWorld;
   const onSourceFolderRef = useRef(onSourceFolder);
   onSourceFolderRef.current = onSourceFolder;
+  const onFilesChangedRef = useRef(onFilesChanged);
+  onFilesChangedRef.current = onFilesChanged;
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +118,8 @@ export function useStateSync(
           onActiveWorldRef.current(msg.adventure, msg.world);
         } else if (msg.type === 'SOURCE_FOLDER') {
           onSourceFolderRef.current(msg.sourceFolder);
+        } else if (msg.type === 'FILES_CHANGED') {
+          onFilesChangedRef.current();
         } else if (msg.type === 'CONTROLLER_CHANGED') {
           setIsController(msg.controllerId === clientIdRef.current);
           setControllerName(msg.controllerName);

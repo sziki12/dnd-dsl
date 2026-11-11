@@ -1,6 +1,9 @@
 import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { spawn } from 'child_process';
 import fs from 'fs';
+import { EmptyFileSystem } from 'langium';
+import { createDndDslServices } from '@dnd-language/index.js';
+import { setWorldName } from '@dnd-language/world-files.js';
 import os from 'os';
 import path from 'path';
 import { SettingsService } from '../settings/settings.service.js';
@@ -105,13 +108,8 @@ export class AdventureService implements OnApplicationBootstrap {
     async open(adventure: string, world: string): Promise<void> {
         assertName('adventure', adventure);
         assertName('world', world);
-        if (!fs.existsSync(this.fileService.getDnDFilePath(adventure, world))) {
-            throw new AdventureError(`${adventure} / ${world} does not exist.`);
-        }
-        await this.worldStateService.loadFromFile(
-            this.fileService.getDnDFilePath(adventure, world),
-            this.fileService.getStateFilePath(adventure, world),
-        );
+        const { files } = this.fileService.getWorldFiles(adventure, world);
+        await this.worldStateService.loadFromFiles(files, world, this.fileService.getStateFilePath(adventure, world));
         this.markLoaded(adventure, world);
         this.commandService.resetHistory();
         this.stateSyncGateway.broadcastActiveWorld(adventure, world);
@@ -125,7 +123,8 @@ export class AdventureService implements OnApplicationBootstrap {
 
     /** Copies the open world, with its state, layout, map views, saved states and images, and opens the copy. */
     async saveAs(target: WorldRef): Promise<void> {
-        copyWorld(this.root, this.openWorld(), target);
+        assertName('world', target.world);
+        copyWorld(this.root, this.openWorld(), target, text => setWorldName(this.parserServices(), text, target.world));
         await this.open(target.adventure, target.world);
     }
 
@@ -160,6 +159,13 @@ export class AdventureService implements OnApplicationBootstrap {
             child.once('error', () => reject(new AdventureError(`Could not start "${command}".`)));
             child.once('spawn', () => { child.unref(); resolve(); });
         });
+    }
+
+    private parser: ReturnType<typeof createDndDslServices>['DndDsl'] | undefined;
+
+    /** Only the parser is needed, to find the world line of a file. */
+    private parserServices() {
+        return (this.parser ??= createDndDslServices(EmptyFileSystem).DndDsl);
     }
 
     private openWorld(): WorldRef {

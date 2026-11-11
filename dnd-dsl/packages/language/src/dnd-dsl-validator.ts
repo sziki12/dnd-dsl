@@ -1,4 +1,5 @@
-import type { AstNode, ValidationAcceptor, ValidationChecks } from 'langium';
+import type { AstNode, IndexManager, ValidationAcceptor, ValidationChecks } from 'langium';
+import { worldParts } from './world-parts.js';
 import {
     ChangeOccurrence,
     isBoolVal,
@@ -221,7 +222,7 @@ export function registerValidationChecks(services: DndDslServices) {
     const registry = services.validation.ValidationRegistry;
     const validator = services.validation.DndDslValidator;
     const checks: ValidationChecks<DndDslAstType> = {
-        World: [validator.checkUniqueNames, validator.checkRelationTypes],
+        World: [validator.checkUniqueNames, validator.checkRelationTypes, validator.checkWorldHeaders],
         Relation: validator.checkRelation,
         RelationRefItem: validator.checkRelationQuery,
         State: validator.checkUniqueStateValues,
@@ -246,6 +247,18 @@ export function registerValidationChecks(services: DndDslServices) {
  * Implementation of custom validations.
  **/
 export class DndDslValidator {
+
+    /** Without it a world is checked as the one document it is in; with it, as all the files it is written in. */
+    constructor(private readonly indexManager?: IndexManager) {}
+
+    /** A header repeated where the next file of the world begins has to name the same world. */
+    checkWorldHeaders(world: World, accept: ValidationAcceptor): void {
+        world.partNames.forEach((name, index) => {
+            if (name !== world.name) {
+                accept('error', `This header says "${name}", but the world is "${world.name}". Change it to: world "${world.name}"`, { node: world, property: 'partNames', index });
+            }
+        });
+    }
 
     checkUniqueNames(world: World, accept: ValidationAcceptor): void {
         // Two parents may each have a sublocation of the same name: it is addressed through its parent
@@ -667,9 +680,11 @@ export class DndDslValidator {
             const world = AstUtils.getContainerOfType(chain, isWorld);
             // A `reference world` script holds none of the world's own items.
             if (!world || world.isReference) return undefined;
+            const parts = worldParts(world, this.indexManager);
             const byField: Record<string, { name: string }[] | undefined> = {
-                locations: this.collectAllLocations(world.locations), npcs: world.npcs, factions: world.factions, parties: world.parties, quests: world.quests,
-                events: world.events, functions: world.functions, states: world.states,
+                locations: parts.flatMap(part => this.collectAllLocations(part.locations)), npcs: parts.flatMap(part => part.npcs),
+                factions: parts.flatMap(part => part.factions), parties: parts.flatMap(part => part.parties), quests: parts.flatMap(part => part.quests),
+                events: parts.flatMap(part => part.events), functions: parts.flatMap(part => part.functions), states: parts.flatMap(part => part.states),
             };
             return byField[field ?? '']?.map(n => n.name);
         }
@@ -698,7 +713,7 @@ export class DndDslValidator {
     /** A world with no party has nothing for a bare `party` to mean. A script is checked when it runs: it declares no parties. */
     checkCurrentParty(item: CurrentPartyRefItem, accept: ValidationAcceptor): void {
         const world = AstUtils.getContainerOfType(item, isWorld);
-        if (world && !world.isReference && world.parties.length === 0) {
+        if (world && !world.isReference && worldParts(world, this.indexManager).every(part => part.parties.length === 0)) {
             accept('error', `There is no party in this world. Declare one with: party "Name".`, { node: item });
         }
     }

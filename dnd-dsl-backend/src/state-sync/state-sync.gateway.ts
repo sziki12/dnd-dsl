@@ -10,7 +10,8 @@ type ServerMessage =
   | { type: 'WORLD_STATE'; payload: CommandResponse }
   | { type: 'CONTROLLER_CHANGED'; controllerId: string | null; controllerName: string | null }
   | { type: 'ACTIVE_WORLD'; adventure: string; world: string }
-  | { type: 'SOURCE_FOLDER'; sourceFolder: string };
+  | { type: 'SOURCE_FOLDER'; sourceFolder: string }
+  | { type: 'FILES_CHANGED' };
 
 type ClientMessage = { type: 'CLAIM_CONTROL' };
 
@@ -67,6 +68,11 @@ export class StateSyncGateway implements OnGatewayConnection, OnGatewayDisconnec
   /** Sent to every page when the source folder changes: no world is open until one is chosen from it. */
   broadcastSourceFolder(sourceFolder: string): void {
     this.broadcast({ type: 'SOURCE_FOLDER', sourceFolder });
+  }
+
+  /** Sent to every page when a world file was written or added, so editors that have it open can re-read it. */
+  broadcastFilesChanged(): void {
+    this.broadcast({ type: 'FILES_CHANGED' });
   }
 
   isController(clientId: string): boolean {

@@ -8,6 +8,7 @@ import { WorldStateService } from './world-state/world-state.service.js';
 import { CommandService } from './command/command.service.js';
 import { DndDslParseError } from '@dnd-cli/main.js';
 import { AdventureService } from './adventure/adventure.service.js';
+import { AdventureError } from './adventure/adventure-store.js';
 
 @Controller()
 export class AppController {
@@ -29,8 +30,9 @@ export class AppController {
   @Post('/parse')
   async parseLanguage(@Query('adventure') adventure: string, @Query('world') world: string) {
     try {
-      await this.worldStateService.loadFromFile(
-        this.fileService.getDnDFilePath(adventure, world),
+      await this.worldStateService.loadFromFiles(
+        this.fileService.getWorldFiles(adventure, world).files,
+        world,
         this.fileService.getStateFilePath(adventure, world),
       )
       this.adventureService.markLoaded(adventure, world)
@@ -39,6 +41,9 @@ export class AppController {
     } catch (e) {
       if (e instanceof DndDslParseError) {
         throw new BadRequestException({ success: false, errors: e.diagnostics.map(d => d.message) })
+      }
+      if (e instanceof AdventureError) {
+        throw new BadRequestException({ success: false, errors: [e.message] })
       }
       throw e
     }
@@ -54,6 +59,11 @@ export class AppController {
   @Get('/world')
   async getWorldState() {
     return this.worldStateService.getWorldState()
+  }
+
+  @Get('/world/source')
+  async getWorldSource() {
+    return this.worldStateService.getWorldSource()
   }
 
   @Get('/world/render')

@@ -1,8 +1,10 @@
 import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs/common';
 import fs from "fs"
+import { basename } from "path"
 import { type FileDto } from "./dto/save-file.dto.js"
 import { FileService } from './file.service.js';
 import { WorldStateService } from '../world-state/world-state.service.js';
+import { StateSyncGateway } from '../state-sync/state-sync.gateway.js';
 import { EMPTY_STATE_OVERLAY, type StateOverlayFile } from '../world-state/state-overlay.types.js';
 import { isSafeSegment, readMapView, writeMapView, type MapViewEntry } from './map-view-store.js';
 import { readLayout, writeLayout, type Layout } from './layout-store.js';
@@ -13,21 +15,36 @@ export class FileController {
     constructor(
         private readonly fileService: FileService,
         private readonly worldStateService: WorldStateService,
+        private readonly stateSyncGateway: StateSyncGateway,
       ) {}
+
+    // A world is one file or several (see adventure-store.ts); `file` names one of them and may be left out for one file.
+    @Get('list')
+    listFiles(@Query('adventure') adventure: string, @Query('world') world: string): { kind: 'file' | 'folder'; files: string[] } {
+        const { kind, files } = this.fileService.getWorldFiles(adventure, world)
+        return { kind, files: files.map(file => basename(file)) };
+    }
 
     @Post('save')
     saveDnDFile(@Body() dto: FileDto): { success: boolean } {
-        const dndFilePath = this.fileService.getDnDFilePath(dto.identifier.adventure, dto.identifier.world)
+        const dndFilePath = this.fileService.getWorldFilePath(dto.identifier.adventure, dto.identifier.world, dto.file)
         fs.writeFileSync(`${dndFilePath}`, dto.content, 'utf-8');
+        this.stateSyncGateway.broadcastFilesChanged();
         return { success: true };
     }
 
     @Get('load')
-    loadDnDFile(@Query('adventure') adventure: string, @Query('world') world: string): FileDto {
-        const dndFilePath = this.fileService.getDnDFilePath(adventure, world)
+    loadDnDFile(@Query('adventure') adventure: string, @Query('world') world: string, @Query('file') file?: string): FileDto {
+        const dndFilePath = this.fileService.getWorldFilePath(adventure, world, file)
         const fileContent = fs.readFileSync(`${dndFilePath}`, 'utf-8');
-        console.log("Loaded")
-        return { content: fileContent, identifier:{adventure, world} };
+        return { content: fileContent, identifier:{adventure, world}, file: basename(dndFilePath) };
+    }
+
+    @Post('new')
+    newFile(@Body() body: { adventure: string; world: string; file: string }): { file: string } {
+        const file = this.fileService.addWorldFile(body?.adventure, body?.world, body?.file);
+        this.stateSyncGateway.broadcastFilesChanged();
+        return { file };
     }
 
     @Post('layout/save')

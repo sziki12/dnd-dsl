@@ -13,6 +13,8 @@ type DslContext = {
   updateAdventure: (newAdventure: string) => Promise<void>;
   /** The folder that holds the adventures: undefined until the server has been asked, null while none is chosen. */
   sourceFolder: string | null | undefined;
+  /** Goes up each time any page writes or adds a world file; editors that show the files re-read them. */
+  filesVersion: number;
   worldState: SerializedModel | undefined;
   updateWorldState: () => Promise<void>;
   reloadWorld: () => Promise<{ ok: boolean; errors?: string[] }>;
@@ -60,6 +62,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
   // The "adventure/world" the server announced as already loaded, so this page does not parse it again.
   const announcedRef = useRef('');
   const [sourceFolder, setSourceFolder] = useState<string | null | undefined>(undefined);
+  const [filesVersion, setFilesVersion] = useState(0);
   const [worldState, setWorldState] = useState<SerializedModel | undefined>(undefined);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -166,7 +169,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
 
   // Live sync across every open page/tab/device: applyCommandResponse handles a broadcast from another page exactly like
   // one from this page's own request; catchUp handles anything missed while this page was disconnected.
-  const { isController, controllerName, claimControl, clientId } = useStateSync(applyCommandResponse, catchUp, adoptWorld, adoptSourceFolder);
+  const { isController, controllerName, claimControl, clientId } = useStateSync(applyCommandResponse, catchUp, adoptWorld, adoptSourceFolder, () => setFilesVersion(version => version + 1));
 
   // A rejected command (HTTP 400) carries `{ message }` instead of a CommandResponse. Applying it would
   // replace the world state with undefined and blank every page, so it is shown as an error instead
@@ -257,7 +260,7 @@ export function DslContextNode({ children }: { children: React.ReactNode }) {
     <DslContext.Provider value={{
       world, updateWorld,
       adventure, updateAdventure,
-      sourceFolder,
+      sourceFolder, filesVersion,
       worldState, updateWorldState, reloadWorld,
       getByReference,
       execute, runScript, undo, redo, canUndo, canRedo,

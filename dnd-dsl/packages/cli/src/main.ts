@@ -10,7 +10,9 @@ import { registerBuiltinDocument } from '../../language/src/builtin-documents.js
 import * as url from 'node:url';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { AstNode } from 'langium';
+import { AstNode, URI } from 'langium';
+import type { Diagnostic } from 'vscode-languageserver-types';
+import { mergeWorldFiles } from '../../language/src/world-files.js';
 
 export { DndDslParseError };
 
@@ -75,6 +77,45 @@ export const parseModel = async (fileName: string, paramServices: DndDslServices
 };
 
 
+
+const problemAt = (message: string): Diagnostic => ({
+    severity: 1,
+    message,
+    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+});
+
+/**
+ * Loads the world `worldName` from its files (see world-files.ts): the files are glued into one source, parsed and
+ * checked as one world, and every problem says which file and line it is in. A world of one file is that file.
+ */
+export const parseWorld = async (files: string[], worldName: string): Promise<{ model: Model; source: string }> => {
+    const services = createDndDslServices(NodeFileSystem).DndDsl;
+    await registerBuiltinDocument(services.shared);
+
+    const texts = await Promise.all(files.map(async file => ({ file: path.basename(file), text: await fs.readFile(file, 'utf-8') })));
+    const result = mergeWorldFiles(services, worldName, texts);
+    if (!result.ok) {
+        throw new DndDslParseError('DSL validation failed', result.problems.map(p => problemAt(p.file ? `${p.file}: ${p.message}` : p.message)));
+    }
+    const { merged } = result;
+
+    const workspace = services.shared.workspace;
+    const document = workspace.LangiumDocumentFactory.fromString(merged.text, URI.file(path.resolve(files[0])));
+    workspace.LangiumDocuments.addDocument(document);
+    await workspace.DocumentBuilder.build([document], { validation: true });
+
+    const errors = (document.diagnostics ?? []).filter(d => d.severity === 1);
+    if (errors.length > 0) {
+        throw new DndDslParseError('DSL validation failed', errors.map(d => {
+            const at = merged.fileAt(d.range.start.line + 1);
+            return { ...d, message: `${at.file}:${at.line}: ${d.message}` };
+        }));
+    }
+    if (!document.parseResult.value.$document) {
+        (document.parseResult.value as any).$document = document;
+    }
+    return { model: document.parseResult.value as Model, source: merged.text };
+};
 
 export type GenerateOptions = {
     destination?: string;

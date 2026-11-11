@@ -31,7 +31,7 @@ export type DndDslServices = LangiumServices & DndDslAddedServices
  */
 export const DndDslModule: Module<DndDslServices, PartialLangiumServices & DndDslAddedServices> = {
     validation: {
-        DndDslValidator: () => new DndDslValidator()
+        DndDslValidator: (services) => new DndDslValidator(services.shared.workspace.IndexManager)
     },
     parser: {
         LangiumParser: (services) => withBuiltInStatus(createLangiumParser(services))

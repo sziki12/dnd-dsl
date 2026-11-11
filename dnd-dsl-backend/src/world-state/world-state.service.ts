@@ -11,7 +11,7 @@ import {
   OnBlock,
 } from '@dnd-language/index.js';
 import { AstUtils } from 'langium';
-import { parseModel, stringifyNode } from '@dnd-cli/main.js';
+import { parseModel, parseWorld, stringifyNode } from '@dnd-cli/main.js';
 import { registerBuiltinDocument } from '@dnd-language/builtin-documents.js';
 import {
   decodeStatePath,
@@ -89,9 +89,26 @@ export class WorldStateService {
 
   constructor(private readonly interpreterService: LangiumInterpreterService) {}
 
+  /** One file, whatever world it declares. */
   async loadFromFile(dndFilePath: string, statePath?: string): Promise<any> {
-    this._model = await parseModel(dndFilePath);
-    this._worldSource = fs.readFileSync(dndFilePath, 'utf-8');
+    const model = await parseModel(dndFilePath);
+    return this.install(model, fs.readFileSync(dndFilePath, 'utf-8'), statePath);
+  }
+
+  /** The world `worldName` from its files: one, or the equal parts of a folder, each saying `world "<worldName>"`. */
+  async loadFromFiles(files: string[], worldName: string, statePath?: string): Promise<any> {
+    const { model, source } = await parseWorld(files, worldName);
+    return this.install(model, source, statePath);
+  }
+
+  /** The source of the loaded world: its files glued together when it has several. */
+  getWorldSource(): string {
+    return this._worldSource;
+  }
+
+  private install(model: Model, source: string, statePath: string | undefined): any {
+    this._model = model;
+    this._worldSource = source;
     this._statePath = statePath;
     const overlayFile = statePath && fs.existsSync(statePath)
       ? (JSON.parse(fs.readFileSync(statePath, 'utf-8')) as StateOverlayFile)

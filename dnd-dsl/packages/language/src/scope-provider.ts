@@ -1,5 +1,6 @@
 import { AstUtils, DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream } from "langium";
 import type { AstNode, AstNodeDescription, ReferenceInfo, Scope } from "langium";
+import { loadedWorlds, worldParts } from "./world-parts.js";
 import {
     type State,
     isChainTail,
@@ -312,14 +313,12 @@ export class DndScopeProvider extends DefaultScopeProvider
     private worldVariables(head: AstNode, context: ReferenceInfo): VariableDeclaration[] | undefined
     {
         const own = AstUtils.getContainerOfType(head, isWorld);
-        if (!own || !own.isReference) return own?.variables.filter(v => !isHiddenVariable(v.target));
+        if (!own) return undefined;
 
-        for (const description of this.getGlobalScope("World", context).getElements(own.name))
-        {
-            const node = description.node;
-            if (isWorld(node) && !node.isReference) return node.variables.filter(v => !isHiddenVariable(v.target));
-        }
-        return undefined;
+        // A world written in several files has its variables spread over them.
+        const parts = own.isReference ? loadedWorlds(own.name, this.indexManager) : worldParts(own, this.indexManager);
+        if (parts.length === 0) return undefined;
+        return parts.flatMap(part => part.variables).filter(v => !isHiddenVariable(v.target));
     }
 
     /**

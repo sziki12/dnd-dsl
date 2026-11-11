@@ -4,8 +4,14 @@ entry Model:
     (World=World)
     ;
 
+// A world written in several files has its header again where the next file begins (the server glues the files together):
+// that ends the last item of the file before, which would otherwise take the next file's first `let` or `on` block.
 World:
-    'world' name=STRING
+    'world' name=STRING WorldItems
+    ('world' partNames+=STRING WorldItems)*
+  | isReference?='reference' 'world' name=STRING (script=CodeBlock)?;
+
+fragment WorldItems:
     ((locations+=Location)+
     | (functions+=FunctionDeclaration)+
     | (quests+=Quest)+
@@ -16,8 +22,7 @@ World:
     | (onBlocks+=OnBlock)+
     | (parties+=Party)+
     | (factions+=Faction)+
-    | (relationTypes+=RelationType)+)*
-  | isReference?='reference' 'world' name=STRING (script=CodeBlock)?;
+    | (relationTypes+=RelationType)+)*;
 
 State:
     'state' name=ID '{' values+=StateValueDecl (',' values+=StateValueDecl)* ','? '}';
