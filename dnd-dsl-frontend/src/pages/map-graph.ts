@@ -44,6 +44,14 @@ const exitEdge = (from: string, to: string, exit: SerializedLocation['exits'][nu
   style: { strokeWidth: 1 },
 });
 
+type Exit = SerializedLocation['exits'][number];
+
+/** The place an exit into another world leads to: one node for each place, however many exits lead there. */
+const portalNode = (exit: Exit): Node => nodeAt(
+  `portal:${exit.foreignWorld}:${exit.foreignPath.join('\u203a')}`,
+  { location: [exit.foreignWorld, ...exit.foreignPath].join(' \u203a '), kind: 'external', world: exit.foreignWorld, foreignPath: exit.foreignPath },
+);
+
 /** Exits that join the same pair of nodes (either direction) get their labels spread so they do not stack. */
 function spreadParallelExits(edges: Edge[]): void {
   const exits = edges.filter(e => e.data?.kind === 'exit');
@@ -68,7 +76,16 @@ export function buildLocationGraph(location: SerializedLocation, resolve: Resolv
   const edges: Edge[] = [];
   const knownIds = new Set(location.sublocations.flatMap(sub => entryOf(sub)?.key ?? []));
 
-  const addExit = (from: string, exit: SerializedLocation['exits'][number]) => {
+  const addExit = (from: string, exit: Exit) => {
+    if (exit.foreignWorld !== undefined) {
+      const portal = portalNode(exit);
+      if (!knownIds.has(portal.id)) {
+        knownIds.add(portal.id);
+        nodes.push(portal);
+      }
+      edges.push(exitEdge(from, portal.id, exit));
+      return;
+    }
     const target = resolve<SerializedLocation>(exit.exit);
     const entry = target && entryOf(target);
     const id = entry?.key ?? locationKey([target?.name ?? 'Unknown']);
@@ -141,8 +158,20 @@ export function buildWorldGraph(
   }
 
   const bundles = new Map<string, { from: string; to: string; exits: SerializedLocation['exits'] }>();
+  const portals = new Set<string>();
   for (const entry of index.entries) {
     for (const exit of entry.location.exits ?? []) {
+      if (exit.foreignWorld !== undefined) {
+        const from = nearestShown(entry.key);
+        if (from === undefined) continue;
+        const portal = portalNode(exit);
+        if (!portals.has(portal.id)) {
+          portals.add(portal.id);
+          nodes.push(portal);
+        }
+        edges.push(exitEdge(from, portal.id, exit));
+        continue;
+      }
       const target = index.entryOf(resolve<SerializedLocation>(exit.exit));
       if (!target) continue;
       const from = nearestShown(entry.key);

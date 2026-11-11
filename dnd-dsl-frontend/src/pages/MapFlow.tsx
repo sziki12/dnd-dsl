@@ -19,6 +19,7 @@ import type { MapGraph } from './map-graph';
 import { sanitizeLayout } from './map-flow-support';
 import { placeNodes, type NormPos } from './auto-layout';
 import { locationRoute, readWithLegacy, withLegacyKeys } from '../common/location-identity';
+import { useTravel } from '../common/useTravel';
 import { fitViewport, mapRectFor, normalizedToPixel, paddedRect, pixelToNormalized, resizedViewport, zoomLimits, type Size, type Viewport } from './map-coords';
 
 // Module-level so ReactFlow doesn't see a new object every render (which would
@@ -137,10 +138,15 @@ const MapFlow = ({ scopeKey, legacyScopeKey, graph, mode, treeRoot, settings, se
     [setEdges]
   );
 
+  const travel = useTravel();
   const onNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (typeof node.data.world === 'string' && Array.isArray(node.data.foreignPath)) {
+      void travel(node.data.world, node.data.foreignPath.map(String));
+      return;
+    }
     const path = node.data.path;
     if (Array.isArray(path)) navigate(locationRoute(path.map(String)));
-  }, [navigate]);
+  }, [navigate, travel]);
 
   const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
     positionsRef.current[node.id] = pixelToNormalized(rect, node.position.x, node.position.y);

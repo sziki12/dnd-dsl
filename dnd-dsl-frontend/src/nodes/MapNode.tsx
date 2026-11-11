@@ -25,7 +25,7 @@ function MapNode({ id, data }: any) {
       <div className="flex" style={{ alignItems: 'center', gap: 6 }}>
         <div>
           <div style={{ fontSize: 10, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--fg-muted)' }}>
-            {CAPTION[kind]}{isGroup ? ` · ${childCount}` : ''}
+            {data.world ? 'other world' : CAPTION[kind]}{isGroup ? ` · ${childCount}` : ''}
           </div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>{data.location}</div>
         </div>
