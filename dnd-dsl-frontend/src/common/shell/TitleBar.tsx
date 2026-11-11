@@ -3,6 +3,7 @@ import { useLocation, useParams } from 'react-router-dom';
 import { DslContext } from '../../contexts/DslContext';
 import { useLocationRoute } from '../useLocationIndex';
 import FileMenu from './FileMenu';
+import WorldSwitcher from './WorldSwitcher';
 
 const MENU_ITEMS = ['Edit', 'View', 'Help'];
 
@@ -55,7 +56,7 @@ export default function TitleBar() {
           <>
             <span>{adventure}</span>
             <span style={{ color: 'var(--fg-muted)' }}>&rsaquo;</span>
-            <span>{world}</span>
+            <WorldSwitcher />
           </>
         )}
         {adventure && world && entityName && (

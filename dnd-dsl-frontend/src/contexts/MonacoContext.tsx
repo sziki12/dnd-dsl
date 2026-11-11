@@ -7,6 +7,7 @@ import { FileContext } from './FileContext';
 import { DslContext } from './DslContext';
 import { enclosingQuestAt, type EntityRef } from '../common/entity-at-cursor';
 import { planRefresh } from '../common/world-file-refresh';
+import { fileKey, firstFile, splitKey, type FileRef } from '../common/adventure-tree';
 
 /** What the editor needs from the page to offer "Open View" on a named object in the world. */
 export type EntityActions = {
@@ -15,32 +16,39 @@ export type EntityActions = {
     open: (entity: EntityRef) => void,
 }
 
-/** One of the files the open world is written in. */
-export type EditorFile = { name: string, dirty: boolean }
+/** One file of one world of the adventure. */
+export type EditorFile = FileRef & { dirty: boolean }
+/** A world of the adventure; `problem` says why its files could not be listed. */
+export type EditorWorld = { world: string, problem?: string }
 
 type MonacoContext = {
     startEditor: (element: HTMLDivElement, entityActions?: EntityActions) => Promise<void>,
-    /** True when any file of the world has edits that were neither loaded from nor saved to disk. */
+    /** True when any file of any world has edits that were neither loaded from nor saved to disk. */
     hasUnsavedChanges: () => boolean,
     disposeEditor: () => Promise<void>,
-    /** Writes every changed file, then reparses the world once. */
+    /** Writes every changed file, then reparses the open world once. */
     saveFile: () => Promise<{ ok: boolean; errors?: string[] }>,
-    /** Swaps the editor to a read-only, highlighted model holding `text` (the world with its state merged in). */
+    /** Swaps the editor to a read-only, highlighted model holding `text` (the open world with its state merged in). */
     showMergedView: (text: string) => Promise<void>,
     /** Swaps the editor back to the editable source. */
     showSourceView: () => void,
-    /** The world's files, in name order, while an editor is open. */
+    /** The worlds of the open adventure and their files, while an editor is open. */
+    worlds: EditorWorld[],
     files: EditorFile[],
-    selectedFile: string | undefined,
-    selectFile: (name: string) => void,
-    /** Adds a file to the world and opens it. */
-    createFile: (name: string) => Promise<{ ok: boolean; error?: string }>,
+    selected: FileRef | undefined,
+    /** True while the editor shows the read-only merged view, so no single file can be picked. */
+    merged: boolean,
+    selectFile: (world: string, name: string) => void,
+    /** Shows a file with a line of it in view. */
+    revealAt: (world: string, name: string, line: number) => void,
+    /** Adds a file to a world and opens it. */
+    createFile: (world: string, name: string) => Promise<{ ok: boolean; error?: string }>,
 }
 
 type ViewMode = 'source' | 'merged';
 type ScrollPosition = { top: number; left: number };
 type ModelRef = Awaited<ReturnType<typeof createModelReference>>;
-/** A file of the world as an editor model; `saved` is the model version that is on disk. */
+/** A file as an editor model; `saved` is the model version that is on disk. */
 type OpenFile = { ref: ModelRef; saved: number; listener: { dispose(): void } };
 
 const MERGED_URI = `file:///dnd-world-with-state${VIEW_FILE_EXTENSION}`;
@@ -65,15 +73,17 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
     const pendingMergedRef = useRef<string | null>(null);
     const viewRequestRef = useRef(0);
 
-    // Every file of the world is a model, so the language server knows all of them and names link across files;
-    // the editor shows the selected one.
+    // Every file of every world of the adventure is a model, keyed by `fileKey(world, name)`, so the language server
+    // knows all of them (a name means its own world's there); the editor shows the selected one.
     const openFilesRef = useRef<Map<string, OpenFile>>(new Map());
     const selectedRef = useRef<string | undefined>(undefined);
     const loadRequestRef = useRef(0);
+    const [worlds, setWorlds] = useState<EditorWorld[]>([]);
     const [files, setFiles] = useState<EditorFile[]>([]);
-    const [selectedFile, setSelectedFile] = useState<string | undefined>(undefined);
+    const [selected, setSelected] = useState<FileRef | undefined>(undefined);
+    const [merged, setMerged] = useState(false);
 
-    // The editor itself starts on an empty placeholder; the world's files are shown in it by setModel.
+    // The editor itself starts on an empty placeholder; the files are shown in it by setModel.
     const getEditorConfig = () =>
     {
         const editorAppConfig: EditorAppConfig = {
@@ -100,8 +110,8 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         return editorAppConfig
     }
 
-    const modelOf = (name: string | undefined) =>
-        name === undefined ? null : openFilesRef.current.get(name)?.ref.object.textEditorModel ?? null;
+    const modelOf = (key: string | undefined) =>
+        key === undefined ? null : openFilesRef.current.get(key)?.ref.object.textEditorModel ?? null;
 
     const isDirty = (open: OpenFile) => {
         const model = open.ref.object.textEditorModel;
@@ -112,20 +122,18 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
 
     const publishFiles = () => {
         const next = [...openFilesRef.current.entries()]
-            .map(([name, open]) => ({ name, dirty: isDirty(open) }))
-            .sort((a, b) => a.name.localeCompare(b.name));
+            .map(([key, open]) => ({ ...splitKey(key), dirty: isDirty(open) }))
+            .sort((a, b) => a.world.localeCompare(b.world) || a.name.localeCompare(b.name));
         setFiles(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
     };
 
-    const fileUri = (name: string) => {
-        const { adventure, world } = latest.current.dlsContext;
-        return vscode.Uri.from({ scheme: 'file', path: `/${adventure}/${world}/${name}` });
-    };
+    const fileUri = (world: string, name: string) =>
+        vscode.Uri.from({ scheme: 'file', path: `/${latest.current.dlsContext.adventure}/${world}/${name}` });
 
-    const openFile = async (name: string, text: string) => {
-        const ref = await createModelReference(fileUri(name), text);
+    const openFile = async (world: string, name: string, text: string) => {
+        const ref = await createModelReference(fileUri(world, name), text);
         const model = ref.object.textEditorModel;
-        openFilesRef.current.set(name, {
+        openFilesRef.current.set(fileKey(world, name), {
             ref,
             saved: model?.getAlternativeVersionId() ?? 0,
             listener: model ? model.onDidChangeContent(publishFiles) : { dispose() { /* no model, nothing to stop */ } },
@@ -140,12 +148,15 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         openFilesRef.current.clear();
     };
 
-    // The right-click item is shown only when the cursor is on the name of something the world declares.
+    // The right-click item is shown only when the cursor is on the name of something the open world declares, so not in
+    // a file of another world of the adventure.
     const registerEntityAction = (editor: NonNullable<ReturnType<EditorApp['getEditor']>>, actions: EntityActions) => {
         const entityAtCursor = () => {
             const position = editor.getPosition();
             const model = editor.getModel();
             if (!position || !model) return undefined;
+            const [, , world, name] = model.uri.path.split('/');
+            if (name !== undefined && world !== latest.current.dlsContext.world) return undefined;
             const quest = enclosingQuestAt(lineNumber => model.getLineContent(lineNumber), position.lineNumber);
             return actions.find(model.getLineContent(position.lineNumber), position.column, quest);
         };
@@ -192,71 +203,59 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         restoreScroll('source');
     };
 
-    /** Reads the world's files from disk into models, dropping edits that were not saved. */
-    const loadWorldFiles = async (): Promise<void> => {
+    /**
+     * Brings the models up to date with the adventure on disk: takes up new worlds and files, re-reads a file that
+     * changed, and keeps every file with unsaved edits as it is. `replace` drops all models first (another adventure).
+     */
+    const syncAdventure = async (replace: boolean): Promise<void> => {
         const { fileContext: loader, dlsContext: dsl } = latest.current;
-        const { adventure, world } = dsl;
+        const { adventure, world: active } = dsl;
         const app = editorAppRef.current;
-        if (!app || !adventure || !world) return;
-        const request = ++loadRequestRef.current;
+        if (!app || !adventure) return;
+        const request = replace ? ++loadRequestRef.current : loadRequestRef.current;
 
-        let loaded: { name: string; text: string }[];
+        let data: Awaited<ReturnType<typeof loader.loadAdventure>>;
         try {
-            const list = await loader.listFiles(adventure, world);
-            loaded = await Promise.all(list.files.map(async name => ({ name, text: (await loader.loadFile(adventure, world, name)).content })));
+            data = await loader.loadAdventure(adventure);
         } catch (e) {
-            console.error('Could not load the files of the world', e);
+            console.error('Could not load the adventure', e);
             return;
         }
+        // A newer full load (another adventure, or the editor closing) wins over this one.
         if (request !== loadRequestRef.current || editorAppRef.current !== app) return;
 
-        // The models are about to go: park the editor on the placeholder first.
-        const placeholder = app.getTextModels().modified;
-        if (placeholder) app.getEditor()?.setModel(placeholder);
-        closeFiles();
-        for (const { name, text } of loaded) await openFile(name, text);
-        if (request !== loadRequestRef.current || editorAppRef.current !== app) return;
-
-        const names = [...openFilesRef.current.keys()].sort((a, b) => a.localeCompare(b));
-        const keep = selectedRef.current !== undefined && openFilesRef.current.has(selectedRef.current) ? selectedRef.current : names[0];
-        selectedRef.current = keep;
-        setSelectedFile(keep);
-        publishFiles();
-        if (viewModeRef.current === 'source') showSelected();
-    };
-
-    /** Another page wrote or added a file: take it up, keeping every file with unsaved edits here as it is. */
-    const refreshWorldFiles = async (): Promise<void> => {
-        const { fileContext: loader, dlsContext: dsl } = latest.current;
-        const { adventure, world } = dsl;
-        const app = editorAppRef.current;
-        if (!app || !adventure || !world) return;
-        const request = loadRequestRef.current;
-
-        let disk: { name: string; text: string }[];
-        try {
-            const list = await loader.listFiles(adventure, world);
-            disk = await Promise.all(list.files.map(async name => ({ name, text: (await loader.loadFile(adventure, world, name)).content })));
-        } catch (e) {
-            console.error('Could not re-read the files of the world', e);
-            return;
+        if (replace) {
+            // The models are about to go: park the editor on the placeholder first.
+            const placeholder = app.getTextModels().modified;
+            if (placeholder) app.getEditor()?.setModel(placeholder);
+            closeFiles();
+            selectedRef.current = undefined;
         }
-        // A full reload (another world, or the editor closing) is newer than this one.
-        if (request !== loadRequestRef.current || editorAppRef.current !== app) return;
 
-        const open = [...openFilesRef.current.entries()].map(([name, file]) => ({
-            name, dirty: isDirty(file), text: file.ref.object.textEditorModel?.getValue() ?? '',
+        const open = [...openFilesRef.current.entries()].map(([key, file]) => ({
+            name: key, dirty: isDirty(file), text: file.ref.object.textEditorModel?.getValue() ?? '',
         }));
+        const disk = data.worlds.flatMap(w => w.files.map(f => ({ name: fileKey(w.world, f.name), text: f.content })));
         const { add, update } = planRefresh(open, disk);
-        for (const { name, text } of update) {
-            const file = openFilesRef.current.get(name);
+        for (const { name: key, text } of update) {
+            const file = openFilesRef.current.get(key);
             file?.ref.object.textEditorModel?.setValue(text);
             if (file) file.saved = file.ref.object.textEditorModel?.getAlternativeVersionId() ?? file.saved;
         }
-        for (const { name, text } of add) {
-            if (!openFilesRef.current.has(name)) await openFile(name, text);
+        for (const { name: key, text } of add) {
+            const { world, name } = splitKey(key);
+            if (!openFilesRef.current.has(key)) await openFile(world, name, text);
         }
+        if (request !== loadRequestRef.current || editorAppRef.current !== app) return;
+
+        setWorlds(data.worlds.map(w => ({ world: w.world, problem: w.problem })));
         publishFiles();
+        if (selectedRef.current === undefined || !openFilesRef.current.has(selectedRef.current)) {
+            const first = firstFile([...openFilesRef.current.keys()].map(splitKey), active);
+            selectedRef.current = first && fileKey(first.world, first.name);
+            setSelected(first);
+            if (viewModeRef.current === 'source') showSelected();
+        }
     };
 
     const startEditor = async (element: HTMLDivElement, entityActions?: EntityActions) => {
@@ -277,28 +276,36 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         const editor = app.getEditor();
         if (editor && entityActions) registerEntityAction(editor, entityActions);
         viewModeRef.current = 'source';
-        await loadWorldFiles();
+        await syncAdventure(true);
         if (pendingMergedRef.current !== null) await showMergedView(pendingMergedRef.current);
 
         console.log('Editor started');
     };
 
-    const selectFile = (name: string) => {
-        if (!openFilesRef.current.has(name) || name === selectedRef.current) return;
+    const selectFile = (world: string, name: string) => {
+        const key = fileKey(world, name);
+        if (!openFilesRef.current.has(key) || key === selectedRef.current) return;
         if (viewModeRef.current === 'source') saveScroll();
-        selectedRef.current = name;
-        setSelectedFile(name);
+        selectedRef.current = key;
+        setSelected({ world, name });
         if (viewModeRef.current === 'source') showSelected();
     };
 
-    const createFile = async (name: string): Promise<{ ok: boolean; error?: string }> => {
+    const revealAt = (world: string, name: string, line: number) => {
+        selectFile(world, name);
+        const editor = editorAppRef.current?.getEditor();
+        if (!editor || viewModeRef.current !== 'source') return;
+        editor.revealLineInCenter(line);
+        editor.setPosition({ lineNumber: line, column: 1 });
+        editor.focus();
+    };
+
+    const createFile = async (world: string, name: string): Promise<{ ok: boolean; error?: string }> => {
         const { fileContext: loader, dlsContext: dsl } = latest.current;
         try {
-            const created = await loader.newFile(dsl.adventure, dsl.world, name);
-            const { content } = await loader.loadFile(dsl.adventure, dsl.world, created);
-            await openFile(created, content);
-            publishFiles();
-            selectFile(created);
+            const created = await loader.newFile(dsl.adventure, world, name);
+            await syncAdventure(false);
+            selectFile(world, created);
             return { ok: true };
         } catch (e) {
             return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -330,10 +337,11 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
 
         saveScroll();
         viewModeRef.current = 'merged';
+        setMerged(true);
         editor.setModel(model);
         editor.updateOptions({
             readOnly: true,
-            readOnlyMessage: { value: 'This is the world with its current state merged in. Switch back to the source to edit.' },
+            readOnlyMessage: { value: 'This is the open world with its current state merged in. Switch back to the source to edit.' },
         });
         restoreScroll('merged');
     };
@@ -346,6 +354,7 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
 
         saveScroll();
         viewModeRef.current = 'source';
+        setMerged(false);
         showSelected();
     };
 
@@ -359,10 +368,13 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         }
         closeFiles();
         setFiles([]);
+        setWorlds([]);
+        setSelected(undefined);
         viewRequestRef.current++;
         viewModelRef.current?.dispose();
         viewModelRef.current = null;
         viewModeRef.current = 'source';
+        setMerged(false);
     };
 
     const saveFile = async (): Promise<{ ok: boolean; errors?: string[] }> => {
@@ -370,14 +382,14 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
             return { ok: false, errors: ['Switch back to the source view to save.'] };
         }
         const { fileContext: loader, dlsContext: dsl } = latest.current;
-        const { adventure, world } = dsl;
 
         // The file models, never the editor's current one: that may be the read-only merged view.
         try {
-            for (const [name, open] of openFilesRef.current) {
+            for (const [key, open] of openFilesRef.current) {
                 const model = open.ref.object.textEditorModel;
                 if (!model || !isDirty(open)) continue;
-                await loader.saveFile({ identifier: { adventure, world }, file: name, content: model.getValue() });
+                const { world, name } = splitKey(key);
+                await loader.saveFile({ identifier: { adventure: dsl.adventure, world }, file: name, content: model.getValue() });
                 open.saved = model.getAlternativeVersionId();
             }
         } catch (e) {
@@ -388,21 +400,21 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         return await dsl.reloadWorld();
     };
 
-    // Another page (or this one) wrote or added a file.
+    // Any page wrote or added a file, or another world became the open one (a new world may have been made): take up
+    // what is new, keeping the edits that are not saved.
     useEffect(() => {
-        if (editorAppRef.current) void refreshWorldFiles();
-    }, [dlsContext.filesVersion]);
+        if (editorAppRef.current) void syncAdventure(false);
+    }, [dlsContext.filesVersion, dlsContext.world]);
 
-    // Another adventure or world was opened (by any page): the editor shows its files.
+    // Another adventure was opened (by any page): the editor shows that one instead.
     useEffect(() => {
-        if (!dlsContext.adventure || !dlsContext.world || !editorAppRef.current) return;
-        void loadWorldFiles();
-    }, [dlsContext.adventure, dlsContext.world]);
+        if (dlsContext.adventure && editorAppRef.current) void syncAdventure(true);
+    }, [dlsContext.adventure]);
 
     return (
         <MonacoContext.Provider value={{
             startEditor, hasUnsavedChanges, disposeEditor, saveFile, showMergedView, showSourceView,
-            files, selectedFile, selectFile, createFile,
+            worlds, files, selected, merged, selectFile, revealAt, createFile,
         }}>
             {children}
         </MonacoContext.Provider>

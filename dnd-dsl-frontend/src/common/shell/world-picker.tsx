@@ -4,9 +4,12 @@ import { button, call, ErrorLine, errorText, field, Hint, primary, row, type Adv
 
 type PickerProps = { onDone: () => void; confirmDiscard: () => boolean };
 
-/** Every world of every adventure in the source folder; a click opens one. Used in a dialog and on the first-run screen. */
-export function WorldList({ onDone, confirmDiscard }: PickerProps) {
-  const { adventure, world } = useContext(DslContext);
+/**
+ * The adventures in the source folder; a click opens one (on the world it was last open on, or its first), with all of
+ * its worlds in the Editor. Used in a dialog and on the first-run screen.
+ */
+export function AdventureList({ onDone, confirmDiscard }: PickerProps) {
+  const { adventure } = useContext(DslContext);
   const [adventures, setAdventures] = useState<Adventure[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -14,10 +17,11 @@ export function WorldList({ onDone, confirmDiscard }: PickerProps) {
     call<Adventure[]>('list').then(setAdventures).catch(e => setError(errorText(e)));
   }, []);
 
-  const open = async (nextAdventure: string, nextWorld: string) => {
-    if ((nextAdventure === adventure && nextWorld === world) || !confirmDiscard()) return;
+  // Another adventure replaces every file in the Editor, so edits that were not saved are asked about first.
+  const open = async (next: string) => {
+    if (next === adventure || !confirmDiscard()) return;
     try {
-      await call(`open?adventure=${encodeURIComponent(nextAdventure)}&world=${encodeURIComponent(nextWorld)}`, { method: 'POST' });
+      await call(`open?adventure=${encodeURIComponent(next)}`, { method: 'POST' });
       onDone();
     } catch (e) {
       setError(errorText(e));
@@ -28,21 +32,15 @@ export function WorldList({ onDone, confirmDiscard }: PickerProps) {
     <div>
       {adventures?.length === 0 && <Hint>The source folder has no adventures yet. Make one with New.</Hint>}
       <div style={{ maxHeight: 320, overflow: 'auto' }}>
-        {adventures?.map(a => (
-          <div key={a.name} style={{ marginBottom: 8 }}>
-            <div style={{ color: 'var(--fg-secondary)', padding: '2px 8px' }}>{a.name}</div>
-            {a.worlds.length === 0 && <div style={{ color: 'var(--fg-muted)', padding: '2px 20px' }}>no worlds</div>}
-            {a.worlds.map(w => {
-              const isOpen = a.name === adventure && w === world;
-              return (
-                <button key={w} style={{ ...row, paddingLeft: 20, background: isOpen ? 'var(--bg-selection)' : 'transparent' }} onClick={() => open(a.name, w)}>
-                  <span>{w}</span>
-                  {isOpen && <span style={{ color: 'var(--fg-secondary)' }}>open</span>}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+        {adventures?.map(a => {
+          const isOpen = a.name === adventure;
+          return (
+            <button key={a.name} style={{ ...row, background: isOpen ? 'var(--bg-selection)' : 'transparent' }} onClick={() => open(a.name)}>
+              <span>{a.name}</span>
+              <span style={{ color: 'var(--fg-secondary)' }}>{isOpen ? 'open' : `${a.worlds.length} world${a.worlds.length === 1 ? '' : 's'}`}</span>
+            </button>
+          );
+        })}
       </div>
       <ErrorLine text={error} />
     </div>
@@ -64,7 +62,7 @@ export function WorldForm({ mode, onDone, onCancel, confirmDiscard }: PickerProp
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const target = { adventure: adventureName.trim(), world: worldName.trim() };
-    if (!target.adventure || !target.world || !confirmDiscard()) return;
+    if (!target.adventure || !target.world || (target.adventure !== adventure && !confirmDiscard())) return;
     try {
       await call(mode === 'new' ? 'new' : 'save-as', { method: 'POST', body: target });
       onDone();

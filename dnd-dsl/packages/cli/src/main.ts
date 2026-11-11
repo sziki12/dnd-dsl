@@ -12,7 +12,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { AstNode, URI } from 'langium';
 import type { Diagnostic } from 'vscode-languageserver-types';
-import { mergeWorldFiles } from '../../language/src/world-files.js';
+import { mergeWorldFiles, type MergedWorld } from '../../language/src/world-files.js';
+import { checkForeignReferences, foreignWorldNames, type ForeignWorlds } from '../../language/src/evaluation/dnd-dsl-foreign.js';
 
 export { DndDslParseError };
 
@@ -87,8 +88,14 @@ const problemAt = (message: string): Diagnostic => ({
 /**
  * Loads the world `worldName` from its files (see world-files.ts): the files are glued into one source, parsed and
  * checked as one world, and every problem says which file and line it is in. A world of one file is that file.
+ * `prepareForeign` is given the other worlds this world mentions and returns their state; with it, every name that
+ * points into one of them is checked too.
  */
-export const parseWorld = async (files: string[], worldName: string): Promise<{ model: Model; source: string }> => {
+export const parseWorld = async (
+    files: string[],
+    worldName: string,
+    prepareForeign?: (worlds: string[]) => Promise<ForeignWorlds>,
+): Promise<{ model: Model; source: string; foreign?: ForeignWorlds; fileAt: MergedWorld['fileAt'] }> => {
     const services = createDndDslServices(NodeFileSystem).DndDsl;
     await registerBuiltinDocument(services.shared);
 
@@ -114,7 +121,20 @@ export const parseWorld = async (files: string[], worldName: string): Promise<{ 
     if (!document.parseResult.value.$document) {
         (document.parseResult.value as any).$document = document;
     }
-    return { model: document.parseResult.value as Model, source: merged.text };
+    const model = document.parseResult.value as Model;
+
+    const others = prepareForeign ? foreignWorldNames(model, worldName) : [];
+    if (!prepareForeign || others.length === 0) return { model, source: merged.text, fileAt: merged.fileAt };
+
+    const foreign = await prepareForeign(others);
+    const problems = checkForeignReferences(model, foreign);
+    if (problems.length > 0) {
+        throw new DndDslParseError('DSL validation failed', problems.map(problem => {
+            const at = merged.fileAt((problem.node.$cstNode?.range.start.line ?? 0) + 1);
+            return problemAt(`${at.file}:${at.line}: ${problem.message}`);
+        }));
+    }
+    return { model, source: merged.text, foreign, fileAt: merged.fileAt };
 };
 
 export type GenerateOptions = {

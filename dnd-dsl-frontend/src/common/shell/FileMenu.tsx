@@ -3,13 +3,13 @@ import { DslContext } from '../../contexts/DslContext';
 import { MonacoContext } from '../../contexts/MonacoContext';
 import { button, call, Dialog, ErrorLine, errorText, field, Hint, panel, primary, row, type NamedState } from './file-ui';
 import FolderBrowser from './FolderBrowser';
-import { WorldForm, WorldList } from './world-picker';
+import { AdventureList, WorldForm } from './world-picker';
 
 type Action = 'open' | 'new' | 'saveAs' | 'saveState' | 'loadState' | 'folder';
 type Needs = 'folder' | 'world' | undefined;
 
 const MENU: ({ action: Action; label: string; needs: Needs } | 'separator')[] = [
-  { action: 'open', label: 'Open adventure or world...', needs: 'folder' },
+  { action: 'open', label: 'Open adventure...', needs: 'folder' },
   { action: 'new', label: 'New adventure or world...', needs: 'folder' },
   { action: 'saveAs', label: 'Save world as...', needs: 'world' },
   'separator',
@@ -169,8 +169,8 @@ export default function FileMenu() {
         )}
       </div>
       {action === 'open' && (
-        <Dialog title="Open adventure or world" onClose={close}>
-          <WorldList onDone={close} confirmDiscard={confirmDiscard} />
+        <Dialog title="Open adventure" onClose={close}>
+          <AdventureList onDone={close} confirmDiscard={confirmDiscard} />
           <div style={{ textAlign: 'right', marginTop: 8 }}><button style={button} onClick={close}>Close</button></div>
         </Dialog>
       )}

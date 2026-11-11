@@ -4,6 +4,8 @@ import { BackendURL } from './BackendContext';
 type FileContext = {
     /** The files a world is written in: one, or the equal parts of its folder. */
     listFiles: (adventure: string, world: string) => Promise<WorldFileList>,
+    /** Every world of the adventure with the text of its files. */
+    loadAdventure: (adventure: string) => Promise<AdventureFiles>,
     /** One of the world's files; `file` may be left out for a world of one file. */
     loadFile: (adventure: string, world: string, file?: string) => Promise<FileDto>,
     saveFile: (file: FileDto) => Promise<void>,
@@ -12,6 +14,10 @@ type FileContext = {
     loaded: boolean
 }
 export const FileContext = createContext<FileContext>({loaded: false} as FileContext);
+
+export type AdventureFiles = {
+    worlds: { world: string, files: { name: string, content: string }[], problem?: string }[],
+}
 
 export type WorldFileList = {
     kind: 'file' | 'folder',
@@ -45,6 +51,9 @@ export function FileContextNode({ children }: { children: React.ReactNode }) {
     const listFiles = async (adventure: string, world: string) : Promise<WorldFileList> =>
         readJson(await fetch(`${fileEndpoint}/list?${query(adventure, world)}`))
 
+    const loadAdventure = async (adventure: string) : Promise<AdventureFiles> =>
+        readJson(await fetch(`${fileEndpoint}/adventure?adventure=${encodeURIComponent(adventure)}`))
+
     const loadFile = async (adventure: string, world: string, file?: string) : Promise<FileDto> =>
         readJson(await fetch(`${fileEndpoint}/load?${query(adventure, world)}${file === undefined ? '' : `&file=${encodeURIComponent(file)}`}`))
 
@@ -72,7 +81,7 @@ export function FileContextNode({ children }: { children: React.ReactNode }) {
         }))).file
 
     return (
-        <FileContext.Provider value={{ listFiles, loadFile, saveFile, newFile, loaded }}>
+        <FileContext.Provider value={{ listFiles, loadAdventure, loadFile, saveFile, newFile, loaded }}>
             {children}
         </FileContext.Provider>
     );

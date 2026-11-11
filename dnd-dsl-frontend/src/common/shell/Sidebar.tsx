@@ -1,5 +1,6 @@
 import { useContext, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import AdventureTree from './AdventureTree';
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -8,6 +9,7 @@ import ArrowOutwardIcon from '@mui/icons-material/ArrowOutward';
 import { DslContext } from '../../contexts/DslContext';
 import { locationKey, locationRoute, type LocationIndex } from '../location-identity';
 import { useLocationIndex, useLocationRoute } from '../useLocationIndex';
+import { useTravel } from '../useTravel';
 import type { SerializedLocation } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 
 /** A row is a location by the names that lead to it, so sublocations that share a name are separate rows. */
@@ -23,6 +25,7 @@ function LocationRow({
   onSelect: (path: readonly string[]) => void;
 }) {
   const { getByReference } = useContext(DslContext);
+  const travel = useTravel();
   const depth = path.length - 1;
   const key = locationKey(path);
   const hasChildren = loc.sublocations.length > 0;
@@ -73,11 +76,18 @@ function LocationRow({
           {loc.exits.map((exit) => {
             const targetEntry = index.entryOf(getByReference<SerializedLocation>(exit.exit));
             // The bare name tells the place apart unless another location has it too; then the whole path does.
-            const target = targetEntry && (index.isUnique(targetEntry.location.name) ? targetEntry.location.name : targetEntry.path.join(' \u203a '));
+            const abroad = exit.foreignWorld !== undefined;
+            const target = abroad
+              ? [exit.foreignWorld, ...exit.foreignPath].join(' \u203a ')
+              : targetEntry && (index.isUnique(targetEntry.location.name) ? targetEntry.location.name : targetEntry.path.join(' \u203a '));
             return (
               <div
                 key={exit.name}
-                onClick={(e) => { e.stopPropagation(); if (targetEntry) onSelect(targetEntry.path); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (abroad) void travel(exit.foreignWorld!, exit.foreignPath);
+                  else if (targetEntry) onSelect(targetEntry.path);
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 4,
                   padding: `2px 8px 2px ${8 + (depth + 1) * 14}px`,
@@ -104,6 +114,7 @@ export default function Sidebar() {
   const names = useLocationRoute();
   const index = useLocationIndex();
   const navigate = useNavigate();
+  const onEditor = useLocation().pathname === '/editor';
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const locations = worldState?.World?.locations;
@@ -131,6 +142,7 @@ export default function Sidebar() {
 
   return (
     <aside className="shell-sidebar">
+      {onEditor ? <AdventureTree /> : <>
       <div style={{
         padding: '8px 12px 6px', fontSize: 11, textTransform: 'uppercase',
         color: 'var(--fg-secondary)', letterSpacing: '.04em',
@@ -156,6 +168,7 @@ export default function Sidebar() {
           />
         ))}
       </div>
+      </>}
     </aside>
   );
 }

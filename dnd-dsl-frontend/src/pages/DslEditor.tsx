@@ -5,7 +5,6 @@ import { collectEntityNames, entityAt, entityRoute } from '../common/entity-at-c
 import { FileContext } from '../contexts/FileContext';
 import { DslContext } from '../contexts/DslContext';
 import { BackendURL } from '../contexts/BackendContext';
-import WorldFileList from './WorldFileList';
 
 const MERGED_REFRESH_DELAY_MS = 150;
 
@@ -114,15 +113,7 @@ export const DslEditor = () => {
   }, [fileContext.loaded]);
 
   return (
-    <div style={{ display: 'flex', height: '100%', width: '100%' }}>
-    <WorldFileList
-      files={monacoContext.files}
-      selected={monacoContext.selectedFile}
-      disabled={showMerged}
-      onSelect={monacoContext.selectFile}
-      onCreate={monacoContext.createFile}
-    />
-    <div style={{ position: 'relative', flex: 1, minWidth: 0, height: '100%' }}>
+    <div style={{ position: 'relative', height: '100%', width: '100%' }}>
       <div ref={containerRef} className='h-full w-full' />
       {showMerged && mergedError && (
         <div style={{
@@ -154,7 +145,6 @@ export const DslEditor = () => {
           {saveStatus.ok ? 'Saved' : `Save failed: ${saveStatus.errors?.join(', ') ?? 'parse error'}`}
         </div>
       )}
-    </div>
     </div>
   );
 };

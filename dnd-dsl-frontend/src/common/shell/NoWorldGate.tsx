@@ -2,7 +2,7 @@ import { useContext, type ReactNode } from 'react';
 import { DslContext } from '../../contexts/DslContext';
 import { Hint, panel } from './file-ui';
 import FolderBrowser from './FolderBrowser';
-import { WorldForm, WorldList } from './world-picker';
+import { AdventureList, WorldForm } from './world-picker';
 
 const noop = () => undefined;
 const allow = () => true;
@@ -41,9 +41,9 @@ export default function NoWorldGate({ children }: { children: ReactNode }) {
 
   if (!adventure || !world) {
     return (
-      <Centered title="Open a world">
-        <Hint>No world is open in {sourceFolder}.</Hint>
-        <WorldList onDone={noop} confirmDiscard={allow} />
+      <Centered title="Open an adventure">
+        <Hint>No adventure is open in {sourceFolder}.</Hint>
+        <AdventureList onDone={noop} confirmDiscard={allow} />
         <div style={{ borderTop: '1px solid var(--bd-soft)', margin: '12px 0' }} />
         <div style={{ fontWeight: 600, color: 'var(--fg-bright)', marginBottom: 8 }}>Or start a new one</div>
         <WorldForm mode="new" onDone={noop} confirmDiscard={allow} />
