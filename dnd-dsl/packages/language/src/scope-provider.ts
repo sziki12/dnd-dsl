@@ -1,5 +1,6 @@
-import { AstUtils, DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream } from "langium";
-import type { AstNode, AstNodeDescription, ReferenceInfo, Scope } from "langium";
+import { AstUtils, DefaultScopeProvider, EMPTY_SCOPE, MapScope, stream, StreamScope } from "langium";
+import type { AstNode, AstNodeDescription, LangiumCoreServices, LangiumDocuments, ReferenceInfo, Scope, Stream } from "langium";
+import { visibleFrom, worldNameOf } from "./world-scope.js";
 import { loadedWorlds, worldParts } from "./world-parts.js";
 import {
     type State,
@@ -16,6 +17,7 @@ import {
     isLocationRefItem,
     isFactionRefItem,
     isCurrentPartyRefItem,
+    isForeignRefItem,
     isParty,
     isPartyRefItem,
     isNpcRefItem,
@@ -120,6 +122,28 @@ function isIteratedCollection(source: RefChain): boolean {
 
 export class DndScopeProvider extends DefaultScopeProvider
 {
+    private readonly documents: LangiumDocuments;
+
+    constructor(services: LangiumCoreServices)
+    {
+        super(services);
+        this.documents = services.shared.workspace.LangiumDocuments;
+    }
+
+    /** What the index holds of one kind that the world of `node` can see (see world-scope.ts). */
+    private worldElements(referenceType: string, node: AstNode): Stream<AstNodeDescription>
+    {
+        const world = worldNameOf(node);
+        return this.indexManager.allElements(referenceType).filter(description => visibleFrom(world, description, this.documents));
+    }
+
+    // A stream scope, as Langium's: it keeps every element of a name (a shared name is told apart by the linker). Not
+    // cached: what a world can see is a short filter of the index.
+    protected override getGlobalScope(referenceType: string, context: ReferenceInfo): Scope
+    {
+        return new StreamScope(this.worldElements(referenceType, context.container));
+    }
+
     override getScope(context: ReferenceInfo): Scope
     {
         // variableRef is the node type that can be a reference to a variable
@@ -254,6 +278,12 @@ export class DndScopeProvider extends DefaultScopeProvider
         {
             return this.currentPartyScope(chain);
         }
+        else if (isForeignRefItem(prev))
+        {
+            // The members belong to another world that is not loaded here: any name links, and the server checks
+            // them against that world when this one loads (see checkForeignReferences).
+            return this.dynamicMemberScope(chain);
+        }
         else if (isWorldRefItem(prev))
         {
             members = this.worldVariables(prev, context);
@@ -261,6 +291,13 @@ export class DndScopeProvider extends DefaultScopeProvider
         else if (isVariableRefItem(prev))
         {
             const decl = prev.val.val.ref;
+
+            // `world "Other" . npc "Ann" . Stats . Level`: the first member stood in for a variable of another world,
+            // so the one after it is as unknown here.
+            if (decl && (decl.$type as string) === "DynamicMember" && isForeignRefItem(chainHead(chain)))
+            {
+                return this.dynamicMemberScope(chain);
+            }
 
             // `for x in world . npcs do x . <member>` - x has no static shape, it's
             // bound to a different concrete npc each iteration, so there is nothing to
@@ -329,7 +366,7 @@ export class DndScopeProvider extends DefaultScopeProvider
     private currentPartyScope(chain: AstNode): Scope
     {
         const byName = new Map<string, AstNodeDescription>();
-        for (const description of this.indexManager.allElements("Party"))
+        for (const description of this.worldElements("Party", chain))
         {
             const party = description.node;
             if (!isParty(party)) continue;

@@ -9,6 +9,7 @@ import { PREDEFINED_SIGNATURES } from "./evaluation/dnd-dsl-predefined-signature
 import { COLLECTION_FIELDS, SIMPLE_FIELDS, ObjectKind, collectionHeadKind } from "./dnd-dsl-validator.js";
 import { chainHead } from "./evaluation/dnd-dsl-state-path.js";
 import { HOST_KIND } from "./evaluation/dnd-dsl-relations.js";
+import { visibleFrom, worldNameOf } from "./world-scope.js";
 
 /** The name slot of `call predefined <name>` */
 const CALL_KEYWORD = "call";
@@ -275,7 +276,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const typeName = ENTITY_TYPE[keyword];
         if (!typeName) return [];
 
-        return this.nameItems(document, params, partial, quote === '"', typeName, this.nameEntries(typeName));
+        return this.nameItems(document, params, partial, quote === '"', typeName, this.nameEntries(typeName, document));
     }
 
     /**
@@ -283,8 +284,8 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
      * share a name; the quest or parent in the detail keeps those entries apart. Counted by owner, not by index
      * entry: the same world open twice is not a shared name.
      */
-    private nameEntries(typeName: string): Array<string | { name: string; detail: string }> {
-        const found = Array.from(this.indexManager.allElements(typeName), description => ({ description, owner: this.ownerOf(typeName, this.nodeOf(description)) }));
+    private nameEntries(typeName: string, document: LangiumDocument): Array<string | { name: string; detail: string }> {
+        const found = Array.from(this.worldElements(typeName, document), description => ({ description, owner: this.ownerOf(typeName, this.nodeOf(description)) }));
         const owners = new Map<string, Set<string>>();
         for (const { description, owner } of found) {
             const keys = owners.get(description.name) ?? new Set<string>();
@@ -324,7 +325,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             const [, keyword, headName, earlier, collection, quote, partial] = slot;
             if (collection && (collection === "sublocations") !== (keyword === "location")) return [];
 
-            let current = this.findByName(keyword === "location" ? ObjectKind.Location : ObjectKind.Quest, headName);
+            let current = this.findByName(keyword === "location" ? ObjectKind.Location : ObjectKind.Quest, headName, document);
             for (const [, name] of earlier.matchAll(/"([^"\n]*)"/g)) {
                 current = isLocation(current) ? current.sublocations.find(l => l.name === name) : undefined;
             }
@@ -344,9 +345,9 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             const [, earlier, quote, partial] = exit;
             const path = Array.from(earlier.matchAll(/"([^"\n]*)"/g), match => match[1]);
             if (path.length === 0) {
-                return this.nameItems(document, params, partial, quote === '"', ObjectKind.Location, this.nameEntries(ObjectKind.Location));
+                return this.nameItems(document, params, partial, quote === '"', ObjectKind.Location, this.nameEntries(ObjectKind.Location, document));
             }
-            let current = this.nearestLocation(path[0], this.locationAtCursor(document, params));
+            let current = this.nearestLocation(path[0], this.locationAtCursor(document, params), document);
             for (const name of path.slice(1)) current = current?.sublocations.find(l => l.name === name);
             return this.nameItems(document, params, partial, quote === '"', ObjectKind.Location, current ? current.sublocations.map(l => l.name) : []);
         }
@@ -364,7 +365,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
      * The first name of an exit target as the linker would find it: among the sublocations of the location the exit is in,
      * then among its siblings, then the siblings of its parent and so on up; else any location of that name.
      */
-    private nearestLocation(name: string, owner: Location | undefined): Location | undefined {
+    private nearestLocation(name: string, owner: Location | undefined, document: LangiumDocument): Location | undefined {
         const levels: Location[][] = owner ? [owner.sublocations] : [];
         for (let place: AstNode | undefined = owner; place; place = place.$container) {
             if (!isLocation(place)) continue;
@@ -375,7 +376,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             const hit = level.find(location => location.name === name);
             if (hit) return hit;
         }
-        return this.findByName(ObjectKind.Location, name) as Location | undefined;
+        return this.findByName(ObjectKind.Location, name, document) as Location | undefined;
     }
 
     /**
@@ -455,9 +456,15 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         return Array.from(this.indexManager.allElements("RelationType")).some(d => d.name === text);
     }
 
-    private findByName(type: ObjectKind, name: string): AstNode | undefined {
+    /** What the index holds of one kind that the world `document` is written for can see (see world-scope.ts). */
+    private worldElements(type: string, document: LangiumDocument): AstNodeDescription[] {
+        const world = worldNameOf(document.parseResult.value);
+        return Array.from(this.indexManager.allElements(type)).filter(description => visibleFrom(world, description, this.documents));
+    }
+
+    private findByName(type: ObjectKind, name: string, document: LangiumDocument): AstNode | undefined {
         let first: AstNode | undefined;
-        for (const description of this.indexManager.allElements(type)) {
+        for (const description of this.worldElements(type, document)) {
             if (description.name !== name) continue;
             const node = this.nodeOf(description);
             // A top-level location is where a path starts; a sublocation of the same name is reached through its parent.
