@@ -82,8 +82,13 @@ Location:
     ('sublocations' sublocations+=Location* 'end')?;
 // `to "Dungeon 2" -> "Entrance"`: the names in front say which location the target is a child of, for a name that more
 // than one location has. `exit` stays the one cross-reference to the target, so everything that reads an exit is unchanged.
+// `to world "Underdark" -> "Dungeon 1" -> "Entrance"` leads into another world of the adventure: the names are not
+// cross-references (that world is not loaded here), the server checks them against it when this world loads.
 LocationExit:
-    'exit' name=STRING 'to' (via+=[Location:STRING] '->')* exit=[Location:STRING] identifiers+=Identifier*;
+    'exit' name=STRING 'to' (
+          ((via+=[Location:STRING] '->')* exit=[Location:STRING])
+        | ('world' foreignWorld=STRING ('->' foreignPath+=STRING)+)
+    ) identifiers+=Identifier*;
 LocationEntry:
     'entry' entry=[Location:STRING];
 //LocationChain:
@@ -339,6 +344,7 @@ RefChainHead infers RefChainStart:
     | NpcRefItem
     | FactionRefItem
     | RelationRefItem
+    | ForeignRefItem
     | WorldRefItem
     | StateRefItem
     | ThisRefItem
@@ -383,6 +389,13 @@ RelationAnyEnd:
     kind=RelationEndKind;
 RelationEndKind returns string:
     'npc' | 'faction';
+// `world "Underdark" . npc "Ann" . Gold`: a variable of an entity in another world of the adventure, to be read, never
+// written. The bare `world` is this world, told apart by the string after it (so a bare `world` must not be followed by
+// a string). The names are checked against that world when this one loads, not by the linker.
+ForeignRefItem:
+    isForeign='world' world=STRING '.' kind=ForeignKind name=STRING;
+ForeignKind returns string:
+    'location' | 'npc' | 'quest' | 'faction' | 'party';
 // Only one World per document, so a bare keyword is enough - no cross-reference to
 // resolve. Exists so `world . npcs` etc. can be written as a CollectionRef head.
 WorldRefItem:

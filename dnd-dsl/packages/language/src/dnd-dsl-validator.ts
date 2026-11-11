@@ -6,6 +6,7 @@ import {
     isChangeOccurrence,
     isChainTail,
     isCurrentPartyRefItem,
+    type ForeignRefItem,
     isCodeBlock,
 
     isStateRefItem,
@@ -229,6 +230,7 @@ export function registerValidationChecks(services: DndDslServices) {
         VariableDeclaration: [validator.checkStateValue, validator.checkStatusDeclaration, validator.checkReservedPartyVariable],
         SetStatement: [validator.checkStatusAssignment, validator.checkCurrentPartyAssignment],
         CurrentPartyRefItem: validator.checkCurrentParty,
+        ForeignRefItem: validator.checkForeignRef,
         IntToBoolExpression: validator.checkStateComparison,
         RemindStatement: validator.checkRemindPlacement,
         RefChain: [validator.checkRefChainField, validator.checkRefChainIndexes],
@@ -708,6 +710,23 @@ export class DndDslValidator {
             && chain.rest.length === 1
             && chain.rest[0].val.val.$refText === CURRENT_PARTY_MEMBER
             && !chain.field && chain.indexes.length === 0 && !chain.next;
+    }
+
+    /**
+     * `world "Other" . npc "Ann" . Gold` reads a variable of another world. It is never written or watched, and it is only
+     * read where the interpreter does the reading: the value of a variable is read from the served state by the pages, which
+     * hold this world only.
+     */
+    checkForeignRef(item: ForeignRefItem, accept: ValidationAcceptor): void {
+        const chain = item.$container as RefChain;
+        const user = chain.$container;
+        if (AstUtils.getContainerOfType(item, isWorld)?.name === item.world) {
+            accept('error', `That is this world: write 'world' instead of 'world "${item.world}"'.`, { node: item, property: 'world' });
+        } else if ((user?.$type === 'SetStatement' && (user as SetStatement).target === chain) || (isChangeOccurrence(user) && user.target === chain)) {
+            accept('error', `Another world can only be read for now, not changed or watched.`, { node: item });
+        } else if (this.isInsideEntityVariable(item)) {
+            accept('error', `Another world can only be read in code that runs (a function, event, handler, script or quest condition), not in the value of a variable.`, { node: item });
+        }
     }
 
     /** A world with no party has nothing for a bare `party` to mean. A script is checked when it runs: it declares no parties. */
