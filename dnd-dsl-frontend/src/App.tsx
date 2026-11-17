@@ -1,14 +1,16 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import LocationView from './pages/LocationView';
-import WorldMapView from './pages/WorldMapView';
 import NpcsView from './pages/NpcsView';
 import FactionsView from './pages/FactionsView';
 import EventsView from './pages/EventsView';
 import QuestsView from './pages/QuestsView';
-import ScriptView from './pages/ScriptView';
-import { DslEditor } from './pages/DslEditor';
 import { ContextWrapper } from './contexts/ContextWrapper';
-import type { JSX, ReactNode } from 'react';
+import { lazy, Suspense, type JSX, type ReactNode } from 'react';
+
+// The map pages bring the graph library, the editor pages bring Monaco: neither is downloaded until visited.
+const LocationView = lazy(() => import('./pages/LocationView'));
+const WorldMapView = lazy(() => import('./pages/WorldMapView'));
+const ScriptView = lazy(() => import('./pages/ScriptView'));
+const DslEditor = lazy(() => import('./pages/DslEditor').then(m => ({ default: m.DslEditor })));
 import PageWrapper from './common/PageWrapper';
 import ReminderToast from './common/ReminderToast';
 import CommandErrorToast from './common/CommandErrorToast';
@@ -30,7 +32,7 @@ function Contact() {
 
 function createRoute({path, element, }:{path:string, element:JSX.Element})
 {
-  return  <Route path={path} element={<PageWrapper>{element}</PageWrapper>}  />
+  return  <Route path={path} element={<PageWrapper><Suspense fallback={null}>{element}</Suspense></PageWrapper>}  />
 }
 
 function App() {

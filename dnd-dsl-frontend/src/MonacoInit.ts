@@ -19,8 +19,8 @@ export function toMonacoUri(path: string): string {
         .replace(/ /g, '%20');          // encode spaces only
 }
 
-export const VIEW_LANGUAGE_ID = 'dnd-dsl-view';
-export const VIEW_FILE_EXTENSION = '.dndstate';
+import { VIEW_FILE_EXTENSION, VIEW_LANGUAGE_ID } from './view-language';
+export { VIEW_FILE_EXTENSION, VIEW_LANGUAGE_ID };
 
 const BACKEND_PATH ='C:/Users/Szikszai Levente/Documents/GitHub/dnd-dsl/dnd-dsl-backend';
 const WORKSPACE_URI = Uri.file(BACKEND_PATH);

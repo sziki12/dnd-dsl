@@ -1,8 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { EditorApp, type EditorAppConfig } from 'monaco-languageclient/editorApp';
-import { createModelReference } from '@codingame/monaco-vscode-api/monaco';
-import * as vscode from 'vscode';
-import { getMonacoInit, VIEW_FILE_EXTENSION } from '../MonacoInit';
+import type { EditorApp, EditorAppConfig } from 'monaco-languageclient/editorApp';
+import type { createModelReference } from '@codingame/monaco-vscode-api/monaco';
+import { VIEW_FILE_EXTENSION } from '../view-language';
 import { FileContext } from './FileContext';
 import { DslContext } from './DslContext';
 import { enclosingQuestAt, type EntityRef } from '../common/entity-at-cursor';
@@ -127,11 +126,10 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         setFiles(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
     };
 
-    const fileUri = (world: string, name: string) =>
-        vscode.Uri.from({ scheme: 'file', path: `/${latest.current.dlsContext.adventure}/${world}/${name}` });
-
     const openFile = async (world: string, name: string, text: string) => {
-        const ref = await createModelReference(fileUri(world, name), text);
+        const { createModelReference, Uri } = await import('../monaco-runtime');
+        const uri = Uri.from({ scheme: 'file', path: `/${latest.current.dlsContext.adventure}/${world}/${name}` });
+        const ref = await createModelReference(uri, text);
         const model = ref.object.textEditorModel;
         openFilesRef.current.set(fileKey(world, name), {
             ref,
@@ -259,6 +257,7 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
     };
 
     const startEditor = async (element: HTMLDivElement, entityActions?: EntityActions) => {
+        const { getMonacoInit, EditorApp } = await import('../monaco-runtime');
         await getMonacoInit()
         .then(() => console.log('MonacoContext: init complete'))
         .catch((e: any) => console.error('MonacoContext: init failed', e));
@@ -320,7 +319,8 @@ export function MonacoContextNode({ children }: { children: React.ReactNode }) {
         const request = ++viewRequestRef.current;
         let viewRef = viewModelRef.current;
         if (!viewRef) {
-            const created = await createModelReference(vscode.Uri.parse(MERGED_URI), text);
+            const { createModelReference, Uri } = await import('../monaco-runtime');
+            const created = await createModelReference(Uri.parse(MERGED_URI), text);
             if (request !== viewRequestRef.current || editorAppRef.current?.getEditor() !== editor) {
                 created.dispose();
                 return;
