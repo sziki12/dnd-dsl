@@ -1,9 +1,9 @@
-import { AstUtils, CstUtils } from "langium";
-import type { AstNode, AstNodeDescription, AstNodeLocator, GrammarAST, IndexManager, LangiumDocument, LangiumDocuments, Reference, ReferenceInfo } from "langium";
-import { DefaultCompletionProvider, type CompletionContext } from "langium/lsp";
+import { AstUtils, CstUtils, GrammarAST } from "langium";
+import type { AstNode, AstNodeDescription, AstNodeLocator, IndexManager, LangiumDocument, LangiumDocuments, MaybePromise, Reference, ReferenceInfo } from "langium";
+import { DefaultCompletionProvider, type CompletionAcceptor, type CompletionContext, type CompletionValueItem, type NextFeature } from "langium/lsp";
 import type { LangiumServices } from "langium/lsp";
 import { CompletionItemKind, CompletionList } from "vscode-languageserver";
-import type { CancellationToken, CompletionItem, CompletionParams } from "vscode-languageserver";
+import type { CancellationToken, CompletionItem, CompletionParams, TextEdit } from "vscode-languageserver";
 import { isChangeOccurrence, isFaction, isLocation, isNpc, isQuest, isRefChain, isSetStatement, isVariableRef, isWorld, type Location, type RefChain, type RelationType } from "./generated/ast.js";
 import { PREDEFINED_SIGNATURES } from "./evaluation/dnd-dsl-predefined-signatures.js";
 import { COLLECTION_FIELDS, SIMPLE_FIELDS, ObjectKind, collectionHeadKind } from "./dnd-dsl-validator.js";
@@ -34,8 +34,11 @@ const TRIGGERED_KEYWORD = "triggered";
 const ENTITY_SLOT = new RegExp(
     `(?:^|[^\\w"])(${Object.keys(ENTITY_TYPE).join("|")})[ \\t]+(?:${TRIGGERED_KEYWORD}[ \\t]+)?(?:"([^"\\n]*)|(\\w*))$`,
 );
-/** `complete objective ` / `fail objective fr`: no name is written here, only `from` can come next, which Langium offers. */
-const OBJECTIVE_STATEMENT_SLOT = /\b(?:complete|fail)[ \t]+objective[ \t]+\w*$/;
+/** A line inside a relation query (`relation npc "Ann" "Member of" faction `, `for i in relation ...`): Langium offers the target no names there. */
+const RELATION_QUERY_LINE = /\brelation\b/;
+/** A cross-reference written as a string (`[Quest:STRING]`), so its names carry quotes. */
+const isStringReference = (reference: GrammarAST.CrossReference): boolean =>
+    GrammarAST.isRuleCall(reference.terminal) && reference.terminal.rule.ref?.name === "STRING";
 /** The keywords without a letter that are worth offering; Langium drops every other one (see filterKeyword). */
 const SYMBOL_KEYWORDS = new Set(["->"]);
 
@@ -105,9 +108,12 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return CompletionList.create(this.deduplicateItems(relationTypes), true);
         }
 
-        const names = this.entityNameCompletions(document, params).concat(this.doKeyword(document, params));
-        if (names.length > 0) {
-            return CompletionList.create(this.deduplicateItems(names), true);
+        // A relation query is read by Langium as a named subject, so it never offers the target's names (see RELATION_QUERY_LINE).
+        if (RELATION_QUERY_LINE.test(this.lineBefore(document, params))) {
+            const names = this.entityNameCompletions(document, params).concat(this.doKeyword(document, params));
+            if (names.length > 0) {
+                return CompletionList.create(this.deduplicateItems(names), true);
+            }
         }
 
         const predefined = this.predefinedCompletions(document, params);
@@ -115,7 +121,69 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return CompletionList.create(predefined, true);
         }
 
-        return this.quoteRelationTypes(document, params, await super.getCompletion(document, params, cancelToken));
+        const base = this.quoteRelationTypes(document, params, await super.getCompletion(document, params, cancelToken));
+        if (base && base.items.length > 0) return base;
+
+        // After `quest ` in an expression Langium cannot tell a quest expression from a reference chain and finds no name to offer.
+        const names = this.entityNameCompletions(document, params);
+        return names.length > 0 ? CompletionList.create(this.deduplicateItems(names), true) : base;
+    }
+
+    /**
+     * A reference written as a string is offered by Langium without its quotes, and inside a string with no closing quote the
+     * lexer skips the quote and reads the words as names, so the parser sees `location Forest Of` and finds nothing to
+     * complete. Ask where the string starts instead, and keep only the references written as a string: nothing else can be
+     * completed inside one.
+     */
+    protected override findFeaturesAt(document: LangiumDocument["textDocument"], offset: number): NextFeature[] {
+        const before = document.getText({ start: document.positionAt(0), end: document.positionAt(offset) });
+        const line = before.slice(before.lastIndexOf("\n") + 1);
+        // An odd number of quotes on the line: the last one opens a string that is still being typed.
+        if ((line.match(/"/g) ?? []).length % 2 === 0) return super.findFeaturesAt(document, offset);
+        return super.findFeaturesAt(document, before.length - line.length + line.lastIndexOf('"'))
+            .filter(next => GrammarAST.isCrossReference(next.feature) && isStringReference(next.feature));
+    }
+
+    /** The names of a reference written as a string are offered with their quotes. */
+    protected override completionForCrossReference(context: CompletionContext, next: NextFeature<GrammarAST.CrossReference>, acceptor: CompletionAcceptor): MaybePromise<void> {
+        return super.completionForCrossReference(context, next, isStringReference(next.feature)
+            ? (ctx, item) => { const edited = this.quotedItem(ctx, item); if (edited) acceptor(ctx, edited); }
+            : acceptor);
+    }
+
+    private quotedItem(context: CompletionContext, item: CompletionValueItem): CompletionValueItem | undefined {
+        if (!("nodeDescription" in item)) return item;
+        const name = item.nodeDescription.name;
+        const before = context.textDocument.getText().slice(0, context.offset);
+        const open = /"([^"\n]*)$/.exec(before);
+        const partial = open ? open[1] : /\w*$/.exec(before)![0];
+        if (partial && !this.fuzzyMatcher.match(partial, name)) return undefined;
+        const detail = this.sharedDetail(item.nodeDescription, context.document) ?? item.detail;
+        return { ...item, detail, textEdit: this.quotedEdit(context.textDocument, context.offset, partial, open !== null, name) };
+    }
+
+    /**
+     * The edit that writes a quoted name over what is typed. It starts at the partial, not at the opening quote: Monaco
+     * filters by the text from the range start to the cursor, and a `"` there matches no name and drops every candidate.
+     * With the opening quote typed only the name and the closing quote are added, and a closing quote already after the
+     * cursor is consumed.
+     */
+    private quotedEdit(td: LangiumDocument["textDocument"], offset: number, partial: string, hasOpenQuote: boolean, name: string): TextEdit {
+        const start = td.positionAt(offset - partial.length);
+        const end = td.positionAt(hasOpenQuote && td.getText().charAt(offset) === '"' ? offset + 1 : offset);
+        return { range: { start, end }, newText: hasOpenQuote ? `${name}"` : `"${name}"` };
+    }
+
+    /** The text of the cursor's line up to the cursor. */
+    private lineBefore(document: LangiumDocument, params: CompletionParams): string {
+        return document.textDocument.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+    }
+
+    /** What tells this entity from another of the same name (its quest or parent locations); undefined while the name is its alone. */
+    private sharedDetail(description: AstNodeDescription, document: LangiumDocument): string | undefined {
+        const same = this.worldElements(description.type, document).filter(d => d.name === description.name);
+        const owners = new Set(same.map(d => this.ownerOf(description.type, this.nodeOf(d)).key));
+        return owners.size > 1 ? this.ownerOf(description.type, this.nodeOf(description)).detail : undefined;
     }
 
     /**
@@ -154,9 +222,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
     }
 
     private predefinedCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
-        const td = document.textDocument;
-        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
-        const match = PREDEFINED_SLOT.exec(line);
+        const match = PREDEFINED_SLOT.exec(this.lineBefore(document, params));
         if (!match) return [];
 
         const partial = match[1];
@@ -277,10 +343,8 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
     }
 
     private entityNameCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
-        const td = document.textDocument;
-        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
-        const match = ENTITY_SLOT.exec(line);
-        if (!match || OBJECTIVE_STATEMENT_SLOT.test(line)) return [];
+        const match = ENTITY_SLOT.exec(this.lineBefore(document, params));
+        if (!match) return [];
 
         const [, keyword, quoted, bare] = match;
         const typeName = ENTITY_TYPE[keyword];
@@ -327,8 +391,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
      * found by name, not from the half-typed AST, which does not hold a step that has no closing quote yet.
      */
     private childNameCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] | undefined {
-        const td = document.textDocument;
-        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+        const line = this.lineBefore(document, params);
 
         const slot = STEP_SLOT.exec(line);
         if (slot) {
@@ -395,8 +458,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
      * completion would offer the bare name, since it does not know the string needs its quotes.
      */
     private relationTypeCompletions(document: LangiumDocument, params: CompletionParams): CompletionItem[] | undefined {
-        const td = document.textDocument;
-        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+        const line = this.lineBefore(document, params);
 
         let hostKind: string | undefined;
         let partial: string;
@@ -438,8 +500,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
     /** `do` after a complete `for ... in relation ...` header. Langium's completion is skipped when names are offered, so it is added here. */
     private doKeyword(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
         const td = document.textDocument;
-        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
-        const match = FOR_QUERY_END.exec(line);
+        const match = FOR_QUERY_END.exec(this.lineBefore(document, params));
         if (!match || (match[1] && !this.fuzzyMatcher.match(match[1], "do"))) return [];
         const range = { start: td.positionAt(td.offsetAt(params.position) - match[1].length), end: params.position };
         return [{ label: "do", kind: CompletionItemKind.Keyword, sortText: "1", textEdit: { range, newText: "do" } }];
@@ -493,13 +554,6 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
     private nameItems(document: LangiumDocument, params: CompletionParams, partial: string, hasOpenQuote: boolean, detail: string, names: Array<string | { name: string; detail: string }>): CompletionItem[] {
         const td = document.textDocument;
         const offset = td.offsetAt(params.position);
-        const text = td.getText();
-        // The replaced range must start at the partial, not at the opening quote -
-        // Monaco derives the filter prefix from range-start..cursor, and a leading `"`
-        // there matches no entity name and silently drops every candidate.
-        const start = td.positionAt(offset - partial.length);
-        const end = td.positionAt(hasOpenQuote && text[offset] === '"' ? offset + 1 : offset);
-        const newTextPrefix = hasOpenQuote ? "" : '"';
 
         const items: CompletionItem[] = [];
         for (const entry of names) {
@@ -510,10 +564,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
                 kind: CompletionItemKind.Value,
                 detail: typeof entry === "string" ? detail : entry.detail,
                 sortText: "0",
-                textEdit: {
-                    range: { start, end },
-                    newText: `${newTextPrefix}${name}"`,
-                },
+                textEdit: this.quotedEdit(td, offset, partial, hasOpenQuote, name),
             });
         }
         return items;
