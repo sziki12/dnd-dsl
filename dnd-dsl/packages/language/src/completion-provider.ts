@@ -1,5 +1,5 @@
 import { AstUtils, CstUtils } from "langium";
-import type { AstNode, AstNodeDescription, AstNodeLocator, IndexManager, LangiumDocument, LangiumDocuments, Reference, ReferenceInfo } from "langium";
+import type { AstNode, AstNodeDescription, AstNodeLocator, GrammarAST, IndexManager, LangiumDocument, LangiumDocuments, Reference, ReferenceInfo } from "langium";
 import { DefaultCompletionProvider, type CompletionContext } from "langium/lsp";
 import type { LangiumServices } from "langium/lsp";
 import { CompletionItemKind, CompletionList } from "vscode-languageserver";
@@ -34,12 +34,10 @@ const TRIGGERED_KEYWORD = "triggered";
 const ENTITY_SLOT = new RegExp(
     `(?:^|[^\\w"])(${Object.keys(ENTITY_TYPE).join("|")})[ \\t]+(?:${TRIGGERED_KEYWORD}[ \\t]+)?(?:"([^"\\n]*)|(\\w*))$`,
 );
-/** `complete objective ` / `fail objective fr`: the objective is named after `from quest "Q" ->`, so only `from` can come next. */
-const OBJECTIVE_STATEMENT_SLOT = /\b(?:complete|fail)[ \t]+objective[ \t]+(\w*)$/;
-/** `complete objective from quest "Q" `: the quest is named, so the arrow to its objective comes next. */
-const OBJECTIVE_ARROW_SLOT = /\b(?:complete|fail)[ \t]+objective[ \t]+from[ \t]+quest[ \t]+"[^"\n]*"[ \t]*(-?)$/;
-/** Keywords of the `complete`/`fail objective` statement, which name completion or Langium's own completion would otherwise miss. */
-const OBJECTIVE_STATEMENT_KEYWORDS: Array<[RegExp, string]> = [[OBJECTIVE_STATEMENT_SLOT, "from"], [OBJECTIVE_ARROW_SLOT, "->"]];
+/** `complete objective ` / `fail objective fr`: no name is written here, only `from` can come next, which Langium offers. */
+const OBJECTIVE_STATEMENT_SLOT = /\b(?:complete|fail)[ \t]+objective[ \t]+\w*$/;
+/** The keywords without a letter that are worth offering; Langium drops every other one (see filterKeyword). */
+const SYMBOL_KEYWORDS = new Set(["->"]);
 
 /**
  * `location "A" -> "B" -> "` / `quest "Q" . objectives "`: the head, the names of the steps already taken, whether the
@@ -81,6 +79,11 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         this.locator = services.workspace.AstNodeLocator;
     }
 
+    /** Langium drops every keyword without a letter; the arrow between a name and its child is worth offering. */
+    protected override filterKeyword(context: CompletionContext, keyword: GrammarAST.Keyword): boolean {
+        return SYMBOL_KEYWORDS.has(keyword.value) || super.filterKeyword(context, keyword);
+    }
+
     override async getCompletion(
         document: LangiumDocument,
         params: CompletionParams,
@@ -102,7 +105,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return CompletionList.create(this.deduplicateItems(relationTypes), true);
         }
 
-        const names = this.entityNameCompletions(document, params).concat(this.doKeyword(document, params), this.objectiveStatementKeywords(document, params));
+        const names = this.entityNameCompletions(document, params).concat(this.doKeyword(document, params));
         if (names.length > 0) {
             return CompletionList.create(this.deduplicateItems(names), true);
         }
@@ -284,19 +287,6 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         if (!typeName) return [];
 
         return this.nameItems(document, params, quoted ?? bare, quoted !== undefined, typeName, this.nameEntries(typeName, document));
-    }
-
-    /** `from` after `complete objective` and `->` after its quest. Offered here because name completion or Langium's own would otherwise miss them (see doKeyword). */
-    private objectiveStatementKeywords(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
-        const td = document.textDocument;
-        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
-        for (const [slot, keyword] of OBJECTIVE_STATEMENT_KEYWORDS) {
-            const match = slot.exec(line);
-            if (!match || (match[1] && !keyword.startsWith(match[1]) && !this.fuzzyMatcher.match(match[1], keyword))) continue;
-            const range = { start: td.positionAt(td.offsetAt(params.position) - match[1].length), end: params.position };
-            return [{ label: keyword, kind: CompletionItemKind.Keyword, sortText: "0", textEdit: { range, newText: keyword } }];
-        }
-        return [];
     }
 
     /**
