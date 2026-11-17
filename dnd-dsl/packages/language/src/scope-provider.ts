@@ -75,7 +75,7 @@ const slotOf = (owner: Location | Quest | undefined, noun: string): ChildSlot =>
 
 /**
  * The children a name may pick, when `ref` is a step down to a child, an `entry`, or the objective of a status form
- * that names its quest (`complete quest "Q" -> "O"`, `objective completed quest "Q" -> "O"`). After `location "A" ->` /
+ * that names its quest (`complete objective from quest "Q" -> "O"`, `objective completed quest "Q" -> "O"`). After `location "A" ->` /
  * `. sublocations` they are A's own sublocations, after `quest "Q" ->` / `. objectives` Q's own objectives, and for
  * `entry` the sublocations of the location it sits in. In an exit target (`to "A" -> "B" -> "C"`) every name after the
  * first is a child of the one before it; `property` and `index` say which of the exit's references is asked about.

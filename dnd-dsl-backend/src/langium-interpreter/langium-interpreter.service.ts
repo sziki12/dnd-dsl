@@ -1013,7 +1013,7 @@ export class LangiumInterpreterService {
 
     /**
      *  `set quest "X" . Status = ...`. Unlike the statements it does not check the transition
-     *  rules, so it can jump anywhere and move backwards, but arriving at Succeeded/Completed
+     *  rules, so it can jump anywhere and move backwards, but arriving at Completed/Completed
      *  or Failed runs the matching block just like `complete` / `fail` would. Setting the
      *  status it already has runs nothing, so a block that sets its own quest does not loop.
      **/

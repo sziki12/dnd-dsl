@@ -88,7 +88,7 @@ export function statusTransition(kind: StatusKind, action: StatusAction, current
 }
 
 /**
- * The block a quest or objective runs on arriving at `status`: `on completed` for Succeeded
+ * The block a quest or objective runs on arriving at `status`: `on completed` for Completed
  * (quest) or Completed (objective), `on failed` for Failed, none for the rest. The same
  * outcome whether it got there by a statement, the automatic pass, or `set`.
  */

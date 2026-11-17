@@ -30,9 +30,16 @@ const ENTITY_TYPE: Record<string, ObjectKind> = {
  * cross-reference target type. `event triggered "X"` and `event "X"` both land on Event.
  */
 const TRIGGERED_KEYWORD = "triggered";
+// An unquoted partial is one word, so `objective from quest ` is not read as the partial of `objective`.
 const ENTITY_SLOT = new RegExp(
-    `(?:^|[^\\w"])(${Object.keys(ENTITY_TYPE).join("|")})[ \\t]+(?:${TRIGGERED_KEYWORD}[ \\t]+)?("?)([^"\\n]*)$`,
+    `(?:^|[^\\w"])(${Object.keys(ENTITY_TYPE).join("|")})[ \\t]+(?:${TRIGGERED_KEYWORD}[ \\t]+)?(?:"([^"\\n]*)|(\\w*))$`,
 );
+/** `complete objective ` / `fail objective fr`: the objective is named after `from quest "Q" ->`, so only `from` can come next. */
+const OBJECTIVE_STATEMENT_SLOT = /\b(?:complete|fail)[ \t]+objective[ \t]+(\w*)$/;
+/** `complete objective from quest "Q" `: the quest is named, so the arrow to its objective comes next. */
+const OBJECTIVE_ARROW_SLOT = /\b(?:complete|fail)[ \t]+objective[ \t]+from[ \t]+quest[ \t]+"[^"\n]*"[ \t]*(-?)$/;
+/** Keywords of the `complete`/`fail objective` statement, which name completion or Langium's own completion would otherwise miss. */
+const OBJECTIVE_STATEMENT_KEYWORDS: Array<[RegExp, string]> = [[OBJECTIVE_STATEMENT_SLOT, "from"], [OBJECTIVE_ARROW_SLOT, "->"]];
 
 /**
  * `location "A" -> "B" -> "` / `quest "Q" . objectives "`: the head, the names of the steps already taken, whether the
@@ -95,7 +102,7 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
             return CompletionList.create(this.deduplicateItems(relationTypes), true);
         }
 
-        const names = this.entityNameCompletions(document, params).concat(this.doKeyword(document, params));
+        const names = this.entityNameCompletions(document, params).concat(this.doKeyword(document, params), this.objectiveStatementKeywords(document, params));
         if (names.length > 0) {
             return CompletionList.create(this.deduplicateItems(names), true);
         }
@@ -270,13 +277,26 @@ export class DndCompletionProvider extends DefaultCompletionProvider {
         const td = document.textDocument;
         const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
         const match = ENTITY_SLOT.exec(line);
-        if (!match) return [];
+        if (!match || OBJECTIVE_STATEMENT_SLOT.test(line)) return [];
 
-        const [, keyword, quote, partial] = match;
+        const [, keyword, quoted, bare] = match;
         const typeName = ENTITY_TYPE[keyword];
         if (!typeName) return [];
 
-        return this.nameItems(document, params, partial, quote === '"', typeName, this.nameEntries(typeName, document));
+        return this.nameItems(document, params, quoted ?? bare, quoted !== undefined, typeName, this.nameEntries(typeName, document));
+    }
+
+    /** `from` after `complete objective` and `->` after its quest. Offered here because name completion or Langium's own would otherwise miss them (see doKeyword). */
+    private objectiveStatementKeywords(document: LangiumDocument, params: CompletionParams): CompletionItem[] {
+        const td = document.textDocument;
+        const line = td.getText({ start: { line: params.position.line, character: 0 }, end: params.position });
+        for (const [slot, keyword] of OBJECTIVE_STATEMENT_KEYWORDS) {
+            const match = slot.exec(line);
+            if (!match || (match[1] && !keyword.startsWith(match[1]) && !this.fuzzyMatcher.match(match[1], keyword))) continue;
+            const range = { start: td.positionAt(td.offsetAt(params.position) - match[1].length), end: params.position };
+            return [{ label: keyword, kind: CompletionItemKind.Keyword, sortText: "0", textEdit: { range, newText: keyword } }];
+        }
+        return [];
     }
 
     /**

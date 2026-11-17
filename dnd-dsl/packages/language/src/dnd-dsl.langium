@@ -219,12 +219,12 @@ QuestStatements:
     CompleteStatement;
 AcceptQuest infers QuestStatements:
     status='accept' 'quest' target=QuestRef;
-// `complete quest "Q" -> "O"` is the objective O of quest Q (`target` is then an ObjectiveRef, as for `complete objective "O"`);
-// `complete quest "Q"` is the quest. The `->` tells them apart.
+// `complete objective from quest "Q" -> "O"` is the objective O of quest Q (`target` is then an ObjectiveRef);
+// `complete quest "Q"` is the quest. An objective is always written with its quest, so its name need not be unique.
 FailStatement infers QuestStatements:
-    status='fail' ('quest' quest=QuestRef '->' target=ObjectiveRef | 'quest' target=QuestRef | 'objective' target=ObjectiveRef);
+    status='fail' ('quest' target=QuestRef | 'objective' 'from' 'quest' quest=QuestRef '->' target=ObjectiveRef);
 CompleteStatement infers QuestStatements:
-    status='complete' ('quest' quest=QuestRef '->' target=ObjectiveRef | 'quest' target=QuestRef | 'objective' target=ObjectiveRef);
+    status='complete' ('quest' target=QuestRef | 'objective' 'from' 'quest' quest=QuestRef '->' target=ObjectiveRef);
 
 //General Declarations
 VariableDeclaration:
