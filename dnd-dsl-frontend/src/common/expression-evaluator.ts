@@ -8,6 +8,8 @@ import {
     applyComparison,
     applyIndex,
     applyLogical,
+    applyMinus,
+    applyNot,
     negatableBool,
     signedInt,
     type ArithmeticOperator,
@@ -16,7 +18,7 @@ import {
 } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
 import type {
     Expression, BoolVal, IntVal, StringVal,
-    IntExpression, BoolExpression, IntToBoolExpression, GroupedExpression,
+    IntExpression, BoolExpression, IntToBoolExpression, GroupedExpression, NotExpression, MinusExpression,
     ObjectDeclaration,
 } from '../dnd-language/language/src/generated/ast';
 
@@ -94,6 +96,10 @@ export function evaluateExpression(expr: SerializedNode<Expression> | undefined,
             const e = expr as SerializedNode<BoolExpression>;
             return applyLogical(e.operator as LogicalOperator, evaluateExpression(e.left, options), () => evaluateExpression(e.right, options));
         }
+        case 'NotExpression':
+            return applyNot(evaluateExpression((expr as SerializedNode<NotExpression>).exp, options));
+        case 'MinusExpression':
+            return applyMinus(evaluateExpression((expr as SerializedNode<MinusExpression>).exp, options));
         case 'IntToBoolExpression': {
             const e = expr as SerializedNode<IntToBoolExpression>;
             return applyComparison(e.operator as ComparisonOperator, evaluateExpression(e.left, options), evaluateExpression(e.right, options), e.negated);

@@ -22,6 +22,8 @@ import {
     applyComparison,
     applyIndex,
     applyLogical,
+    applyMinus,
+    applyNot,
     negatableBool,
     signedInt,
     type ArithmeticOperator,
@@ -230,6 +232,12 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
             const e = node as unknown as { left: unknown; operator: LogicalOperator; right: unknown };
             return applyLogical(e.operator, evaluateSerializedExpression(model, e.left), () => evaluateSerializedExpression(model, e.right));
         }
+
+        case 'NotExpression':
+            return applyNot(evaluateSerializedExpression(model, (node as unknown as { exp: unknown }).exp));
+
+        case 'MinusExpression':
+            return applyMinus(evaluateSerializedExpression(model, (node as unknown as { exp: unknown }).exp));
 
         case 'IntToBoolExpression': {
             const e = node as unknown as { left: unknown; operator: ComparisonOperator; right: unknown; negated?: boolean };

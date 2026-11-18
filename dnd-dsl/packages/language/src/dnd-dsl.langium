@@ -241,11 +241,16 @@ Expression:
     BoolExpression;
 
 BoolExpression infers Expression:
-    exp=ComparisonExpression (
-        {infer BoolExpression.left=current} 
-        operator=('and' | 'or') 
-        right=ComparisonExpression
+    exp=NotExpression (
+        {infer BoolExpression.left=current}
+        operator=('and' | 'or')
+        right=NotExpression
     )*;
+// `not` binds looser than a comparison (`not a == b` is `not (a == b)`) and tighter than `and` / `or`.
+// It comes first so that `not true` is a NotExpression, like `not x`, and not the BoolVal literal.
+NotExpression infers Expression:
+    {infer NotExpression} 'not' exp=NotExpression
+    | ComparisonExpression;
 ComparisonExpression infers Expression:
     exp=IntExpression (
         {infer IntToBoolExpression.left=current}
@@ -260,11 +265,15 @@ IntExpression infers Expression:
         right=MultiplicativeExpression
     )*;
 MultiplicativeExpression infers Expression:
-    exp=PrimaryExpression (
+    exp=UnaryExpression (
         {infer IntExpression.left=current}
         operator=('*' | '/')
-        right=PrimaryExpression
+        right=UnaryExpression
     )*;
+// The literal comes first, so `-5` stays an IntVal and only `-x`, `-(a + b)` are a MinusExpression.
+UnaryExpression infers Expression:
+    PrimaryExpression
+    | {infer MinusExpression} '-' exp=UnaryExpression;
 PrimaryExpression infers Expression:
     {infer GroupedExpression} '(' exp=Expression ')' |
     StateValueRef |

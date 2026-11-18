@@ -72,6 +72,16 @@ export function applyLogical(operator: LogicalOperator, left: unknown, right: ()
         : Boolean(left) || Boolean(right());
 }
 
+/** `not x`: the truth value of the operand turned around, as `and` / `or` read theirs. */
+export function applyNot(value: unknown): boolean {
+    return !value;
+}
+
+/** `-x`: a number negated, anything else is nothing, like the other arithmetic on non-numbers. */
+export function applyMinus(value: unknown): number | undefined {
+    return typeof value === 'number' ? -value : undefined;
+}
+
 /** `IntVal` to its signed number */
 export function signedInt(node: { isNegative?: boolean; val: number }): number {
     return node.isNegative ? -node.val : node.val;

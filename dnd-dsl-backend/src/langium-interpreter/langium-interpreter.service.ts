@@ -25,6 +25,8 @@ import {
     isIntToBoolExpression,
     isIntVal,
     isListLiteral,
+    isMinusExpression,
+    isNotExpression,
     isLocation,
     isLocationRefItem,
     isFaction,
@@ -81,7 +83,7 @@ import { getPredefinedSignature } from '@dnd-language/evaluation/dnd-dsl-predefi
 import { buildVariablesRecord, evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
 import type { SerializedModel } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
 import { durationToRounds } from '@dnd-language/evaluation/dnd-dsl-clock.js';
-import { applyArithmetic, applyComparison, applyIndex, applyLogical, NAMED_COLLECTION_FIELDS, negatableBool, replaceAtIndexes, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
+import { applyArithmetic, applyComparison, applyIndex, applyLogical, applyMinus, applyNot, NAMED_COLLECTION_FIELDS, negatableBool, replaceAtIndexes, signedInt } from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
 import { computeRemindBodyLocator, type FiredReminder, type ScheduledReminder } from '@dnd-language/evaluation/dnd-dsl-reminders.js';
 import { assertValidStatusWrite, objectiveStatusPath, questStatusPath, STATUS_VARIABLE, statusBlockFor, statusExpressionHolds, statusOrDefault, statusTransition, type StatusAction, type StatusBlock, type StatusKind } from '@dnd-language/evaluation/dnd-dsl-status.js';
 
@@ -173,6 +175,12 @@ export class LangiumInterpreterService {
         
         if (isGroupedExpression(expression)) {
             return this.evaluateExpression(ctx, expression.exp);
+        }
+        if (isNotExpression(expression)) {
+            return applyNot(this.evaluateExpression(ctx, expression.exp));
+        }
+        if (isMinusExpression(expression)) {
+            return applyMinus(this.evaluateExpression(ctx, expression.exp));
         }
         if (isIntExpression(expression)) {
             return applyArithmetic(
