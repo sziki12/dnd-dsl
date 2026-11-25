@@ -50,9 +50,9 @@ location "Cozy Village"
 quest "Rising Dead"
 	enabled on true
 
-	objective "Geather Bone Fragments"
+	objective "Gather Bone Fragments"
 		description
-			"Geather bone freagments form the fallen Undead."
+			"Gather bone fragments from the fallen Undead."
 ```
 
 ## Repository layout
