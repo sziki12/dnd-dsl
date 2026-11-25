@@ -1,1 +1,6 @@
 /docker/Ignis-Obsidian/vaults
+*.md
+!/README.md
+*.test.ts
+*.spec.ts
+*.interp.ts
