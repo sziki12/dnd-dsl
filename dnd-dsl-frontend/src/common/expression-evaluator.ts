@@ -1,26 +1,6 @@
-import type { SerializedModel, SerializedNode, SerializedRef, SerializedRefChain, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
-import { evaluateRelationQuery, evaluateStatusExpression, resolveSerializedRefChain } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
-import { isStatusExpressionType } from '@dnd-language/evaluation/dnd-dsl-status.js';
-import { serializedRefName } from '@dnd-language/evaluation/dnd-dsl-reference.js';
-import { PREDEFINED_FUNCTIONS } from '@dnd-language/evaluation/dnd-dsl-predefined-functions.js';
-import {
-    applyArithmetic,
-    applyComparison,
-    applyIndex,
-    applyLogical,
-    applyMinus,
-    applyNot,
-    negatableBool,
-    signedInt,
-    type ArithmeticOperator,
-    type ComparisonOperator,
-    type LogicalOperator,
-} from '@dnd-language/evaluation/dnd-dsl-expression-operations.js';
-import type {
-    Expression, BoolVal, IntVal, StringVal,
-    IntExpression, BoolExpression, IntToBoolExpression, GroupedExpression, NotExpression, MinusExpression,
-    ObjectDeclaration,
-} from '../dnd-language/language/src/generated/ast';
+import type { SerializedModel, SerializedNode, SerializedVariableDecl } from '@dnd-language/evaluation/dnd-dsl-serialized-types.js';
+import { evaluateSerializedExpression } from '@dnd-language/evaluation/dnd-dsl-value-evaluator.js';
+import type { Expression } from '../dnd-language/language/src/generated/ast';
 
 export type SerialisedObjectDeclaration = {
     name: string,
@@ -56,123 +36,35 @@ export type EvaluateExpressionOptions = {
     worldState?: SerializedModel,
 }
 
+/**
+ * Builds the object shape the pages render. Static members are evaluated here; computed ones stay declarations so a
+ * page evaluates each one when it draws it. `variableName` is the variable holding the object, if known.
+ * `evaluate(expr, name?)` evaluates a member with the same options; a `name` given there becomes the variable name
+ * of any object inside that member.
+ */
+function toObjectDeclaration(
+    variables: SerializedVariableDecl[],
+    variableName: string | undefined,
+    evaluate: (expr: unknown, variableName?: string) => EvalResult | undefined,
+): SerialisedObjectDeclaration {
+    
+    return {
+        name: variableName ?? 'object',
+        staticProperties: Object.fromEntries(
+            variables
+                .filter(v => v.isComputed !== 'computed')
+                .map(v => [v.target, evaluate(v.value, v.target)]),
+        ),
+        computedPropertyDecls: variables.filter(v => v.isComputed === 'computed'),
+    };
+}
+
+/** The canonical evaluator, lenient because it runs during render, with the pages' object shape. */
 export function evaluateExpression(expr: SerializedNode<Expression> | undefined, options?: EvaluateExpressionOptions): EvalResult | undefined {
-    if (!expr) return undefined;
-
-    // An ASSIGN_VARIABLE overlay write replaces a leaf VariableDeclaration.value with a
-    // bare JS primitive, no $type tag at all (see WorldStateService.spliceOverlayValue) -
-    // without this check, every overlaid leaf would silently evaluate to `undefined`.
-    if (typeof expr !== 'object') return expr as EvalResult;
-
-    // An overlay write can also store a whole list, again with no $type. Raw records stay
-    // unsupported here (they have no SerialisedObjectDeclaration shape to render).
-    if (!('$type' in expr)) return Array.isArray(expr) ? (structuredClone(expr) as EvalResult) : undefined;
-
-    switch (expr.$type) {
-        case 'ListLiteral': {
-            const e = expr as unknown as { elements: SerializedNode<Expression>[] };
-            return e.elements.map(element => evaluateExpression(element, options));
-        }
-        case 'BoolVal':
-            return negatableBool(expr as unknown as SerializedNode<BoolVal>);
-        case 'IntVal':
-            return signedInt(expr as unknown as SerializedNode<IntVal>);
-        case 'StringVal': {
-            const e = expr as unknown as SerializedNode<StringVal>;
-            return e.val;
-        }
-        case 'StateValueRef': {
-            // State reference evaluates to its value name (parallel to the backend
-            // interpreter and dnd-dsl-value-evaluator).
-            if (!options?.worldState) return undefined;
-            const ref = (expr as unknown as { value: SerializedRef }).value;
-            return serializedRefName(options.worldState, ref);
-        }
-        case 'IntExpression': {
-            const e = expr as SerializedNode<IntExpression>;
-            return applyArithmetic(e.operator as ArithmeticOperator, evaluateExpression(e.left, options), evaluateExpression(e.right, options));
-        }       
-        case 'BoolExpression': {
-            const e = expr as SerializedNode<BoolExpression>;
-            return applyLogical(e.operator as LogicalOperator, evaluateExpression(e.left, options), () => evaluateExpression(e.right, options));
-        }
-        case 'NotExpression':
-            return applyNot(evaluateExpression((expr as SerializedNode<NotExpression>).exp, options));
-        case 'MinusExpression':
-            return applyMinus(evaluateExpression((expr as SerializedNode<MinusExpression>).exp, options));
-        case 'IntToBoolExpression': {
-            const e = expr as SerializedNode<IntToBoolExpression>;
-            return applyComparison(e.operator as ComparisonOperator, evaluateExpression(e.left, options), evaluateExpression(e.right, options), e.negated);
-        }
-        case 'GroupedExpression': {
-            const e = expr as SerializedNode<GroupedExpression>;
-            return evaluateExpression(e.exp, options);
-        }
-        case 'ObjectDeclaration': {
-            const e = expr as unknown as SerializedNode<ObjectDeclaration>;
-            const staticVars = e.variables.filter(v => v.isComputed !== 'computed');
-            const computedVars = e.variables.filter(v => v.isComputed === 'computed');
-            return {
-                name: options?.variableName ?? "Object",
-                staticProperties: Object.fromEntries(
-                    staticVars.map(v => [v.target ?? '', evaluateExpression(v.value, options)])
-                ),
-                computedPropertyDecls: computedVars as SerializedVariableDecl[],
-            };
-        }
-        case 'Expression':
-            return evaluateExpression(expr.exp, options);
-
-        case 'FunctionCall': {
-            const call = expr as unknown as { predefined: boolean; predefinedTarget?: string; params: SerializedNode<Expression>[] };
-            if (!call.predefined || !call.predefinedTarget) return undefined;
-            const fn = PREDEFINED_FUNCTIONS[call.predefinedTarget];
-            if (!fn) return undefined;
-            try {
-                const args = call.params.map(p => evaluateExpression(p, options));
-                return fn(...args) as EvalResult | undefined;
-            } catch {
-                // This function runs eagerly during render (LocationView)
-                // A bad-argument throw here would crash the page, same reasoning as the RefChain case below.
-                return undefined;
-            }
-        }
-
-        case 'RefChain': {
-            if (!options?.worldState) return undefined;
-            try {
-                const chain = expr as unknown as SerializedRefChain;
-                const exists = evaluateRelationQuery(options.worldState, chain);
-                if (exists !== undefined) return exists;
-                const target = resolveSerializedRefChain(options.worldState, chain);
-                const value = target.kind === 'location' || target.kind === 'entity'
-                    // Reuse the ObjectDeclaration case above rather than duplicating record-building.
-                    ? evaluateExpression({ $type: 'ObjectDeclaration', variables: target.node.variables } as any, options)
-                    : evaluateExpression(target.node.value, { variableName: target.node.target, worldState: options.worldState });
-                return (chain.indexes ?? []).reduce<EvalResult | undefined>(
-                    (list, index) => applyIndex(list, evaluateExpression(index, options)) as EvalResult | undefined,
-                    value,
-                );
-            } catch {
-                // Unresolved/unsupported chain (e.g. an event head - not implemented yet).
-                // This function runs eagerly during render (LocationView), so a throw here would crash the page
-                // Treat it like any other unresolvable expression.
-                return undefined;
-            }
-        }
-        default:
-            if (isStatusExpressionType(expr.$type)) {
-                if (!options?.worldState) return undefined;
-                try {
-                    return evaluateStatusExpression(options.worldState, expr as unknown as Parameters<typeof evaluateStatusExpression>[1]);
-                } catch {
-                    // Same reasoning as the RefChain case: this runs eagerly during render.
-                    return undefined;
-                }
-            }
-    }
-
-    // FunctionCall, EventCalledExpression etc. can't be resolved without runtime state
-    // Caller decides how to display these
-    return undefined;
+    return evaluateSerializedExpression(options?.worldState, expr, {
+        lenient: true,
+        variableName: options?.variableName,
+        objectOf: (variables, variableName, evaluate) =>
+            toObjectDeclaration(variables, variableName, evaluate as (expr: unknown, variableName?: string) => EvalResult | undefined) as never,
+    }) as EvalResult | undefined;
 }

@@ -156,11 +156,25 @@ export function evaluateRelationQuery(model: SerializedModel, chain: SerializedR
  * whether a value originated from local scope or persistent (overlay-applied) state.
  */
 export function buildVariablesRecord(model: SerializedModel, variables: SerializedVariableDecl[]): Record<string, JsonRuntimeValue> {
-    return variables.reduce<Record<string, JsonRuntimeValue>>((rec, v) => {
-        rec[v.target ?? v.name ?? ''] = evaluateSerializedExpression(model, v.value);
-        return rec;
-    }, {});
+    return recordOf(variables, undefined, expr => evaluateSerializedExpression(model, expr)) as Record<string, JsonRuntimeValue>;
 }
+
+/** Evaluates a child node with the same options; a name given here replaces the current variable name. */
+export type SerializedEvaluator = (expr: unknown, variableName?: string) => JsonRuntimeValue;
+
+/** Turns an object's member declarations into its value; `variableName` is the variable that holds the object, if known. */
+export type ObjectBuilder = (variables: SerializedVariableDecl[], variableName: string | undefined, evaluate: SerializedEvaluator) => JsonRuntimeValue;
+
+export type SerializedEvaluationOptions = {
+    /** A failing reference, function call or status expression becomes `undefined` instead of throwing. */
+    lenient?: boolean;
+    /** Builds every object result: declared objects, locations and entities, and records an overlay write stored. */
+    objectOf?: ObjectBuilder;
+    variableName?: string;
+};
+
+const recordOf: ObjectBuilder = (variables, _variableName, evaluate) =>
+    Object.fromEntries(variables.map(v => [v.target ?? v.name ?? '', evaluate(v.value)]));
 
 /**
  * `quest completed "A"` and the other four status forms, against a served worldState. The
@@ -178,31 +192,42 @@ export function evaluateStatusExpression(model: SerializedModel, expr: { $type: 
 
 /**
  * JSON-native counterpart to LangiumInterpreterService.evaluateExpression, for reading
- * live (overlay-applied) values out of a served worldState.
+ * live (overlay-applied) values out of a served worldState. Used by the backend (strict,
+ * plain records) and by the frontend pages (lenient, their own object shape, see the options).
  *
  * MUST short-circuit on a raw (non-`$type`-tagged) value first: an ASSIGN_VARIABLE
- * overlay write replaces a leaf VariableDeclaration.value with a bare JS primitive, no
+ * overlay write replaces a leaf VariableDeclaration.value with a bare JS value, no
  * `$type` at all (see WorldStateService.spliceOverlayValue) - without this check, every
  * overlaid leaf would silently evaluate to `undefined`.
  *
- * FunctionCall / EventCalledExpression return `undefined` - running call/event semantics
- * against JSON isn't implemented (mirrors the frontend evaluator's pre-existing
- * FunctionCall stub); out of scope here.
+ * Without a model, references evaluate to `undefined` and everything else still evaluates.
+ * Only predefined function calls are evaluated; user functions and events need the interpreter.
  */
-export function evaluateSerializedExpression(model: SerializedModel, expr: unknown): JsonRuntimeValue {
+export function evaluateSerializedExpression(model: SerializedModel | undefined, expr: unknown, options: SerializedEvaluationOptions = {}): JsonRuntimeValue {
     if (expr === undefined || expr === null) return undefined;
     if (typeof expr !== 'object') return expr as JsonRuntimeValue;
 
-    // A raw JSON value with no `$type` (an array or record an overlay write stored) is
-    // already a value, not a node. Cloned so nothing downstream can alias - and mutate -
-    // the served world state.
-    if (!('$type' in expr)) return structuredClone(expr) as JsonRuntimeValue;
+    const evaluate: SerializedEvaluator = (child, variableName = options.variableName) =>
+        evaluateSerializedExpression(model, child, variableName === options.variableName ? options : { ...options, variableName });
+    const objectOf = (variables: SerializedVariableDecl[]) => (options.objectOf ?? recordOf)(variables, options.variableName, evaluate);
+    // Per node, not around the whole expression: one bad list element only blanks itself.
+    const lenient = (read: () => JsonRuntimeValue): JsonRuntimeValue => {
+        if (!options.lenient) return read();
+        try { return read(); } catch { return undefined; }
+    };
+
+    // A raw value an overlay write stored is already a value, not a node. Rebuilt rather than
+    // returned, so nothing downstream can alias - and mutate - the served world state.
+    if (!('$type' in expr)) {
+        if (Array.isArray(expr)) return expr.map(item => evaluate(item));
+        return objectOf(Object.entries(expr).map(([target, value]) => ({ $type: 'VariableDeclaration', target, value }) as unknown as SerializedVariableDecl));
+    }
 
     const node = expr as SerializedExpression & { $type: string };
 
     switch (node.$type) {
         case 'ListLiteral':
-            return (node as unknown as { elements: unknown[] }).elements.map(e => evaluateSerializedExpression(model, e));
+            return (node as unknown as { elements: unknown[] }).elements.map(e => evaluate(e));
 
         case 'IntVal':
             return signedInt(node as unknown as { isNegative?: boolean; val: number });
@@ -215,50 +240,54 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
             // The runtime value of a state reference is its value name - keeps `is` /
             // `==` as plain string comparison and matches what an ASSIGN_VARIABLE
             // overlay write stores (a bare name string).
+            if (!model) return undefined;
             const ref = (node as unknown as { value: SerializedRef }).value;
             return serializedRefName(model, ref);
         }
 
         case 'Expression':
         case 'GroupedExpression':
-            return evaluateSerializedExpression(model, (node as unknown as { exp: unknown }).exp);
+            return evaluate((node as unknown as { exp: unknown }).exp);
 
         case 'IntExpression': {
             const e = node as unknown as { left: unknown; operator: ArithmeticOperator; right: unknown };
-            return applyArithmetic(e.operator, evaluateSerializedExpression(model, e.left), evaluateSerializedExpression(model, e.right));
+            return applyArithmetic(e.operator, evaluate(e.left), evaluate(e.right)) as JsonRuntimeValue;
         }
 
         case 'BoolExpression': {
             const e = node as unknown as { left: unknown; operator: LogicalOperator; right: unknown };
-            return applyLogical(e.operator, evaluateSerializedExpression(model, e.left), () => evaluateSerializedExpression(model, e.right));
+            return applyLogical(e.operator, evaluate(e.left), () => evaluate(e.right));
         }
 
         case 'NotExpression':
-            return applyNot(evaluateSerializedExpression(model, (node as unknown as { exp: unknown }).exp));
+            return applyNot(evaluate((node as unknown as { exp: unknown }).exp));
 
         case 'MinusExpression':
-            return applyMinus(evaluateSerializedExpression(model, (node as unknown as { exp: unknown }).exp));
+            return applyMinus(evaluate((node as unknown as { exp: unknown }).exp));
 
         case 'IntToBoolExpression': {
             const e = node as unknown as { left: unknown; operator: ComparisonOperator; right: unknown; negated?: boolean };
-            return applyComparison(e.operator, evaluateSerializedExpression(model, e.left), evaluateSerializedExpression(model, e.right), e.negated);
+            return applyComparison(e.operator, evaluate(e.left), evaluate(e.right), e.negated);
         }
 
         case 'ObjectDeclaration':
-            return buildVariablesRecord(model, (node as unknown as { variables: SerializedVariableDecl[] }).variables);
+            return objectOf((node as unknown as { variables: SerializedVariableDecl[] }).variables);
 
         case 'RefChain': {
-            const chain = node as unknown as SerializedRefChain;
-            const exists = evaluateRelationQuery(model, chain);
-            if (exists !== undefined) return exists;
-            const target = resolveSerializedRefChain(model, chain);
-            const value = target.kind === 'location' || target.kind === 'entity'
-                ? buildVariablesRecord(model, target.node.variables)
-                : evaluateSerializedExpression(model, target.node.value);
-            return (chain.indexes ?? []).reduce<JsonRuntimeValue>(
-                (list, index) => applyIndex(list, evaluateSerializedExpression(model, index)) as JsonRuntimeValue,
-                value,
-            );
+            if (!model) return undefined;
+            return lenient(() => {
+                const chain = node as unknown as SerializedRefChain;
+                const exists = evaluateRelationQuery(model, chain);
+                if (exists !== undefined) return exists;
+                const target = resolveSerializedRefChain(model, chain);
+                const value = target.kind === 'location' || target.kind === 'entity'
+                    ? objectOf(target.node.variables)
+                    : evaluate(target.node.value, target.node.target);
+                return (chain.indexes ?? []).reduce<JsonRuntimeValue>(
+                    (list, index) => applyIndex(list, evaluate(index)) as JsonRuntimeValue,
+                    value,
+                );
+            });
         }
 
         case 'FunctionCall': {
@@ -266,13 +295,13 @@ export function evaluateSerializedExpression(model: SerializedModel, expr: unkno
             if (!call.predefined || !call.predefinedTarget) return undefined;
             const fn = PREDEFINED_FUNCTIONS[call.predefinedTarget];
             if (!fn) return undefined;
-            const args = call.params.map(p => evaluateSerializedExpression(model, p));
-            return fn(...args) as JsonRuntimeValue;
+            return lenient(() => fn(...call.params.map(p => evaluate(p))) as JsonRuntimeValue);
         }
 
         default:
             if (isStatusExpressionType(node.$type)) {
-                return evaluateStatusExpression(model, node as unknown as Parameters<typeof evaluateStatusExpression>[1]);
+                if (!model) return undefined;
+                return lenient(() => evaluateStatusExpression(model, node as unknown as Parameters<typeof evaluateStatusExpression>[1]));
             }
             return undefined;
     }

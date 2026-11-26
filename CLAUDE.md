@@ -140,16 +140,19 @@ equal `.dnd` files, see the multi-file note below) and its `<world>.state.json` 
   `useLocationIndex()` gives pages the `LocationIndex` (path, key and legacy key of every location).
 - `packages/cli/src/main.ts` exports `parseModel()` and `DndDslParseError` (used by the backend).
 
-### Three expression evaluators (intentional parallel implementations)
+### Two expression evaluators (intentional parallel implementations)
 They share operator logic via `packages/language/src/evaluation/dnd-dsl-expression-operations.ts`
 but are otherwise separate:
 1. **Backend** `LangiumInterpreterService.evaluateExpression` — walks the **live AST**, has
    side effects (runs functions, fires events), drives `/command/*`.
-2. **Canonical** `evaluation/dnd-dsl-value-evaluator.ts` `evaluateSerializedExpression` —
-   pure, operates on the **serialized JSON** model.
-3. **Frontend** `common/expression-evaluator.ts` — pure, serialized JSON, UI-shaped result.
+2. **Canonical** `evaluation/dnd-dsl-value-evaluator.ts` `evaluateSerializedExpression(model?, expr, options?)` —
+   pure, operates on the **served JSON** model; used by the backend (strict, plain records) and the frontend.
+   The frontend `common/expression-evaluator.ts` is only a wrapper: `lenient: true` (a failing node is
+   `undefined`, because it runs during render) and `objectOf` (builds the `SerialisedObjectDeclaration`
+   the pages render, computed members left unevaluated). Every object result, including a raw record
+   an overlay write stored, goes through `objectOf`. Without a model, references are `undefined`.
 
-When changing evaluation semantics, update all three (or the shared ops file).
+When changing evaluation semantics, update both (or the shared ops file).
 
 ### State model
 - The parsed world is immutable. Runtime mutation lives in a `<world>.state.json`
